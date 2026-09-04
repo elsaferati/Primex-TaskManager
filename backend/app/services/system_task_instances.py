@@ -346,8 +346,9 @@ async def generate_system_task_instances(
                 start_local_dt=occurrence_run_at.astimezone(tz),
                 duration_days=int(getattr(template, "duration_days", 1) or 1),
             )
-            # Weekly generation creates the complete original plan. PV/ZV is
-            # intentionally applied by the daily reconciliation shortly before work starts.
+            # Keep the original slot identity while generating. The scheduler
+            # immediately follows this with rolling PV/ZV reconciliation, which
+            # also corrects already-generated instances when leave data changes.
             for source_slot in occurrence_slots:
                 assigned_user_id = source_slot.primary_user_id
                 inserted = await _insert_system_task_instance(
@@ -513,6 +514,32 @@ async def reconcile_system_task_assignments_for_day(
                 counts["reassigned"] += 1
 
     return counts
+
+
+async def reconcile_system_task_assignments_in_range(
+    db: AsyncSession,
+    *,
+    start: date,
+    end: date,
+    now_utc: datetime | None = None,
+) -> dict[str, int]:
+    """Apply PV/ZV assignments to every generated system task in a date range."""
+    totals = {"reassigned": 0, "deactivated": 0, "reactivated": 0, "created": 0, "skipped": 0}
+    if end < start:
+        return totals
+
+    current = start
+    while current <= end:
+        counts = await reconcile_system_task_assignments_for_day(
+            db=db,
+            target_day=current,
+            now_utc=now_utc,
+        )
+        for key in totals:
+            totals[key] += counts.get(key, 0)
+        current += timedelta(days=1)
+
+    return totals
 
 
 async def ensure_task_instances_in_range(

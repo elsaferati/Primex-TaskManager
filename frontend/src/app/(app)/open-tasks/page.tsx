@@ -21,12 +21,14 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { TaskSkillField } from "@/components/task-skill-field"
 import { useAuth } from "@/lib/auth"
 import { departmentTableTag, formatDepartmentName } from "@/lib/department-name"
 import { formatDateDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { resolveProjectTitle } from "@/lib/project-display-title"
+import { SKILL_CATEGORIES } from "@/lib/skills"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
-import type { Department, GaNote, Project, Task, UserLookup } from "@/lib/types"
+import type { Department, GaNote, Project, SkillCategory, Task, UserLookup } from "@/lib/types"
 
 type OpenTaskDateFilter = "all" | OpenTaskDateBucket
 type OpenTaskStatusFilter = "all" | "todo" | "in_progress"
@@ -227,6 +229,7 @@ export default function OpenTasksPage() {
   const [departmentId, setDepartmentId] = React.useState(ALL_VALUE)
   const [dateFilter, setDateFilter] = React.useState<OpenTaskDateFilter>("all")
   const [statusFilter, setStatusFilter] = React.useState<OpenTaskStatusFilter>("all")
+  const [skillFilter, setSkillFilter] = React.useState<SkillCategory | typeof ALL_VALUE>(ALL_VALUE)
   const [typeFilters, setTypeFilters] = React.useState<OpenTaskTypeFilter[]>([])
   const [userId, setUserId] = React.useState(ALL_VALUE)
   const [search, setSearch] = React.useState("")
@@ -245,6 +248,7 @@ export default function OpenTasksPage() {
   const [dueDate, setDueDate] = React.useState("")
   const [finishPeriod, setFinishPeriod] = React.useState<"AM" | "PM" | typeof NONE_VALUE>("AM")
   const [assigneeIds, setAssigneeIds] = React.useState<string[]>([])
+  const [skillCategory, setSkillCategory] = React.useState<SkillCategory | null>(null)
   const [saving, setSaving] = React.useState(false)
   const [exportingExcel, setExportingExcel] = React.useState(false)
 
@@ -389,6 +393,7 @@ export default function OpenTasksPage() {
       if (dateFilter !== "all" && dateBucket !== dateFilter) return false
       if (statusFilter === "todo" && (task.status || "TODO").toUpperCase() !== "TODO") return false
       if (statusFilter === "in_progress" && (task.status || "").toUpperCase() !== "IN_PROGRESS") return false
+      if (skillFilter !== ALL_VALUE && task.skill_category !== skillFilter) return false
       if (typeFilters.length && !typeFilters.some((value) => taskMatchesTypeFilter(task, value))) return false
       if (query) {
         const note = task.ga_note_origin_id ? noteById.get(task.ga_note_origin_id) : null
@@ -414,7 +419,7 @@ export default function OpenTasksPage() {
       }
       return true
     })
-  }, [assigneeInitialsLabel, assigneeLabel, dateFilter, departmentById, nextWeekEnd, nextWeekStart, noteById, projectById, search, sourceLabel, statusFilter, taskAssigneeIds, tasks, thisWeekEnd, thisWeekStart, typeFilters, userId])
+  }, [assigneeInitialsLabel, assigneeLabel, dateFilter, departmentById, nextWeekEnd, nextWeekStart, noteById, projectById, search, skillFilter, sourceLabel, statusFilter, taskAssigneeIds, tasks, thisWeekEnd, thisWeekStart, typeFilters, userId])
 
   const bucketCounts = React.useMemo(() => {
     const counts: Record<OpenTaskDateBucket, number> = {
@@ -458,6 +463,7 @@ export default function OpenTasksPage() {
     setDueDate(toDateInputValue(task.due_date))
     setFinishPeriod((task.finish_period as "AM" | "PM" | null) || NONE_VALUE)
     setAssigneeIds(taskAssigneeIds(task))
+    setSkillCategory(task.skill_category || null)
     setDialogOpen(true)
   }
 
@@ -557,6 +563,7 @@ export default function OpenTasksPage() {
             is_deadline_important: deadlineImportant,
             assigned_to: assigneeIds[0] ?? null,
             assignees: assigneeIds,
+            skill_category: skillCategory,
           }
       const res = await apiFetch(`/tasks/${selectedTask.id}`, {
         method: "PATCH",
@@ -622,6 +629,15 @@ export default function OpenTasksPage() {
               <SelectContent>
                 {OPEN_TASK_STATUS_FILTER_OPTIONS.map((option) => (
                   <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={skillFilter} onValueChange={(value) => setSkillFilter(value as SkillCategory | typeof ALL_VALUE)}>
+              <SelectTrigger><SelectValue placeholder="Lloji i punës" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_VALUE}>Të gjitha aftësitë</SelectItem>
+                {SKILL_CATEGORIES.map((category) => (
+                  <SelectItem key={category.id} value={category.id}>{category.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -957,6 +973,13 @@ export default function OpenTasksPage() {
                   </Select>
                 </div>
               </div>
+              <TaskSkillField
+                value={skillCategory}
+                onChange={setSkillCategory}
+                disabled={saving || Boolean(selectedTask.ga_note_origin_id || selectedTask.plan_note_origin_id)}
+                selectedAssigneeIds={assigneeIds}
+                onSelectCandidate={(candidateId) => setAssigneeIds((previous) => previous.includes(candidateId) ? previous : [...previous, candidateId])}
+              />
               <div className="flex justify-end gap-2">
                 <Button variant="outline" disabled={saving} onClick={() => setDialogOpen(false)}>Cancel</Button>
                 <Button disabled={saving} onClick={() => void saveTask()}>{saving ? "Saving..." : "Save task"}</Button>

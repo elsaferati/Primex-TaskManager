@@ -16,10 +16,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { TaskSkillField } from "@/components/task-skill-field"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
-import type { Task, TaskFinishPeriod, UserLookup } from "@/lib/types"
+import type { SkillCategory, Task, TaskFinishPeriod, UserLookup } from "@/lib/types"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
 
 const TASK_STATUS_OPTIONS = [
@@ -135,6 +136,7 @@ export function TaskEditDialog({
   const [finishPeriod, setFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
   const [oneHReportSlot, setOneHReportSlot] = React.useState<string>(ONE_H_REPORT_SLOT_NONE_VALUE)
   const [confirmationAssigneeId, setConfirmationAssigneeId] = React.useState("")
+  const [skillCategory, setSkillCategory] = React.useState<SkillCategory | null>(null)
   const [users, setUsers] = React.useState<UserLookup[]>([])
   const [saving, setSaving] = React.useState(false)
 
@@ -150,6 +152,7 @@ export function TaskEditDialog({
     setFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
     setOneHReportSlot(getOneHReportSlotValue(task.one_h_report_slot))
     setConfirmationAssigneeId(task.confirmation_assignee_id || "")
+    setSkillCategory(task.skill_category || null)
   }, [task])
 
   const supportsWaitingConfirmation = Boolean(
@@ -244,6 +247,7 @@ export function TaskEditDialog({
         ...(nextStartDate !== currentStartDate ? { start_date: nextStartDate } : {}),
         ...(nextDueDate !== currentDueDate ? { due_date: nextDueDate } : {}),
         ...(nextFinishPeriod !== currentFinishPeriod ? { finish_period: nextFinishPeriod } : {}),
+        ...(skillCategory !== (task.skill_category || null) ? { skill_category: skillCategory } : {}),
         ...(nextOneHReportSlot !== currentOneHReportSlot ? { one_h_report_slot: nextOneHReportSlot } : {}),
         ...(isFastTask(task) && fastTaskType !== currentFastTaskType
           ? {
@@ -309,6 +313,7 @@ export function TaskEditDialog({
     onUpdated,
     projectTaskType,
     showDescriptionField,
+    skillCategory,
     startDate,
     statusValue,
     task,
@@ -356,6 +361,10 @@ export function TaskEditDialog({
                 />
               </div>
             ) : null}
+
+            <div className="md:col-span-2">
+              <TaskSkillField value={skillCategory} onChange={setSkillCategory} disabled={saving} />
+            </div>
 
             {isFastTask(task) ? (
               <div className="space-y-2">

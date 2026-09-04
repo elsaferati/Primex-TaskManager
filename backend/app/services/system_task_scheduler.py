@@ -10,7 +10,7 @@ from app.db import SessionLocal
 from app.services.meeting_system_tasks import reconcile_external_meeting_system_tasks
 from app.services.system_task_instances import (
     generate_system_task_instances,
-    reconcile_system_task_assignments_for_day,
+    reconcile_system_task_assignments_in_range,
 )
 
 
@@ -79,8 +79,19 @@ async def run_system_task_scheduler_once(now_utc: datetime | None = None) -> int
     async with SessionLocal() as db:
         created = await generate_system_task_instances(db=db, now_utc=now_utc)
         created += await reconcile_external_meeting_system_tasks(db=db, now_utc=now_utc)
+        start = now_utc.astimezone(scheduler_timezone()).date()
+        reconciliation = await reconcile_system_task_assignments_in_range(
+            db=db,
+            start=start,
+            end=start + timedelta(days=max(int(settings.SYSTEM_TASK_GENERATE_AHEAD_DAYS), 0)),
+            now_utc=now_utc,
+        )
         await db.commit()
-    logger.info("System task scheduler created %s task(s)", created)
+    logger.info(
+        "System task scheduler created %s task(s); PV/ZV reconciliation: %s",
+        created,
+        reconciliation,
+    )
     return created
 
 
@@ -89,9 +100,15 @@ async def run_system_task_daily_reconciliation_once(
 ) -> dict[str, int]:
     now_utc = now_utc or datetime.now(timezone.utc)
     async with SessionLocal() as db:
-        result = await reconcile_system_task_assignments_for_day(db=db, now_utc=now_utc)
+        start = now_utc.astimezone(scheduler_timezone()).date()
+        result = await reconcile_system_task_assignments_in_range(
+            db=db,
+            start=start,
+            end=start + timedelta(days=max(int(settings.SYSTEM_TASK_GENERATE_AHEAD_DAYS), 0)),
+            now_utc=now_utc,
+        )
         await db.commit()
-    logger.info("System task daily PV/ZV reconciliation: %s", result)
+    logger.info("System task rolling PV/ZV reconciliation: %s", result)
     return result
 
 

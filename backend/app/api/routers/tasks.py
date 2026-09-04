@@ -19,7 +19,7 @@ from app.api.access import ensure_department_access, ensure_manager_or_admin, en
 from app.api.deps import get_current_user
 from app.config import settings
 from app.db import get_db
-from app.models.enums import NotificationType, ProjectPhaseStatus, TaskPriority, TaskStatus, UserRole
+from app.models.enums import NotificationType, ProjectPhaseStatus, TaskPriority, TaskSkillCategory, TaskStatus, UserRole
 from app.models.department import Department
 from app.models.ga_note import GaNote
 from app.models.plan_note import PlanNote
@@ -929,6 +929,7 @@ def _task_to_out(
         title=_normalize_email_task_title(task.title),
         description=task.description,
         internal_notes=task.internal_notes,
+        skill_category=task.skill_category,
         project_id=task.project_id,
         dependency_task_id=task.dependency_task_id,
         department_id=task.department_id,
@@ -1073,6 +1074,80 @@ async def _sync_control_task_owner_from_ko(
     duplicated in CONTROL assignment fields.
     """
     return await ensure_ko_user_is_task_assignee(db, task=task, project=project)
+
+
+async def _create_pcm_control_for_product(
+    db: AsyncSession,
+    *,
+    product_task: Task,
+    project: Project | None,
+) -> Task | None:
+    """Create exactly one linked CONTROL for a new PCM MST/TT PRODUCT task."""
+    if (
+        project is None
+        or product_task.project_id is None
+        or str(product_task.phase or "").upper() != ProjectPhaseStatus.PRODUCT.value
+        or not _is_mst_or_tt_project(project)
+        or project.department_id is None
+    ):
+        return None
+
+    department_code = (
+        await db.execute(select(Department.code).where(Department.id == project.department_id))
+    ).scalar_one_or_none()
+    if str(department_code or "").strip().upper() != "PCM":
+        return None
+
+    possible_controls = (
+        await db.execute(
+            select(Task)
+            .where(Task.project_id == project.id)
+            .where(Task.phase == ProjectPhaseStatus.CONTROL.value)
+            .where(Task.is_active.is_(True))
+            .where(Task.internal_notes.ilike(f"%{product_task.id}%"))
+        )
+    ).scalars().all()
+    for control in possible_controls:
+        if _parse_origin_task_id(control.internal_notes) == product_task.id:
+            return control
+
+    total, _ = _extract_total_and_completed(product_task.daily_products, product_task.internal_notes)
+    notes = f"origin_task_id={product_task.id}; total_products={total or 0}; completed_products=0"
+    control = Task(
+        title=product_task.title,
+        description=product_task.description,
+        internal_notes=notes,
+        project_id=project.id,
+        department_id=project.department_id,
+        assigned_to=None,
+        created_by=product_task.created_by,
+        status=TaskStatus.TODO,
+        priority=product_task.priority,
+        finish_period=product_task.finish_period,
+        phase=ProjectPhaseStatus.CONTROL.value,
+        progress_percentage=0,
+        start_date=product_task.start_date,
+        due_date=None,
+        is_deadline_important=product_task.is_deadline_important,
+    )
+    db.add(control)
+    await db.flush()
+    add_audit_log(
+        db=db,
+        actor_user_id=product_task.created_by,
+        entity_type="task",
+        entity_id=control.id,
+        action="created",
+        before=None,
+        after={
+            "title": control.title,
+            "status": TaskStatus.TODO.value,
+            "assigned_to": None,
+            "phase": ProjectPhaseStatus.CONTROL.value,
+            "origin_task_id": str(product_task.id),
+        },
+    )
+    return control
 
 
 async def _users_by_usernames(db: AsyncSession, usernames: set[str]) -> list[User]:
@@ -1331,6 +1406,7 @@ async def list_tasks(
     department_id: uuid.UUID | None = None,
     project_id: uuid.UUID | None = None,
     status: TaskStatus | None = None,
+    skill_category: TaskSkillCategory | None = None,
     assigned_to: uuid.UUID | None = None,
     created_by: uuid.UUID | None = None,
     ga_note_origin_ids: list[uuid.UUID] | None = Query(None),
@@ -1385,6 +1461,8 @@ async def list_tasks(
         stmt = stmt.where(Task.project_id == project_id)
     if status:
         stmt = stmt.where(Task.status == status.value)
+    if skill_category:
+        stmt = stmt.where(Task.skill_category == skill_category)
     if assigned_to:
         # Check both Task.assigned_to and TaskAssignee table for multiple assignees
         stmt = stmt.where(
@@ -2060,6 +2138,7 @@ async def create_task(
                     title=payload.title,
                     description=payload.description,
                     internal_notes=payload.internal_notes,
+                    skill_category=payload.skill_category,
                     project_id=payload.project_id,
                     dependency_task_id=dependency_task_id,
                     department_id=task_department_id,
@@ -2188,6 +2267,7 @@ async def create_task(
                             title=payload.title,
                             description=payload.description,
                             internal_notes=payload.internal_notes,
+                            skill_category=payload.skill_category,
                             project_id=payload.project_id,
                             dependency_task_id=dependency_task_id,
                             department_id=task_department_id,
@@ -2299,6 +2379,7 @@ async def create_task(
                 title=payload.title,
                 description=payload.description,
                 internal_notes=payload.internal_notes,
+                skill_category=payload.skill_category,
                 project_id=payload.project_id,
                 dependency_task_id=dependency_task_id,
                 department_id=task_department_id,
@@ -2399,6 +2480,7 @@ async def create_task(
                 title=payload.title,
                 description=payload.description,
                 internal_notes=payload.internal_notes,
+                skill_category=payload.skill_category,
                 project_id=payload.project_id,
                 dependency_task_id=dependency_task_id,
                 department_id=task_department_id,
@@ -2496,6 +2578,7 @@ async def create_task(
         title=payload.title,
         description=payload.description,
         internal_notes=payload.internal_notes,
+        skill_category=payload.skill_category,
         project_id=payload.project_id,
         dependency_task_id=dependency_task_id,
         department_id=task_department_id,
@@ -2555,6 +2638,7 @@ async def create_task(
         if assignee_ids == [] and task.system_template_origin_id and task.department_id is not None:
             task.is_active = False
     await _sync_control_task_owner_from_ko(db, task=task, project=project)
+    await _create_pcm_control_for_product(db, product_task=task, project=project)
 
     # If this is a project task, and the project was previously removed from the weekly planner
     # for this user/day/slot, auto-clear that exclusion so the newly created task is visible.
@@ -2843,6 +2927,8 @@ async def update_task(
         task.description = payload.description
     if internal_notes_set:
         task.internal_notes = payload.internal_notes
+    if _payload_has_field(payload, "skill_category"):
+        task.skill_category = payload.skill_category
     dependency_set = _payload_has_field(payload, "dependency_task_id")
 
     if dependency_set:
@@ -3433,6 +3519,7 @@ async def update_task(
                         title=task.title,
                         description=task.description,
                         internal_notes=task.internal_notes,
+                        skill_category=task.skill_category,
                         project_id=task.project_id,
                         dependency_task_id=task.dependency_task_id,
                         department_id=task.department_id,

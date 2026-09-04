@@ -16,11 +16,13 @@ import { Label } from "@/components/ui/label"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { TaskSkillField } from "@/components/task-skill-field"
 import { ChevronDown, Eye, Pencil } from "lucide-react"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
+import { SKILL_CATEGORIES } from "@/lib/skills"
 import type {
   ChecklistItem,
   Department,
@@ -29,6 +31,7 @@ import type {
   Project,
   ProjectPhaseChecklistItem,
   ProjectPrompt,
+  SkillCategory,
   Task,
   TaskFinishPeriod,
   User,
@@ -413,6 +416,7 @@ export default function ProjectPage() {
   const [newStatus, setNewStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
   const [newTaskType, setNewTaskType] = React.useState<(typeof PROJECT_TASK_TYPES)[number]>("NORMAL")
   const [newAssignees, setNewAssignees] = React.useState<string[]>([])
+  const [newSkillCategory, setNewSkillCategory] = React.useState<SkillCategory | null>(null)
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newStartDate, setNewStartDate] = React.useState("")
   const [newDueDate, setNewDueDate] = React.useState("")
@@ -431,6 +435,7 @@ export default function ProjectPage() {
   const [editStatus, setEditStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
   const [editTaskType, setEditTaskType] = React.useState<(typeof PROJECT_TASK_TYPES)[number]>("NORMAL")
   const [editAssignees, setEditAssignees] = React.useState<string[]>([])
+  const [editSkillCategory, setEditSkillCategory] = React.useState<SkillCategory | null>(null)
   const [editPhase, setEditPhase] = React.useState<string>("")
   const [editStartDate, setEditStartDate] = React.useState("")
   const [editDueDate, setEditDueDate] = React.useState("")
@@ -988,6 +993,7 @@ export default function ProjectPage() {
         project_id: project.id,
         department_id: project.department_id,
         assignees: newAssignees,
+        skill_category: newSkillCategory,
         status: newStatus,
         priority: newTaskType === "HIGH" ? "HIGH" : "NORMAL",
         is_1h_report: newTaskType === "1H",
@@ -1024,6 +1030,7 @@ export default function ProjectPage() {
       setNewStatus("TODO")
       setNewTaskType("NORMAL")
       setNewAssignees([])
+      setNewSkillCategory(null)
       setNewTaskPhase("")
       setNewStartDate("")
       setNewDueDate("")
@@ -1332,6 +1339,7 @@ export default function ProjectPage() {
       ? task.assignees.map(a => a.id)
       : (task.assigned_to || task.assigned_to_user_id ? [task.assigned_to || task.assigned_to_user_id!] : [])
     setEditAssignees(assigneeIds)
+    setEditSkillCategory(task.skill_category || null)
     setEditPhase(task.phase || activePhase)
     setEditStartDate(toDateInput(task.start_date))
     setEditDueDate(toDateInput(task.due_date))
@@ -1384,6 +1392,7 @@ export default function ProjectPage() {
         is_personal: editTaskType === "PERSONAL",
         is_bllok: editTaskType === "BLLOK",
         assignees: editAssignees,
+        skill_category: editSkillCategory,
         phase: editPhase || activePhase,
         start_date: editStartDate ? new Date(editStartDate).toISOString() : null,
         due_date: editDueDate || null,
@@ -3556,6 +3565,14 @@ export default function ProjectPage() {
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="md:col-span-2">
+                      <TaskSkillField
+                        value={newSkillCategory}
+                        onChange={setNewSkillCategory}
+                        selectedAssigneeIds={newAssignees}
+                        onSelectCandidate={(candidateId) => setNewAssignees((previous) => previous.includes(candidateId) ? previous : [...previous, candidateId])}
+                      />
+                    </div>
                     <div className="space-y-2">
                       <Label>Start date</Label>
                       <Input
@@ -3732,6 +3749,14 @@ export default function ProjectPage() {
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="md:col-span-2">
+                      <TaskSkillField
+                        value={editSkillCategory}
+                        onChange={setEditSkillCategory}
+                        selectedAssigneeIds={editAssignees}
+                        onSelectCandidate={(candidateId) => setEditAssignees((previous) => previous.includes(candidateId) ? previous : [...previous, candidateId])}
+                      />
+                    </div>
                     <div className="space-y-2">
                       <Label>Start date</Label>
                       <Input
@@ -3900,6 +3925,11 @@ export default function ProjectPage() {
                       <div className="grid grid-cols-[minmax(320px,1fr)_100px_140px_130px_110px_230px] items-start gap-3">
                         <div className="font-medium flex items-center gap-2 flex-wrap">
                           <span>{task.title}</span>
+                          {task.skill_category ? (
+                            <Badge variant="outline" className="text-xs">
+                              {SKILL_CATEGORIES.find((category) => category.id === task.skill_category)?.label || task.skill_category}
+                            </Badge>
+                          ) : null}
                           {isDevelopmentProject && (
                             <Badge
                               variant="secondary"

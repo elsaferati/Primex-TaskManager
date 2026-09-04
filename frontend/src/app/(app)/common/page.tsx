@@ -163,6 +163,35 @@ const getNextWorkingDay = (from: Date) => {
   return next
 }
 
+const getMeetingStartOneHourLater = (value: string) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value)
+  if (!match) return null
+
+  const [, year, month, day, hours, minutes] = match
+  const shifted = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hours) + 1,
+    Number(minutes),
+  )
+  if (Number.isNaN(shifted.getTime())) return null
+
+  const pad = (part: number) => String(part).padStart(2, "0")
+  return {
+    date: `${shifted.getFullYear()}-${pad(shifted.getMonth() + 1)}-${pad(shifted.getDate())}`,
+    time: `${pad(shifted.getHours())}:${pad(shifted.getMinutes())}`,
+  }
+}
+
+const getMeetingTimeOneHourLater = (value: string) => {
+  const match = /^(\d{2}):(\d{2})$/.exec(value)
+  if (!match) return ""
+
+  const hours = (Number(match[1]) + 1) % 24
+  return `${String(hours).padStart(2, "0")}:${match[2]}`
+}
+
 const escapePrintHtml = (value: string) =>
   value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#039;")
 
@@ -1487,6 +1516,7 @@ export default function CommonViewPage() {
   const [externalMeetingPersonSearch, setExternalMeetingPersonSearch] = React.useState("")
   const externalMeetingPersonsRef = React.useRef<HTMLDivElement | null>(null)
   const externalMeetingInternalStartsAtEditedRef = React.useRef(false)
+  const externalMeetingInternalStartTimeEditedRef = React.useRef(false)
   const [externalMeetingRecurrenceType, setExternalMeetingRecurrenceType] = React.useState<"none" | "weekly" | "monthly" | "yearly">("none")
   const [externalMeetingRecurrenceDaysOfWeek, setExternalMeetingRecurrenceDaysOfWeek] = React.useState<number[]>([])
   const [externalMeetingRecurrenceDaysOfMonth, setExternalMeetingRecurrenceDaysOfMonth] = React.useState<number[]>([])
@@ -5758,6 +5788,7 @@ export default function CommonViewPage() {
       setExternalMeetingPersonsOpen(false)
       setExternalMeetingPersonSearch("")
       externalMeetingInternalStartsAtEditedRef.current = false
+      externalMeetingInternalStartTimeEditedRef.current = false
       setExternalMeetingRecurrenceType("none")
       setExternalMeetingRecurrenceDaysOfWeek([])
       setExternalMeetingRecurrenceDaysOfMonth([])
@@ -12074,8 +12105,12 @@ export default function CommonViewPage() {
                           onChange={(e) => {
                             const nextValue = e.target.value
                             setExternalMeetingStartsAt(nextValue)
+                            const defaultInternalStart = getMeetingStartOneHourLater(nextValue)
                             if (!externalMeetingInternalStartsAtEditedRef.current) {
-                              setExternalMeetingInternalStartsAt(nextValue.split("T")[0] || "")
+                              setExternalMeetingInternalStartsAt(defaultInternalStart?.date || "")
+                            }
+                            if (!externalMeetingInternalStartTimeEditedRef.current) {
+                              setExternalMeetingInternalStartTime(defaultInternalStart?.time || "")
                             }
                           }}
                         />
@@ -12112,7 +12147,10 @@ export default function CommonViewPage() {
                             <input
                               type="time"
                               value={externalMeetingInternalStartTime}
-                              onChange={(e) => setExternalMeetingInternalStartTime(e.target.value)}
+                              onChange={(e) => {
+                                externalMeetingInternalStartTimeEditedRef.current = true
+                                setExternalMeetingInternalStartTime(e.target.value)
+                              }}
                               style={{
                                 width: "105px",
                                 border: 0,
@@ -12132,7 +12170,13 @@ export default function CommonViewPage() {
                           className="input"
                           type="time"
                           value={externalMeetingStartTime}
-                          onChange={(e) => setExternalMeetingStartTime(e.target.value)}
+                          onChange={(e) => {
+                            const nextValue = e.target.value
+                            setExternalMeetingStartTime(nextValue)
+                            if (!externalMeetingInternalStartTimeEditedRef.current) {
+                              setExternalMeetingInternalStartTime(getMeetingTimeOneHourLater(nextValue))
+                            }
+                          }}
                         />
                       </label>
                       {externalMeetingCreateInternal ? (
@@ -12142,7 +12186,10 @@ export default function CommonViewPage() {
                             className="input"
                             type="time"
                             value={externalMeetingInternalStartTime}
-                            onChange={(e) => setExternalMeetingInternalStartTime(e.target.value)}
+                            onChange={(e) => {
+                              externalMeetingInternalStartTimeEditedRef.current = true
+                              setExternalMeetingInternalStartTime(e.target.value)
+                            }}
                           />
                         </label>
                       ) : null}

@@ -65,7 +65,7 @@ class TestSystemTaskTemplateSlotReschedule(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value=5),
             ) as generate_instances,
             patch(
-                "app.api.routers.system_tasks.reconcile_system_task_assignments_for_day",
+                "app.api.routers.system_tasks.reconcile_system_task_assignments_in_range",
                 new=AsyncMock(return_value={}),
             ) as reconcile_assignments,
             patch(
@@ -92,7 +92,8 @@ class TestSystemTaskTemplateSlotReschedule(unittest.IsolatedAsyncioTestCase):
         )
         reconcile_assignments.assert_awaited_once_with(
             db=db,
-            target_day=approved_at.date(),
+            start=approved_at.date(),
+            end=approved_at.date().replace(day=10),
             now_utc=approved_at,
         )
         db.flush.assert_awaited_once()

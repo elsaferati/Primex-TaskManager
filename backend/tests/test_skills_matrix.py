@@ -10,10 +10,10 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.api.deps import require_manager_or_admin
-from app.api.routers.skills import get_my_skills, get_team_matrix, update_my_skills
+from app.api.routers.skills import get_my_skills, get_recommendations, get_team_matrix, infer_category, update_my_skills
 from app.models.enums import SkillRating, UserRole
 from app.models.user_task_preference import UserTaskPreference
-from app.schemas.skills import SKILL_FIELDS, SkillsProfileUpdate
+from app.schemas.skills import SKILL_FIELDS, SkillCategoryInferenceRequest, SkillsProfileUpdate
 from app.services.skills import completed_skill_count, rank_profiles, update_completion
 
 
@@ -41,6 +41,15 @@ class MatrixDb:
 
     async def execute(self, _statement: object) -> object:
         return SimpleNamespace(all=lambda: self.rows)
+
+
+class RecommendationDb:
+    def __init__(self, profiles: list[object]) -> None:
+        self.profiles = profiles
+
+    async def execute(self, _statement: object) -> object:
+        scalars = SimpleNamespace(unique=lambda: SimpleNamespace(all=lambda: self.profiles))
+        return SimpleNamespace(scalars=lambda: scalars)
 
 
 class TestSkillsLogic(unittest.TestCase):
@@ -95,6 +104,24 @@ class TestSkillsLogic(unittest.TestCase):
 
 
 class TestSkillsPermissions(unittest.IsolatedAsyncioTestCase):
+    async def test_ai_category_inference_returns_only_structured_category(self) -> None:
+        ai_result = {"category": "qa", "confidence": "high", "reason": "Kërkon testim dhe kontroll cilësie."}
+        with patch("app.api.routers.skills.infer_task_skill_category", new=AsyncMock(return_value=ai_result)):
+            result = await infer_category(
+                SkillCategoryInferenceRequest(title="Testo rezultatin", description="Kontrollo gabimet"),
+                SimpleNamespace(role=UserRole.STAFF),
+            )
+        self.assertEqual(result.category, "qa")
+        self.assertEqual(result.confidence, "high")
+
+    async def test_ai_category_inference_rejects_empty_text(self) -> None:
+        with self.assertRaises(HTTPException) as raised:
+            await infer_category(
+                SkillCategoryInferenceRequest(title=" ", description=" "),
+                SimpleNamespace(role=UserRole.STAFF),
+            )
+        self.assertEqual(raised.exception.status_code, 422)
+
     async def test_manager_and_admin_can_access_team_dependencies(self) -> None:
         for role in (UserRole.MANAGER, UserRole.ADMIN):
             user = SimpleNamespace(role=role)
@@ -104,6 +131,18 @@ class TestSkillsPermissions(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as raised:
             await require_manager_or_admin(SimpleNamespace(role=UserRole.STAFF))
         self.assertEqual(raised.exception.status_code, 403)
+
+    async def test_authenticated_staff_can_receive_task_recommendations(self) -> None:
+        item = profile("Ada Example", SkillRating.A_PLUS)
+        item.user.department_id = None
+        item.user.department = None
+        result = await get_recommendations(
+            category="analysis",
+            db=RecommendationDb([item]),
+            _user=SimpleNamespace(role=UserRole.STAFF),
+        )
+        self.assertEqual(result[0].name, "Ada Example")
+        self.assertEqual(result[0].rating, SkillRating.A_PLUS)
 
     async def test_manager_can_retrieve_team_matrix(self) -> None:
         department = SimpleNamespace(name="Development")

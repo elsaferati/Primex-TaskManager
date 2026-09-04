@@ -40,7 +40,6 @@ import type {
   SystemTaskFrequency,
   SystemTaskScope,
   SystemTaskTemplateDefinition,
-  SystemTaskTemplateAssigneeSlot,
   TaskFinishPeriod,
   TaskPriority,
   User,
@@ -765,9 +764,15 @@ export function SystemTasksView({
           ? ALL_DEPARTMENTS_VALUE
           : editTemplate.department_id ?? ALL_DEPARTMENTS_VALUE
     setEditDepartmentId(editDeptValue)
-    const editIds =
-      editTemplate.assignees?.map((assignee) => assignee.id) ??
-      (editTemplate.default_assignee_id ? [editTemplate.default_assignee_id] : [])
+    const listedAssigneeIds = editTemplate.assignees?.map((assignee) => assignee.id) ?? []
+    const activeSlotAssigneeIds = (editTemplate.assignee_slots ?? [])
+      .filter((slot) => slot.is_active)
+      .map((slot) => slot.primary_user_id)
+    const editIds = listedAssigneeIds.length
+      ? listedAssigneeIds
+      : editTemplate.default_assignee_id
+        ? [editTemplate.default_assignee_id]
+        : activeSlotAssigneeIds
     setEditAssigneeIds(editIds)
     setEditZv1UserId(editTemplate.zv1_user_id || "")
     setEditZv2UserId(editTemplate.zv2_user_id || "")
@@ -1634,15 +1639,10 @@ export function SystemTasksView({
 
   const renderManagementAssignees = React.useCallback(
     (template: SystemTaskTemplateDefinition) => {
-      const slots = [...(template.assignee_slots ?? [])]
+      const slots = (template.assignee_slots ?? []).filter((slot) => slot.is_active)
       if (slots.length > 0) {
-        slots.sort((a: SystemTaskTemplateAssigneeSlot, b: SystemTaskTemplateAssigneeSlot) => {
-          if (a.is_active === b.is_active) return 0
-          return a.is_active ? -1 : 1
-        })
         return renderAssigneeSummaryText(
-          slots.map((slot) => resolveAssigneeNameById(slot.primary_user_id)),
-          slots.every((slot) => !slot.is_active)
+          slots.map((slot) => resolveAssigneeNameById(slot.primary_user_id))
         )
       }
 
