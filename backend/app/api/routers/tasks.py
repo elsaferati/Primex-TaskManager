@@ -1083,10 +1083,15 @@ async def _create_pcm_control_for_product(
     project: Project | None,
 ) -> Task | None:
     """Create exactly one linked CONTROL for a new PCM MST/TT PRODUCT task."""
+    phase_value = (
+        product_task.phase.value
+        if isinstance(product_task.phase, ProjectPhaseStatus)
+        else str(product_task.phase or "")
+    )
     if (
         project is None
         or product_task.project_id is None
-        or str(product_task.phase or "").upper() != ProjectPhaseStatus.PRODUCT.value
+        or phase_value.upper() != ProjectPhaseStatus.PRODUCT.value
         or not _is_mst_or_tt_project(project)
         or project.department_id is None
     ):
