@@ -34,6 +34,7 @@ from app.services.meeting_system_tasks import (
 from app.services.microsoft_calendar_sync import (
     get_shared_calendar_token,
     is_annual_leave_title_or_categories,
+    microsoft_calendar_sync_window,
     sync_external_calendar_events,
 )
 from app.api.routers.microsoft import resolve_redirect_uri
@@ -67,7 +68,10 @@ async def list_meetings(
     user=Depends(get_current_user),
 ) -> list[MeetingOut]:
     stmt = select(Meeting).where(
-        or_(Meeting.calendar_sync_status.is_(None), Meeting.calendar_sync_status != "excluded")
+        or_(
+            Meeting.calendar_sync_status.is_(None),
+            Meeting.calendar_sync_status.notin_(("excluded", "out_of_window")),
+        )
     )
     if department_id is None and project_id is None and participant_user_id is None:
         if include_all_departments:
@@ -159,16 +163,20 @@ async def sync_microsoft_calendar(
 ) -> dict:
     """Import every event from the shared info calendar as a TAK EXT."""
     now = datetime.now(timezone.utc)
-    sync_start = start or (now - timedelta(days=90))
-    sync_end = end or (now + timedelta(days=365))
-    if sync_start.tzinfo is None:
-        sync_start = sync_start.replace(tzinfo=timezone.utc)
-    if sync_end.tzinfo is None:
-        sync_end = sync_end.replace(tzinfo=timezone.utc)
+    allowed_start, allowed_end = microsoft_calendar_sync_window(now)
+    requested_start = start or allowed_start
+    requested_end = end or allowed_end
+    if requested_start.tzinfo is None:
+        requested_start = requested_start.replace(tzinfo=timezone.utc)
+    if requested_end.tzinfo is None:
+        requested_end = requested_end.replace(tzinfo=timezone.utc)
+    sync_start = max(requested_start, allowed_start)
+    sync_end = min(requested_end, allowed_end)
     if sync_end <= sync_start:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="end must be after start")
-    if sync_end - sync_start > timedelta(days=730):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sync range cannot exceed 730 days")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Calendar sync is limited to the next 14 days.",
+        )
 
     try:
         token = await get_shared_calendar_token(db, redirect_uri=resolve_redirect_uri(request))
@@ -518,7 +526,7 @@ async def update_meeting(
     # Update participants if provided
     if "participant_ids" in payload_dict:
         participant_ids = payload.participant_ids or []
-        if not participant_ids:
+        if not participant_ids and not meeting.calendar_imported:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Select at least one person for the meeting",

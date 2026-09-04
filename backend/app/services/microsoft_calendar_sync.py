@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -36,6 +36,11 @@ class MicrosoftCalendarSyncResult:
     updated: int
     cancelled: int
     skipped: int
+
+
+def microsoft_calendar_sync_window(now: datetime) -> tuple[datetime, datetime]:
+    """Return the forward-only shared-calendar import window."""
+    return now, now + timedelta(days=max(settings.MS_CALENDAR_SYNC_FUTURE_DAYS, 1))
 
 
 async def get_shared_calendar_token(
@@ -171,6 +176,21 @@ async def sync_external_calendar_events(
         existing_by_event_id = {
             str(row.microsoft_event_id): row for row in existing_rows if row.microsoft_event_id
         }
+        existing_participant_ids_by_meeting: dict[Any, set[Any]] = {}
+        if existing_rows:
+            participant_rows = list(
+                (
+                    await db.execute(
+                        select(MeetingParticipant).where(
+                            MeetingParticipant.meeting_id.in_([row.id for row in existing_rows])
+                        )
+                    )
+                ).scalars().all()
+            )
+            for participant_row in participant_rows:
+                existing_participant_ids_by_meeting.setdefault(
+                    participant_row.meeting_id, set()
+                ).add(participant_row.user_id)
         seen_event_ids: set[str] = set()
         unchanged_meeting_ids: list[Any] = []
         now = datetime.now(timezone.utc)
@@ -262,9 +282,14 @@ async def sync_external_calendar_events(
                     row.department_id = mapped_department_id
                 updated += 1
 
-            await db.execute(delete(MeetingParticipant).where(MeetingParticipant.meeting_id == row.id))
+            # Calendar attendees are added automatically, while PrimeFlow users
+            # assigned manually remain assigned across subsequent syncs.
+            existing_participant_ids = existing_participant_ids_by_meeting.setdefault(row.id, set())
             for participant in participants:
+                if participant.id in existing_participant_ids:
+                    continue
                 db.add(MeetingParticipant(meeting_id=row.id, user_id=participant.id))
+                existing_participant_ids.add(participant.id)
 
         if unchanged_meeting_ids:
             await db.execute(
@@ -277,6 +302,8 @@ async def sync_external_calendar_events(
             if not row.calendar_imported or not row.microsoft_event_id or row.calendar_sync_status == "cancelled":
                 continue
             if row.starts_at is None or not (start <= row.starts_at < end):
+                row.calendar_sync_status = "out_of_window"
+                row.calendar_last_synced_at = now
                 continue
             if str(row.microsoft_event_id) not in seen_event_ids:
                 row.calendar_sync_status = "cancelled"

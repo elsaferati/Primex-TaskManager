@@ -124,6 +124,8 @@ jobs:
           echo MS_CLIENT_SECRET=%MS_CLIENT_SECRET% >> backend\.env
           echo MS_REDIRECT_URI=https://api-flow.primexeu.com/api/microsoft/callback >> backend\.env
           echo MS_ORGANIZER_EMAIL=info@primexeu.com >> backend\.env
+          echo MS_CALENDAR_SYNC_PAST_DAYS=0 >> backend\.env
+          echo MS_CALENDAR_SYNC_FUTURE_DAYS=14 >> backend\.env
           echo DEVELOPMENT_CLIENTS_PATH=\\192.168.10.8\Files\10_ZHVILLIM\05_CLIENTS >> backend\.env
           echo PRODUCT_CLIENTS_PATH=\\192.168.10.8\Klientat\05_CLIENTS >> backend\.env
           echo PRIMEFLOW_API_BASE_URL=https://api-flow.primexeu.com >> backend\.env

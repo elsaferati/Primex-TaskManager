@@ -84,8 +84,8 @@ class Settings(BaseSettings):
     MS_ORGANIZER_EMAIL: str = "info@primexeu.com"
     MS_CALENDAR_SYNC_ENABLED: bool = True
     MS_CALENDAR_SYNC_INTERVAL_MINUTES: int = 5
-    MS_CALENDAR_SYNC_PAST_DAYS: int = 90
-    MS_CALENDAR_SYNC_FUTURE_DAYS: int = 365
+    MS_CALENDAR_SYNC_PAST_DAYS: int = 0
+    MS_CALENDAR_SYNC_FUTURE_DAYS: int = 14
     MS_CALENDAR_DEFAULT_DEPARTMENT_CODE: str = "DEV"
 
     FRONTEND_URL: str = "http://localhost:3000"

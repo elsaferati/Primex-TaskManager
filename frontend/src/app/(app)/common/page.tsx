@@ -1566,7 +1566,13 @@ export default function CommonViewPage() {
         .map((meeting) => {
           const owner = meeting.created_by ? users.find((u) => u.id === meeting.created_by) : null
           const ownerName = owner?.full_name || owner?.username || "Unknown"
-          return mapMeetingToCommonItem(meeting, meetingType, ownerName)
+          const item = mapMeetingToCommonItem(meeting, meetingType, ownerName)
+          if (!item) return null
+          const assignees = (meeting.participant_ids || [])
+            .map((participantId) => users.find((candidate) => candidate.id === participantId))
+            .map((participant) => participant?.full_name || participant?.username || participant?.email || "")
+            .filter(Boolean)
+          return { ...item, assignees }
         })
         .filter((item): item is ExternalItem | InternalItem => item !== null)
 
@@ -1816,6 +1822,10 @@ export default function CommonViewPage() {
   const [editingExternalMeetingRecurrenceMonth, setEditingExternalMeetingRecurrenceMonth] = React.useState("1")
   const [editingExternalMeetingRecurrenceDay, setEditingExternalMeetingRecurrenceDay] = React.useState("1")
   const [editingExternalMeetingDepartmentId, setEditingExternalMeetingDepartmentId] = React.useState("")
+  const [editingExternalMeetingParticipantIds, setEditingExternalMeetingParticipantIds] = React.useState<string[]>([])
+  const [editingExternalMeetingPersonsOpen, setEditingExternalMeetingPersonsOpen] = React.useState(false)
+  const [editingExternalMeetingPersonSearch, setEditingExternalMeetingPersonSearch] = React.useState("")
+  const editingExternalMeetingPersonsRef = React.useRef<HTMLDivElement | null>(null)
   const [showEditWeekendDays, setShowEditWeekendDays] = React.useState(false)
   const [updatingExternalMeeting, setUpdatingExternalMeeting] = React.useState(false)
   const [deletingExternalMeetingId, setDeletingExternalMeetingId] = React.useState<string | null>(null)
@@ -2094,18 +2104,26 @@ export default function CommonViewPage() {
     return Number.isNaN(startsAt.getTime()) ? null : startsAt
   }, [])
   const externalMeetingsVisible = React.useMemo(() => {
-    if (externalMeetingListFilter === "all") return externalMeetingsSorted
+    const activeMeetings = externalMeetingsSorted.filter(
+      (meeting) => meeting.calendar_sync_status !== "cancelled"
+    )
+    if (selectedDates.size) {
+      return activeMeetings.filter((meeting) => {
+        const meetingDate = getExternalMeetingListDate(meeting)
+        return meetingDate ? selectedDates.has(toISODate(meetingDate)) : false
+      })
+    }
+    if (externalMeetingListFilter === "all") return activeMeetings
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-    return externalMeetingsSorted.filter((meeting) => {
-      if (meeting.calendar_sync_status === "cancelled") return false
+    return activeMeetings.filter((meeting) => {
       const meetingDate = getExternalMeetingListDate(meeting)
       if (!meetingDate) return false
       return externalMeetingListFilter === "past"
         ? meetingDate.getTime() < today.getTime()
         : meetingDate.getTime() >= today.getTime()
     })
-  }, [externalMeetingListFilter, externalMeetingsSorted, getExternalMeetingListDate])
+  }, [externalMeetingListFilter, externalMeetingsSorted, getExternalMeetingListDate, selectedDates, toISODate])
   const internalMeetingsSorted = React.useMemo(() => {
     return [...internalMeetings].sort((a, b) => {
       const aResolved = resolveExternalMeetingDate(a)
@@ -3633,6 +3651,10 @@ export default function CommonViewPage() {
               time: resolvedDate ? formatTime(resolvedDate) : "TBD",
               platform: meeting.platform?.trim() || "TBD",
               owner: ownerName,
+              assignees: (meeting.participant_ids || [])
+                .map((participantId) => loadedUsers.find((candidate) => candidate.id === participantId))
+                .map((participant) => participant?.full_name || participant?.username || participant?.email || "")
+                .filter(Boolean),
               recurrenceType: meeting.recurrence_type || "none",
               calendarCategories: meeting.calendar_categories || [],
               calendarImported: Boolean(meeting.calendar_imported || meeting.microsoft_event_id),
@@ -5916,6 +5938,7 @@ export default function CommonViewPage() {
       (meeting.recurrence_days_of_week || []).some((day) => day >= 5)
     )
     setEditingExternalMeetingDepartmentId(meeting.department_id || "")
+    setEditingExternalMeetingParticipantIds(meeting.participant_ids || [])
   }, [canEditExternalMeeting])
 
   const cancelEditExternalMeeting = React.useCallback(() => {
@@ -5930,6 +5953,9 @@ export default function CommonViewPage() {
     setEditingExternalMeetingRecurrenceMonth("1")
     setEditingExternalMeetingRecurrenceDay("1")
     setEditingExternalMeetingDepartmentId("")
+    setEditingExternalMeetingParticipantIds([])
+    setEditingExternalMeetingPersonsOpen(false)
+    setEditingExternalMeetingPersonSearch("")
     setShowEditWeekendDays(false)
   }, [])
 
@@ -5997,6 +6023,7 @@ export default function CommonViewPage() {
               ? [Number(editingExternalMeetingRecurrenceDay)]
               : null,
         department_id: editingExternalMeetingDepartmentId || null,
+        participant_ids: editingExternalMeetingParticipantIds,
       }
       const res = await apiFetch(`/meetings/${editingExternalMeetingId}`, {
         method: "PATCH",
@@ -6042,6 +6069,7 @@ export default function CommonViewPage() {
     editingExternalMeetingRecurrenceMonth,
     editingExternalMeetingRecurrenceDay,
     editingExternalMeetingDepartmentId,
+    editingExternalMeetingParticipantIds,
     commonDepartmentId,
     apiFetch,
     cancelEditExternalMeeting,
@@ -6674,6 +6702,28 @@ export default function CommonViewPage() {
       document.removeEventListener("keydown", handleKeyDown)
     }
   }, [externalMeetingPersonsOpen])
+
+  React.useEffect(() => {
+    if (!editingExternalMeetingPersonsOpen) return
+    const closePersonsMenu = () => {
+      setEditingExternalMeetingPersonsOpen(false)
+      setEditingExternalMeetingPersonSearch("")
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const picker = editingExternalMeetingPersonsRef.current
+      if (!picker || picker.contains(event.target as Node)) return
+      closePersonsMenu()
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closePersonsMenu()
+    }
+    document.addEventListener("mousedown", handlePointerDown)
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [editingExternalMeetingPersonsOpen])
 
   React.useEffect(() => {
     if (!internalMeetingPersonsOpen) return
@@ -12747,23 +12797,29 @@ export default function CommonViewPage() {
             </div>
             <div className="external-meeting-list">
               <div className="external-meeting-list-header">
-                <div className="external-meeting-form-title">All external meetings</div>
-                <div className="external-meeting-filter" aria-label="External meetings filter">
-                  {([
-                    ["next", "Next"],
-                    ["past", "Past"],
-                    ["all", "All"],
-                  ] as const).map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      className={externalMeetingListFilter === value ? "active" : ""}
-                      onClick={() => setExternalMeetingListFilter(value)}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                <div className="external-meeting-form-title">
+                  {selectedDates.size
+                    ? `External meetings for ${Array.from(selectedDates).sort().map(formatDateHuman).join(", ")}`
+                    : "All external meetings"}
                 </div>
+                {!selectedDates.size ? (
+                  <div className="external-meeting-filter" aria-label="External meetings filter">
+                    {([
+                      ["next", "Next"],
+                      ["past", "Past"],
+                      ["all", "All"],
+                    ] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={externalMeetingListFilter === value ? "active" : ""}
+                        onClick={() => setExternalMeetingListFilter(value)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
               {externalMeetingsVisible.length ? (
                 <div className="external-meeting-cards">
@@ -12784,7 +12840,7 @@ export default function CommonViewPage() {
                     return (
                       <div
                         key={meeting.id}
-                        className={`external-meeting-card ${meeting.calendar_imported ? outlookCategoryTone(meeting.calendar_categories) : ""}`}
+                        className={`external-meeting-card ${meeting.calendar_imported || meeting.microsoft_event_id ? outlookCategoryTone(meeting.calendar_categories) : ""}`}
                       >
                         {isEditing ? (
                           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
@@ -12965,6 +13021,127 @@ export default function CommonViewPage() {
                                 ))}
                               </select>
                             </div>
+                            <div className="external-person-picker" ref={editingExternalMeetingPersonsRef}>
+                              <button
+                                className={`external-person-picker-trigger ${editingExternalMeetingPersonsOpen ? "active" : ""}`}
+                                type="button"
+                                onClick={() => {
+                                  setEditingExternalMeetingPersonsOpen((current) => {
+                                    if (current) setEditingExternalMeetingPersonSearch("")
+                                    return !current
+                                  })
+                                }}
+                                aria-haspopup="dialog"
+                                aria-expanded={editingExternalMeetingPersonsOpen}
+                              >
+                                <span>
+                                  {editingExternalMeetingParticipantIds.length
+                                    ? "Assigned PrimeFlow users"
+                                    : "Assign PrimeFlow users"}
+                                </span>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                                  {editingExternalMeetingParticipantIds.length ? (
+                                    <span className="external-person-picker-count">
+                                      {editingExternalMeetingParticipantIds.length}
+                                    </span>
+                                  ) : null}
+                                  <span aria-hidden="true">{editingExternalMeetingPersonsOpen ? "^" : "v"}</span>
+                                </span>
+                              </button>
+                              {editingExternalMeetingPersonsOpen ? (
+                                <div
+                                  className="external-person-picker-menu"
+                                  role="dialog"
+                                  aria-label="Assign PrimeFlow users to external meeting"
+                                >
+                                  <input
+                                    className="external-person-picker-search"
+                                    type="search"
+                                    value={editingExternalMeetingPersonSearch}
+                                    onChange={(event) => setEditingExternalMeetingPersonSearch(event.target.value)}
+                                    placeholder="Search users..."
+                                    aria-label="Search PrimeFlow users"
+                                    autoFocus
+                                  />
+                                  <div className="external-person-picker-list" role="group">
+                                    {commonUserFilterOptions
+                                      .filter(
+                                        (option) =>
+                                          option.isActive
+                                          && option.label.toLowerCase().includes(
+                                            editingExternalMeetingPersonSearch.trim().toLowerCase()
+                                          )
+                                      )
+                                      .map((option) => (
+                                        <label key={option.id} className="external-person-picker-option">
+                                          <input
+                                            type="checkbox"
+                                            checked={editingExternalMeetingParticipantIds.includes(option.id)}
+                                            onChange={(event) => {
+                                              setEditingExternalMeetingParticipantIds((current) =>
+                                                event.target.checked
+                                                  ? Array.from(new Set([...current, option.id]))
+                                                  : current.filter((id) => id !== option.id)
+                                              )
+                                            }}
+                                          />
+                                          <span>{option.label}</span>
+                                        </label>
+                                      ))}
+                                    {!commonUserFilterOptions.some(
+                                      (option) =>
+                                        option.isActive
+                                        && option.label.toLowerCase().includes(
+                                          editingExternalMeetingPersonSearch.trim().toLowerCase()
+                                        )
+                                    ) ? (
+                                      <div className="external-person-picker-empty">No users found</div>
+                                    ) : null}
+                                  </div>
+                                  <div className="external-person-picker-footer">
+                                    <button
+                                      className="external-person-picker-done"
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingExternalMeetingPersonsOpen(false)
+                                        setEditingExternalMeetingPersonSearch("")
+                                      }}
+                                    >
+                                      Done
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : null}
+                              {editingExternalMeetingParticipantIds.length ? (
+                                <div className="external-person-chips" aria-label="Assigned PrimeFlow users">
+                                  {editingExternalMeetingParticipantIds.slice(0, 3).map((id) => {
+                                    const person = commonUserFilterOptions.find((option) => option.id === id)
+                                    if (!person) return null
+                                    return (
+                                      <button
+                                        key={person.id}
+                                        className="external-person-chip"
+                                        type="button"
+                                        title={`Remove ${person.label}`}
+                                        onClick={() =>
+                                          setEditingExternalMeetingParticipantIds((current) =>
+                                            current.filter((itemId) => itemId !== person.id)
+                                          )
+                                        }
+                                      >
+                                        <span>{person.label}</span>
+                                        <span className="external-person-chip-remove" aria-hidden="true">&times;</span>
+                                      </button>
+                                    )
+                                  })}
+                                  {editingExternalMeetingParticipantIds.length > 3 ? (
+                                    <span className="external-person-chip">
+                                      +{editingExternalMeetingParticipantIds.length - 3}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
                             <div style={{ display: "flex", gap: "8px" }}>
                               <button
                                 className="btn-surface"
@@ -13120,7 +13297,9 @@ export default function CommonViewPage() {
                 </div>
               ) : (
                 <div className="external-meeting-empty">
-                  {externalMeetingListFilter === "past"
+                  {selectedDates.size
+                    ? "No external meetings for the selected date."
+                    : externalMeetingListFilter === "past"
                     ? "No past external meetings."
                     : externalMeetingListFilter === "next"
                       ? "No upcoming external meetings."

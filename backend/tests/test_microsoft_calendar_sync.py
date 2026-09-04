@@ -11,6 +11,7 @@ from app.services.microsoft_calendar_sync import (
     graph_platform,
     is_annual_leave_event,
     is_annual_leave_title_or_categories,
+    microsoft_calendar_sync_window,
     parse_graph_datetime,
 )
 
@@ -68,3 +69,16 @@ def test_calendar_categories_are_normalized_and_pv_events_are_excluded() -> None
     assert is_annual_leave_title_or_categories("ESH PV 31.08-14.09.2026", []) is True
     assert is_annual_leave_title_or_categories("Annual leave", ["pv"]) is True
     assert is_annual_leave_title_or_categories("PVX client meeting", ["Blue category"]) is False
+
+
+def test_calendar_sync_window_only_fetches_the_next_two_weeks(monkeypatch) -> None:
+    now = datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        "app.services.microsoft_calendar_sync.settings.MS_CALENDAR_SYNC_FUTURE_DAYS",
+        14,
+    )
+
+    start, end = microsoft_calendar_sync_window(now)
+
+    assert start == now
+    assert end == datetime(2026, 9, 18, 8, 0, tzinfo=timezone.utc)
