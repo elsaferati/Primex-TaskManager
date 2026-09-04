@@ -8733,6 +8733,9 @@ export default function CommonViewPage() {
         .external-person-picker {
           position: relative;
         }
+        .external-person-picker.compact {
+          width: min(100%, 320px);
+        }
         .external-person-picker-trigger {
           width: 100%;
           min-height: 36px;
@@ -13058,7 +13061,7 @@ export default function CommonViewPage() {
                                 ))}
                               </select>
                             </div>
-                            <div className="external-person-picker" ref={editingExternalMeetingPersonsRef}>
+                            <div className="external-person-picker compact" ref={editingExternalMeetingPersonsRef}>
                               <button
                                 className={`external-person-picker-trigger ${editingExternalMeetingPersonsOpen ? "active" : ""}`}
                                 type="button"
