@@ -37,6 +37,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
 from app.services.one_h_slots import effective_slot_date
+from app.services.microsoft_calendar_sync import is_annual_leave_title_or_categories
 from app.services.system_task_schedule import matches_template_date
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
 
@@ -67,7 +68,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "13"
+COMMON_VIEW_CACHE_VERSION = "14"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -1113,7 +1114,13 @@ async def get_common_view(
         week_days = [week_start_date + timedelta(days=i) for i in range(7)]
 
         for meeting in meetings:
-            if meeting.calendar_sync_status == "cancelled":
+            if meeting.calendar_sync_status in {"cancelled", "excluded", "out_of_window"}:
+                continue
+            is_calendar_meeting = bool(meeting.calendar_imported or meeting.microsoft_event_id)
+            if is_calendar_meeting and is_annual_leave_title_or_categories(
+                meeting.title,
+                meeting.calendar_categories,
+            ):
                 continue
             owner_user = users_map.get(meeting.created_by) if meeting.created_by else None
             owner_name = owner_user.full_name if owner_user and owner_user.full_name else owner_user.username if owner_user else "Unknown"
@@ -1137,6 +1144,8 @@ async def get_common_view(
                                 "owner": owner_name,
                                 "department": department_name,
                                 "recurrence_type": meeting.recurrence_type or "none",
+                                "calendarImported": is_calendar_meeting,
+                                "calendarCategories": meeting.calendar_categories or [],
                             }
                         )
             else:
@@ -1158,6 +1167,8 @@ async def get_common_view(
                         "owner": owner_name,
                         "department": department_name,
                         "recurrence_type": meeting.recurrence_type or "none",
+                        "calendarImported": is_calendar_meeting,
+                        "calendarCategories": meeting.calendar_categories or [],
                     }
                 )
 

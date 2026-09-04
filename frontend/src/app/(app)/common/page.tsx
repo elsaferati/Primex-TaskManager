@@ -303,6 +303,9 @@ type ExternalItem = {
   recurrence_type?: string | null
   calendarCategories?: string[]
   calendarImported?: boolean
+  calendar_categories?: string[]
+  calendar_imported?: boolean
+  microsoft_event_id?: string | null
 }
 type InternalItem = {
   id?: string
@@ -322,9 +325,22 @@ const outlookCategoryTone = (categories?: string[]) => {
   if (values.some((category) => category.includes("red"))) return "outlook-red"
   if (values.some((category) => category === "tak int" || category.includes("yellow"))) return "outlook-yellow"
   if (values.some((category) => category.includes("daily") || category.includes("weekly"))) return "outlook-orange"
-  if (values.some((category) => category.includes("blue") || category.includes("event"))) return "outlook-blue"
+  if (
+    values.some(
+      (category) =>
+        category.includes("blue") ||
+        category.includes("event") ||
+        category.includes("evvent") ||
+        category.includes("fizik")
+    )
+  )
+    return "outlook-blue"
   return "outlook-violet"
 }
+
+const isCalendarAnnualLeave = (title?: string, categories?: string[]) =>
+  (categories || []).some((category) => category.trim().toLowerCase() === "pv") ||
+  /(^|[^a-z0-9])pv([^a-z0-9]|$)/i.test(title || "")
 type R1Item = {
   title: string
   date: string
@@ -2833,6 +2849,23 @@ export default function CommonViewPage() {
           date: parsed.everyday ? weekStartIso : item.date,
         }
       })
+      const normalizedExternal = payload.items.external
+        .map((item) => {
+          const calendarCategories = item.calendarCategories ?? item.calendar_categories ?? []
+          return {
+            ...item,
+            recurrenceType: item.recurrenceType ?? item.recurrence_type ?? "none",
+            calendarCategories,
+            calendarImported: Boolean(
+              item.calendarImported ?? item.calendar_imported ?? item.microsoft_event_id
+            ),
+          } as ExternalItem
+        })
+        .filter((item) => !isCalendarAnnualLeave(item.title, item.calendarCategories))
+      const normalizedInternal = payload.items.internal.map((item) => ({
+        ...item,
+        recurrenceType: item.recurrenceType ?? item.recurrence_type ?? "none",
+      })) as InternalItem[]
       setCommonData((prev) => {
         let next = { ...prev }
         for (const includeKey of payload.included) {
@@ -2850,6 +2883,10 @@ export default function CommonViewPage() {
               next = { ...next, r1: normalizedR1 }
             } else if (bucket === "problems") {
               next = { ...next, problems: normalizedProblems }
+            } else if (bucket === "external") {
+              next = { ...next, external: normalizedExternal }
+            } else if (bucket === "internal") {
+              next = { ...next, internal: normalizedInternal }
             } else {
               next = { ...next, [bucket]: payload.items[bucket] }
             }
