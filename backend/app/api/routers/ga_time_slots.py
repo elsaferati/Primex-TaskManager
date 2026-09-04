@@ -174,6 +174,29 @@ def _connection_out(connection: GaIcloudSyncConnection) -> GaIcloudSyncConnectio
     )
 
 
+async def _connection_from_sync_token(
+    db: AsyncSession,
+    raw_token: str | None,
+    *,
+    lock: bool = False,
+) -> GaIcloudSyncConnection:
+    token = (raw_token or "").strip()
+    connection_id = connection_id_from_token(token)
+    if connection_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid sync token")
+
+    statement = select(GaIcloudSyncConnection).where(
+        GaIcloudSyncConnection.id == connection_id,
+        GaIcloudSyncConnection.revoked_at.is_(None),
+    )
+    if lock:
+        statement = statement.with_for_update()
+    connection = (await db.execute(statement)).scalar_one_or_none()
+    if connection is None or not hmac.compare_digest(connection.token_hash, hash_connection_token(token)):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid sync token")
+    return connection
+
+
 def _replace_row_comments(
     row: GaTimeTableRow,
     start_comments: list[GaTimeTableRowComment],
@@ -973,28 +996,22 @@ async def revoke_icloud_sync_connection(
     await db.commit()
 
 
+@router.get("/icloud-sync/ping", response_model=dict[str, bool])
+async def ping_icloud_sync_connection(
+    x_primeflow_sync_token: str | None = Header(default=None, alias="X-PrimeFlow-Sync-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, bool]:
+    await _connection_from_sync_token(db, x_primeflow_sync_token)
+    return {"ok": True}
+
+
 @router.post("/icloud-sync/import", response_model=GaIcloudSyncImportOut)
 async def import_icloud_timetable_data(
     payload: GaIcloudSyncImport,
     x_primeflow_sync_token: str | None = Header(default=None, alias="X-PrimeFlow-Sync-Token"),
     db: AsyncSession = Depends(get_db),
 ) -> GaIcloudSyncImportOut:
-    token = (x_primeflow_sync_token or "").strip()
-    connection_id = connection_id_from_token(token)
-    if connection_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid sync token")
-    connection = (
-        await db.execute(
-            select(GaIcloudSyncConnection)
-            .where(
-                GaIcloudSyncConnection.id == connection_id,
-                GaIcloudSyncConnection.revoked_at.is_(None),
-            )
-            .with_for_update()
-        )
-    ).scalar_one_or_none()
-    if connection is None or not hmac.compare_digest(connection.token_hash, hash_connection_token(token)):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid sync token")
+    connection = await _connection_from_sync_token(db, x_primeflow_sync_token, lock=True)
     if payload.sync_window_end < payload.sync_window_start:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid sync window")
     if (payload.sync_window_end - payload.sync_window_start).days > 92:

@@ -1975,9 +1975,7 @@ export default function AdminTasksPage() {
   const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
   const [editTitle, setEditTitle] = React.useState("")
   const [editStartDate, setEditStartDate] = React.useState("")
-  const [editStartDateDisplay, setEditStartDateDisplay] = React.useState("")
   const [editDueDate, setEditDueDate] = React.useState("")
-  const [editDueDateDisplay, setEditDueDateDisplay] = React.useState("")
   const [editingTaskIsFast, setEditingTaskIsFast] = React.useState(false)
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [deletingTaskId, setDeletingTaskId] = React.useState<string | null>(null)
@@ -3064,8 +3062,9 @@ export default function AdminTasksPage() {
       const needsGaneConfirmation =
         task.status === "WAITING_CONFIRMATION" && task.confirmation_assignee_id === ganeUserId
 
-      const startDateIso = toDateOnlyIso(task.start_date || task.due_date || null)
+      const startDateIso = toDateOnlyIso(task.start_date || null)
       const dueDateIso = getTaskDateIso(task)
+      const dueDateDisplayIso = toDateOnlyIso(task.due_date || null)
       const dateIso = dueDateIso || startDateIso
       const statusValue = task.status || (task.completed_at ? "DONE" : "TODO")
       const systemFrequency = isSystemTask ? systemTemplate?.frequency || "" : ""
@@ -3095,9 +3094,9 @@ export default function AdminTasksPage() {
         nll: isSystemTask ? "SYS" : task.project_id ? "-" : fastReportSubtypeShort(task),
         assigned: taskAssigneeBadges(task),
         startDateIso,
-        startDateLabel: startDateIso ? formatDateDMY(startDateIso) : "-",
+        startDateLabel: startDateIso ? formatDateDayMonth(startDateIso) : "-",
         dateIso,
-        dateLabel: dateIso ? formatDateDayMonth(dateIso) : "-",
+        dateLabel: dueDateDisplayIso ? formatDateDayMonth(dueDateDisplayIso) : "-",
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         title: task.title || "-",
         systemFrequency,
@@ -3426,10 +3425,8 @@ export default function AdminTasksPage() {
     setEditTitle(task.title || "")
     const taskStartDate = toDateInputValue(task.start_date)
     setEditStartDate(taskStartDate)
-    setEditStartDateDisplay(taskStartDate ? toDDMMYYYY(taskStartDate) : "")
-    const taskDueDate = toDateInputValue(task.due_date || task.start_date)
+    const taskDueDate = toDateInputValue(task.due_date)
     setEditDueDate(taskDueDate)
-    setEditDueDateDisplay(taskDueDate ? toDDMMYYYY(taskDueDate) : "")
     setEditOpen(true)
   }
 
@@ -3437,18 +3434,17 @@ export default function AdminTasksPage() {
     if (!editingTaskId) return
     setSavingEdit(true)
     try {
-      let normalizedStartDate = editStartDate || ""
-      let normalizedDueDate = editDueDate || ""
-      if (editingTaskIsFast && normalizedStartDate && normalizedDueDate && normalizedStartDate > normalizedDueDate) {
-        ;[normalizedStartDate, normalizedDueDate] = [normalizedDueDate, normalizedStartDate]
+      const normalizedStartDate = editStartDate || ""
+      const normalizedDueDate = editDueDate || ""
+      if (normalizedStartDate && normalizedDueDate && normalizedStartDate > normalizedDueDate) {
+        toast.error("Start date cannot be after due date")
+        return
       }
       const startDateValue = normalizedStartDate ? new Date(normalizedStartDate).toISOString() : null
       const dueDateValue = normalizedDueDate ? new Date(normalizedDueDate).toISOString() : null
       // This dialog edits dates only. Do not resend title or other shared fields:
       // note-derived fast tasks must keep those fields synchronized with their source note.
-      const payload: Record<string, unknown> = editingTaskIsFast
-        ? { start_date: startDateValue, due_date: dueDateValue }
-        : { due_date: dueDateValue }
+      const payload: Record<string, unknown> = { start_date: startDateValue, due_date: dueDateValue }
       const res = await apiFetch(`/tasks/${editingTaskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -6598,7 +6594,8 @@ export default function AdminTasksPage() {
       const headers = [
         "NR",
         "LL",
-        "DATE",
+        "START DATE",
+        "DUE DATE",
         "AM/PM",
         "TITLE",
         "FREQUENCY",
@@ -6690,7 +6687,7 @@ export default function AdminTasksPage() {
                     ? "w-[26px] px-1 text-center"
                     : label === "LL"
                       ? "w-[30px] px-1 text-center"
-                      : label === "DATE"
+                    : label === "START DATE" || label === "DUE DATE"
                         ? "w-[42px] max-w-[42px] px-0.5 sm:w-[74px] sm:max-w-none sm:px-1"
                         : label === "AM/PM"
                           ? "w-[54px]"
@@ -6754,6 +6751,9 @@ export default function AdminTasksPage() {
                 <TableRow key={row.id}>
                   <TableCell className="w-[26px] border-r border-slate-200 px-1 py-1 text-center align-middle font-semibold text-slate-700 last:border-r-0">{group.startNumber + index}</TableCell>
                   <TableCell className="w-[30px] border-r border-slate-200 px-1 py-1 text-center align-middle font-semibold last:border-r-0">{row.ll}</TableCell>
+                  <TableCell className="w-[42px] max-w-[42px] border-r border-slate-200 px-0.5 py-1 align-middle last:border-r-0 sm:w-[74px] sm:max-w-none sm:px-1">
+                    {row.startDateLabel}
+                  </TableCell>
                   <TableCell className="w-[42px] max-w-[42px] border-r border-slate-200 px-0.5 py-1 align-middle last:border-r-0 sm:w-[74px] sm:max-w-none sm:px-1">
                     <div className="flex flex-col items-start gap-0.5 leading-none">
                       <span>{row.dateLabel}</span>
@@ -6855,7 +6855,7 @@ export default function AdminTasksPage() {
                           variant="outline"
                           size="icon"
                           className="h-5 w-5 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
-                          title={row.isFastTask ? "Edit task dates" : "Edit due date"}
+                          title="Edit task dates"
                           aria-label={`Edit ${plainCommonMarkedTitle(row.title)}`}
                           onClick={() => startEditTask(rowTask)}
                         >
@@ -8096,7 +8096,7 @@ export default function AdminTasksPage() {
       >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editingTaskIsFast ? "Edit Fast Task Dates" : "Edit Task Due Date"}</DialogTitle>
+            <DialogTitle>{editingTaskIsFast ? "Edit Fast Task Dates" : "Edit Task Dates"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
@@ -8104,53 +8104,26 @@ export default function AdminTasksPage() {
               <Input value={editTitle} readOnly className="bg-slate-50 text-slate-600" />
             </div>
             <div className="grid gap-3 md:grid-cols-2">
-              {editingTaskIsFast ? (
-                <>
-                  <div className="space-y-2">
-                    <Label>Start date</Label>
-                    <Input
-                      type="date"
-                      value={editStartDate}
-                      onChange={(event) => {
-                        const value = event.target.value
-                        setEditStartDate(value)
-                        setEditStartDateDisplay(value ? toDDMMYYYY(value) : "")
-                      }}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Due date</Label>
-                    <Input
-                      type="date"
-                      value={editDueDate}
-                      onChange={(event) => {
-                        const value = event.target.value
-                        setEditDueDate(value)
-                        setEditDueDateDisplay(value ? toDDMMYYYY(value) : "")
-                      }}
-                    />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="space-y-2">
-                    <Label>Current due date</Label>
-                    <Input value={editDueDateDisplay} readOnly className="bg-slate-50 text-slate-600" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>New due date</Label>
-                    <Input
-                      type="date"
-                      value={editDueDate}
-                      onChange={(event) => {
-                        const value = event.target.value
-                        setEditDueDate(value)
-                        setEditDueDateDisplay(value ? toDDMMYYYY(value) : "")
-                      }}
-                    />
-                  </div>
-                </>
-              )}
+              <div className="space-y-2">
+                <Label>Start date</Label>
+                <Input
+                  type="date"
+                  value={editStartDate}
+                  onChange={(event) => {
+                    setEditStartDate(event.target.value)
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Due date</Label>
+                <Input
+                  type="date"
+                  value={editDueDate}
+                  onChange={(event) => {
+                    setEditDueDate(event.target.value)
+                  }}
+                />
+              </div>
             </div>
             <div className="text-xs text-slate-500">
               {editingTaskIsFast
@@ -8162,7 +8135,7 @@ export default function AdminTasksPage() {
                 Cancel
               </Button>
               <Button
-                disabled={savingEdit || !editingTaskId || (editingTaskIsFast ? !editStartDate || !editDueDate : !editDueDate)}
+                disabled={savingEdit || !editingTaskId || (!editStartDate && !editDueDate)}
                 onClick={() => void saveEditTask()}
               >
                 {savingEdit ? "Saving..." : "Save"}

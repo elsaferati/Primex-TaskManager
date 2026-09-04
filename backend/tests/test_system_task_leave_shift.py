@@ -13,6 +13,7 @@ from app.services.system_task_instances import (
     _replacement_user_for_occurrence,
     generate_system_task_instances,
     reconcile_system_task_assignments_for_day,
+    reconcile_system_task_assignments_in_range,
 )
 
 
@@ -226,6 +227,37 @@ class TestSystemTaskLeaveShift(TestCase):
 
 
 class TestSystemTaskLeaveGeneration(IsolatedAsyncioTestCase):
+    async def test_range_reconciliation_covers_future_days_and_aggregates_results(self) -> None:
+        db = AsyncMock()
+        start = date(2026, 5, 1)
+        now_utc = datetime(2026, 5, 1, 4, 0, tzinfo=timezone.utc)
+
+        with patch(
+            "app.services.system_task_instances.reconcile_system_task_assignments_for_day",
+            new=AsyncMock(
+                side_effect=[
+                    {"reassigned": 1, "deactivated": 0, "reactivated": 0, "created": 0, "skipped": 0},
+                    {"reassigned": 0, "deactivated": 1, "reactivated": 0, "created": 0, "skipped": 2},
+                    {"reassigned": 2, "deactivated": 0, "reactivated": 1, "created": 0, "skipped": 0},
+                ]
+            ),
+        ) as reconcile_day:
+            result = await reconcile_system_task_assignments_in_range(
+                db=db,
+                start=start,
+                end=date(2026, 5, 3),
+                now_utc=now_utc,
+            )
+
+        self.assertEqual(
+            result,
+            {"reassigned": 3, "deactivated": 1, "reactivated": 1, "created": 0, "skipped": 2},
+        )
+        self.assertEqual(
+            [call.kwargs["target_day"] for call in reconcile_day.await_args_list],
+            [date(2026, 5, 1), date(2026, 5, 2), date(2026, 5, 3)],
+        )
+
     async def test_daily_reconciliation_reassigns_single_absent_user_to_zv1(self) -> None:
         primary_id, zv1_id, zv2_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
         occurrence = datetime(2026, 5, 1, 9, 0, tzinfo=timezone.utc)

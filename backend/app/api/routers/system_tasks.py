@@ -57,7 +57,7 @@ from app.services.system_task_schedule import (
 from app.services.system_task_instances import (
     ensure_slots_initialized,
     generate_system_task_instances,
-    reconcile_system_task_assignments_for_day,
+    reconcile_system_task_assignments_in_range,
 )
 from app.services.meeting_system_tasks import (
     EXTERNAL_MEETING_TASK_KIND,
@@ -1530,9 +1530,10 @@ async def approve_system_task_template(
         end=approval_day + timedelta(days=max(int(settings.SYSTEM_TASK_GENERATE_AHEAD_DAYS), 0)),
         template_ids=[template.id],
     )
-    await reconcile_system_task_assignments_for_day(
+    await reconcile_system_task_assignments_in_range(
         db=db,
-        target_day=approval_day,
+        start=approval_day,
+        end=approval_day + timedelta(days=max(int(settings.SYSTEM_TASK_GENERATE_AHEAD_DAYS), 0)),
         now_utc=approved_at,
     )
 
