@@ -100,10 +100,13 @@ jobs:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           REPORT_STORAGE_DIR: ${{ vars.REPORT_STORAGE_DIR }}
-          MS_CLIENT_ID: ${{ vars.MS_CLIENT_ID }}
-          MS_TENANT_ID: ${{ vars.MS_TENANT_ID }}
+          MS_CLIENT_ID: ${{ vars.MS_CLIENT_ID || secrets.MS_CLIENT_ID }}
+          MS_TENANT_ID: ${{ vars.MS_TENANT_ID || secrets.MS_TENANT_ID }}
           MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
         run: |
+          if not defined MS_CLIENT_ID (echo ::error::MS_CLIENT_ID is missing from GitHub Actions Variables or Secrets & exit /b 1)
+          if not defined MS_TENANT_ID (echo ::error::MS_TENANT_ID is missing from GitHub Actions Variables or Secrets & exit /b 1)
+          if not defined MS_CLIENT_SECRET (echo ::error::MS_CLIENT_SECRET is missing from GitHub Actions Secrets & exit /b 1)
           echo NEXT_PUBLIC_API_BASE_URL=https://api-flow.primexeu.com > frontend\.env.local
           echo DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus > backend\.env
           echo DB_POOL_SIZE=20 >> backend\.env
