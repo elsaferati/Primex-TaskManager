@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class MicrosoftEvent(BaseModel):
@@ -11,6 +11,7 @@ class MicrosoftEvent(BaseModel):
     starts_at: datetime | None = None
     ends_at: datetime | None = None
     location: str | None = None
+    categories: list[str] = Field(default_factory=list)
     is_all_day: bool = False
     organizer: str | None = None
     body_preview: str | None = None

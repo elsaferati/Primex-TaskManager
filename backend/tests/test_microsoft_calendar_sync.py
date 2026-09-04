@@ -6,8 +6,10 @@ from types import SimpleNamespace
 from app.services.microsoft_calendar_sync import (
     choose_department_id,
     graph_attendee_emails,
+    graph_event_categories,
     graph_meeting_url,
     graph_platform,
+    is_annual_leave_event,
     parse_graph_datetime,
 )
 
@@ -51,3 +53,14 @@ def test_department_uses_majority_of_matched_attendees() -> None:
         SimpleNamespace(id=ga_id, code="GA"),
     ]
     assert choose_department_id(participants, departments) == ga_id
+
+
+def test_calendar_categories_are_normalized_and_pv_events_are_excluded() -> None:
+    categorized = {"subject": "Annual leave", "categories": [" PV ", "Yellow category"]}
+    titled = {"subject": "LH PV 31.08-11.09", "categories": []}
+    unrelated = {"subject": "PVX client meeting", "categories": ["Blue category"]}
+
+    assert graph_event_categories(categorized) == ["PV", "Yellow category"]
+    assert is_annual_leave_event(categorized) is True
+    assert is_annual_leave_event(titled) is True
+    assert is_annual_leave_event(unrelated) is False

@@ -23,6 +23,7 @@ class Meeting(Base):
     calendar_imported: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     calendar_sync_status: Mapped[str | None] = mapped_column(String(20))
     calendar_change_key: Mapped[str | None] = mapped_column(String(500))
+    calendar_categories: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     calendar_last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     meeting_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default="external")
     recurrence_type: Mapped[str | None] = mapped_column(String(20))  # "none", "weekly", "monthly"

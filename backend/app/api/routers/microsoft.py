@@ -278,6 +278,7 @@ async def get_events(
                 starts_at=starts_at,
                 ends_at=ends_at,
                 location=location,
+                categories=[str(category) for category in (event.get("categories") or [])],
                 is_all_day=bool(event.get("isAllDay") or False),
                 organizer=organizer,
                 body_preview=event.get("bodyPreview"),

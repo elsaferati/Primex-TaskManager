@@ -16,6 +16,7 @@ class MeetingOut(BaseModel):
     microsoft_event_id: str | None = None
     calendar_imported: bool = False
     calendar_sync_status: str | None = None
+    calendar_categories: list[str] = Field(default_factory=list)
     calendar_last_synced_at: datetime | None = None
     meeting_type: str
     recurrence_type: str | None = None

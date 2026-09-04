@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 
@@ -74,7 +74,7 @@ async def fetch_calendar_events(access_token: str, start: datetime, end: datetim
         "startDateTime": format_datetime(start),
         "endDateTime": format_datetime(end),
         "$select": (
-            "id,iCalUId,changeKey,subject,start,end,location,isAllDay,isCancelled,isOnlineMeeting,organizer,attendees,"
+            "id,iCalUId,changeKey,subject,start,end,location,categories,isAllDay,isCancelled,isOnlineMeeting,organizer,attendees,"
             "bodyPreview,onlineMeeting,onlineMeetingUrl,webLink,type,seriesMasterId"
         ),
         "$orderby": "start/dateTime",
@@ -96,6 +96,47 @@ async def fetch_calendar_events(access_token: str, start: datetime, end: datetim
             url = data.get("@odata.nextLink")
             next_params = None
     return events
+
+
+async def update_calendar_event(
+    access_token: str,
+    event_id: str,
+    *,
+    subject: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    location: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if subject is not None:
+        payload["subject"] = subject
+    if start is not None:
+        payload["start"] = {"dateTime": format_datetime(start).removesuffix("Z"), "timeZone": "UTC"}
+    if end is not None:
+        payload["end"] = {"dateTime": format_datetime(end).removesuffix("Z"), "timeZone": "UTC"}
+    if location is not None:
+        payload["location"] = {"displayName": location}
+    if not payload:
+        return {}
+    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        res = await client.patch(
+            f"{GRAPH_BASE_URL}/me/events/{quote(event_id, safe='')}",
+            json=payload,
+            headers=headers,
+        )
+    res.raise_for_status()
+    return res.json()
+
+
+async def delete_calendar_event(access_token: str, event_id: str) -> None:
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        res = await client.delete(
+            f"{GRAPH_BASE_URL}/me/events/{quote(event_id, safe='')}",
+            headers=headers,
+        )
+    res.raise_for_status()
 
 
 async def fetch_calendar_schedule(

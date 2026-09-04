@@ -6,12 +6,13 @@ from datetime import date, datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_admin, ensure_department_access, ensure_manager_or_admin, ensure_meeting_editor
 from app.api.deps import get_current_user
 from app.db import get_db
+from app.integrations.microsoft import delete_calendar_event, update_calendar_event
 from app.models.meeting import Meeting, MeetingParticipant
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.project import Project
@@ -64,7 +65,9 @@ async def list_meetings(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[MeetingOut]:
-    stmt = select(Meeting)
+    stmt = select(Meeting).where(
+        or_(Meeting.calendar_sync_status.is_(None), Meeting.calendar_sync_status != "excluded")
+    )
     if department_id is None and project_id is None and participant_user_id is None:
         if include_all_departments:
             # Allow all users to see all meetings in common view
@@ -114,6 +117,7 @@ async def list_meetings(
             microsoft_event_id=m.microsoft_event_id,
             calendar_imported=bool(m.calendar_imported),
             calendar_sync_status=m.calendar_sync_status,
+            calendar_categories=m.calendar_categories or [],
             calendar_last_synced_at=m.calendar_last_synced_at,
             meeting_type=m.meeting_type,
             recurrence_type=m.recurrence_type,
@@ -369,6 +373,7 @@ async def create_meeting(
             microsoft_event_id=paired_internal_meeting.microsoft_event_id,
             calendar_imported=bool(paired_internal_meeting.calendar_imported),
             calendar_sync_status=paired_internal_meeting.calendar_sync_status,
+            calendar_categories=paired_internal_meeting.calendar_categories or [],
             calendar_last_synced_at=paired_internal_meeting.calendar_last_synced_at,
             meeting_type=paired_internal_meeting.meeting_type,
             recurrence_type=paired_internal_meeting.recurrence_type,
@@ -395,6 +400,7 @@ async def create_meeting(
         microsoft_event_id=meeting.microsoft_event_id,
         calendar_imported=bool(meeting.calendar_imported),
         calendar_sync_status=meeting.calendar_sync_status,
+        calendar_categories=meeting.calendar_categories or [],
         calendar_last_synced_at=meeting.calendar_last_synced_at,
         meeting_type=meeting.meeting_type,
         recurrence_type=meeting.recurrence_type,
@@ -417,22 +423,51 @@ async def create_meeting(
 async def update_meeting(
     meeting_id: uuid.UUID,
     payload: MeetingUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> MeetingOut:
     meeting = (await db.execute(select(Meeting).where(Meeting.id == meeting_id))).scalar_one_or_none()
     if meeting is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
-    if meeting.calendar_imported:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Calendar meetings must be edited in Microsoft Calendar",
-        )
     # Allow admin, manager, or the person that created it to edit
     ensure_meeting_editor(user, meeting)
 
     # Get fields that were explicitly set in the request
     payload_dict = payload.model_dump(exclude_unset=True)
+
+    if meeting.calendar_imported and meeting.microsoft_event_id:
+        token = await get_shared_calendar_token(db, redirect_uri=resolve_redirect_uri(request))
+        if token is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The shared Microsoft calendar is not connected.",
+            )
+        graph_start = payload.starts_at if "starts_at" in payload_dict else meeting.starts_at
+        graph_end = payload.ends_at if "ends_at" in payload_dict else meeting.ends_at
+        if "starts_at" in payload_dict and "ends_at" not in payload_dict and graph_start is not None:
+            current_duration = (
+                meeting.ends_at - meeting.starts_at
+                if meeting.starts_at is not None and meeting.ends_at is not None
+                else timedelta(hours=1)
+            )
+            graph_end = graph_start + current_duration
+            meeting.ends_at = graph_end
+        try:
+            await update_calendar_event(
+                token.access_token,
+                meeting.microsoft_event_id,
+                subject=payload.title if "title" in payload_dict else None,
+                start=graph_start if "starts_at" in payload_dict else None,
+                end=graph_end if "starts_at" in payload_dict or "ends_at" in payload_dict else None,
+                location=payload.platform if "platform" in payload_dict else None,
+            )
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Microsoft Calendar event could not be updated.",
+            ) from exc
+        meeting.calendar_change_key = None
     
     if "title" in payload_dict and payload.title is not None:
         meeting.title = payload.title
@@ -440,6 +475,8 @@ async def update_meeting(
         meeting.platform = payload.platform
     if "starts_at" in payload_dict:
         meeting.starts_at = payload.starts_at
+    if "ends_at" in payload_dict:
+        meeting.ends_at = payload.ends_at
     if "meeting_url" in payload_dict:
         meeting.meeting_url = payload.meeting_url
     if "meeting_type" in payload_dict and payload.meeting_type is not None:
@@ -516,6 +553,7 @@ async def update_meeting(
         microsoft_event_id=meeting.microsoft_event_id,
         calendar_imported=bool(meeting.calendar_imported),
         calendar_sync_status=meeting.calendar_sync_status,
+        calendar_categories=meeting.calendar_categories or [],
         calendar_last_synced_at=meeting.calendar_last_synced_at,
         meeting_type=meeting.meeting_type,
         recurrence_type=meeting.recurrence_type,
@@ -572,6 +610,7 @@ async def create_agent_test_task_for_meeting(
         microsoft_event_id=meeting.microsoft_event_id,
         calendar_imported=bool(meeting.calendar_imported),
         calendar_sync_status=meeting.calendar_sync_status,
+        calendar_categories=meeting.calendar_categories or [],
         calendar_last_synced_at=meeting.calendar_last_synced_at,
         meeting_type=meeting.meeting_type,
         recurrence_type=meeting.recurrence_type,
@@ -627,6 +666,7 @@ async def create_pim_image_test_task_for_meeting(
         microsoft_event_id=meeting.microsoft_event_id,
         calendar_imported=bool(meeting.calendar_imported),
         calendar_sync_status=meeting.calendar_sync_status,
+        calendar_categories=meeting.calendar_categories or [],
         calendar_last_synced_at=meeting.calendar_last_synced_at,
         meeting_type=meeting.meeting_type,
         recurrence_type=meeting.recurrence_type,
@@ -647,19 +687,35 @@ async def create_pim_image_test_task_for_meeting(
 @router.delete("/{meeting_id}", status_code=status.HTTP_200_OK)
 async def delete_meeting(
     meeting_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> dict:
     meeting = (await db.execute(select(Meeting).where(Meeting.id == meeting_id))).scalar_one_or_none()
     if meeting is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
-    if meeting.calendar_imported:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Calendar meetings must be deleted in Microsoft Calendar",
-        )
     # Only admins can delete external meetings
     ensure_admin(user)
+    if meeting.calendar_imported and meeting.microsoft_event_id:
+        token = await get_shared_calendar_token(db, redirect_uri=resolve_redirect_uri(request))
+        if token is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The shared Microsoft calendar is not connected.",
+            )
+        try:
+            await delete_calendar_event(token.access_token, meeting.microsoft_event_id)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != status.HTTP_404_NOT_FOUND:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Microsoft Calendar event could not be deleted.",
+                ) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Microsoft Calendar event could not be deleted.",
+            ) from exc
     await deactivate_external_meeting_system_tasks(db, meeting.id)
     await db.delete(meeting)
     await db.commit()

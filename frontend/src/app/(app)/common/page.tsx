@@ -291,6 +291,21 @@ type PersonalItem = {
   isDone?: boolean
 } & FastTaskItemMeta
 type ExternalItem = {
+  id?: string
+  title: string
+  date: string
+  time: string
+  platform: string
+  owner: string
+  assignees?: string[]
+  department?: string
+  recurrenceType?: string | null
+  recurrence_type?: string | null
+  calendarCategories?: string[]
+  calendarImported?: boolean
+}
+type InternalItem = {
+  id?: string
   title: string
   date: string
   time: string
@@ -301,16 +316,14 @@ type ExternalItem = {
   recurrenceType?: string | null
   recurrence_type?: string | null
 }
-type InternalItem = {
-  title: string
-  date: string
-  time: string
-  platform: string
-  owner: string
-  assignees?: string[]
-  department?: string
-  recurrenceType?: string | null
-  recurrence_type?: string | null
+
+const outlookCategoryTone = (categories?: string[]) => {
+  const values = (categories || []).map((category) => category.trim().toLowerCase())
+  if (values.some((category) => category.includes("red"))) return "outlook-red"
+  if (values.some((category) => category === "tak int" || category.includes("yellow"))) return "outlook-yellow"
+  if (values.some((category) => category.includes("daily") || category.includes("weekly"))) return "outlook-orange"
+  if (values.some((category) => category.includes("blue") || category.includes("event"))) return "outlook-blue"
+  return "outlook-violet"
 }
 type R1Item = {
   title: string
@@ -1380,12 +1393,15 @@ export default function CommonViewPage() {
       const dateSource = resolvedDate ?? validCreatedAt
       if (!dateSource) return null
       return {
+        id: `meeting:${meeting.id}`,
         title: meeting.title || (meetingType === "external" ? "External meeting" : "Internal meeting"),
         date: toISODate(dateSource),
         time: resolvedDate ? formatTime(resolvedDate) : "TBD",
         platform: meeting.platform?.trim() || "TBD",
         owner: fallbackOwnerName || "Unknown",
         recurrenceType: meeting.recurrence_type || "none",
+        calendarCategories: meeting.calendar_categories || [],
+        calendarImported: Boolean(meeting.calendar_imported),
       }
     },
     [formatTime, toISODate]
@@ -1502,7 +1518,7 @@ export default function CommonViewPage() {
   const [externalMeetingsOpen, setExternalMeetingsOpen] = React.useState(false)
   const [externalMeetings, setExternalMeetings] = React.useState<Meeting[]>([])
   const [syncingExternalCalendar, setSyncingExternalCalendar] = React.useState(false)
-  const initialExternalCalendarSyncRef = React.useRef(false)
+  const reloadMeetingListsRef = React.useRef<() => Promise<void>>(async () => undefined)
   const [externalMeetingListFilter, setExternalMeetingListFilter] = React.useState<"next" | "past" | "all">("next")
   const [externalMeetingTitle, setExternalMeetingTitle] = React.useState("")
   const [externalMeetingPlatform, setExternalMeetingPlatform] = React.useState("")
@@ -3611,12 +3627,15 @@ export default function CommonViewPage() {
             const ownerName = ownerUser?.full_name || ownerUser?.username || "Unknown"
 
             allData.external.push({
+              id: `meeting:${meeting.id}`,
               title: meeting.title || "External meeting",
               date: toISODate(dateSource),
               time: resolvedDate ? formatTime(resolvedDate) : "TBD",
               platform: meeting.platform?.trim() || "TBD",
               owner: ownerName,
               recurrenceType: meeting.recurrence_type || "none",
+              calendarCategories: meeting.calendar_categories || [],
+              calendarImported: Boolean(meeting.calendar_imported),
             })
           }
         }
@@ -3637,6 +3656,7 @@ export default function CommonViewPage() {
             const ownerName = ownerUser?.full_name || ownerUser?.username || "Unknown"
 
             allData.internal.push({
+              id: `meeting:${meeting.id}`,
               title: meeting.title || "Internal meeting",
               date: toISODate(dateSource),
               time: resolvedDate ? formatTime(resolvedDate) : "TBD",
@@ -3735,59 +3755,67 @@ export default function CommonViewPage() {
     }
   }, [apiFetch, authLoading, userId, user?.role, user?.department_id, weekStart, commonViewAggregateEnabled, commonViewIncludeStages, fetchCommonViewStage])
 
+  const reloadMeetingLists = React.useCallback(async () => {
+    const meetingsBase = commonDepartmentId
+      ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
+      : "/meetings?include_all_departments=true"
+    const [externalRes, internalRes] = await Promise.all([
+      apiFetch(`${meetingsBase}&meeting_type=external`),
+      apiFetch(`${meetingsBase}&meeting_type=internal`),
+    ])
+    if (externalRes?.ok) {
+      const meetings = (await externalRes.json()) as Meeting[]
+      setExternalMeetings(meetings)
+      syncCommonMeetingBucket(
+        "external",
+        meetings.filter((meeting) => meeting.calendar_sync_status !== "cancelled")
+      )
+    }
+    if (internalRes?.ok) {
+      const meetings = (await internalRes.json()) as Meeting[]
+      setInternalMeetings(meetings)
+      syncCommonMeetingBucket("internal", meetings)
+    }
+    COMMON_VIEW_CACHE.clear()
+  }, [apiFetch, commonDepartmentId, syncCommonMeetingBucket])
+
+  React.useEffect(() => {
+    reloadMeetingListsRef.current = reloadMeetingLists
+  }, [reloadMeetingLists])
+
   const syncAndReloadExternalMeetings = React.useCallback(async (showFeedback = false) => {
     setSyncingExternalCalendar(true)
     try {
       const syncRes = await apiFetch("/meetings/sync-microsoft-calendar", { method: "POST" })
-      if (!syncRes?.ok && showFeedback) {
-        const detail = await syncRes
-          ?.json()
-          .then((body) => (typeof body?.detail === "string" ? body.detail : null))
-          .catch(() => null)
-        toast.error(detail || "Microsoft Calendar sync failed.")
+      if (!syncRes?.ok) {
+        if (showFeedback) {
+          const detail = await syncRes
+            ?.json()
+            .then((body) => (typeof body?.detail === "string" ? body.detail : null))
+            .catch(() => null)
+          toast.error(detail || "Microsoft Calendar sync failed.")
+        }
+        return
       }
-      const meetingsBase = commonDepartmentId
-        ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
-        : "/meetings?include_all_departments=true"
-      const [externalRes, internalRes] = await Promise.all([
-        apiFetch(`${meetingsBase}&meeting_type=external`),
-        apiFetch(`${meetingsBase}&meeting_type=internal`),
-      ])
-      if (externalRes?.ok) {
-        const meetings = (await externalRes.json()) as Meeting[]
-        setExternalMeetings(meetings)
-        syncCommonMeetingBucket(
-          "external",
-          meetings.filter((meeting) => meeting.calendar_sync_status !== "cancelled")
-        )
-      }
-      if (internalRes?.ok) {
-        const meetings = (await internalRes.json()) as Meeting[]
-        setInternalMeetings(meetings)
-        syncCommonMeetingBucket("internal", meetings)
-      }
-      if (syncRes?.ok && showFeedback) {
+      await reloadMeetingLists()
+      if (showFeedback) {
         toast.success("Microsoft Calendar synchronized.")
       }
-      COMMON_VIEW_CACHE.clear()
     } catch (error) {
       console.error("Microsoft Calendar sync failed", error)
       if (showFeedback) toast.error("Microsoft Calendar sync failed.")
     } finally {
       setSyncingExternalCalendar(false)
     }
-  }, [apiFetch, commonDepartmentId, syncCommonMeetingBucket])
+  }, [apiFetch, reloadMeetingLists])
 
   React.useEffect(() => {
     if (!externalMeetingsOpen) return
-    void syncAndReloadExternalMeetings()
-  }, [externalMeetingsOpen, syncAndReloadExternalMeetings])
-
-  React.useEffect(() => {
-    if (authLoading || !userId || initialExternalCalendarSyncRef.current) return
-    initialExternalCalendarSyncRef.current = true
-    void syncAndReloadExternalMeetings()
-  }, [authLoading, userId, syncAndReloadExternalMeetings])
+    // The backend scheduler keeps Microsoft Calendar synchronized. Opening the
+    // panel should only read persisted meetings instead of starting another
+    // potentially long-running calendar import.
+    void reloadMeetingListsRef.current()
+  }, [externalMeetingsOpen])
 
   React.useEffect(() => {
     if (!internalMeetingsOpen) return
@@ -5839,7 +5867,6 @@ export default function CommonViewPage() {
 
   const canEditExternalMeeting = React.useCallback((meeting: Meeting) => {
     if (!user) return false
-    if (meeting.calendar_imported) return false
     // Allow admin, manager, or the person that created it
     if (isAdmin || isManager) return true
     if (meeting.created_by && meeting.created_by === user.id) return true
@@ -6887,6 +6914,7 @@ export default function CommonViewPage() {
       dateLabel: formatDateHuman(x.date),
       accentClass: [
         "swimlane-accent external",
+        x.calendarImported ? outlookCategoryTone(x.calendarCategories) : "",
         isOneTimeMeeting(x.recurrenceType ?? x.recurrence_type) ? "one-time-meeting" : "",
       ]
         .filter(Boolean)
@@ -8792,6 +8820,11 @@ export default function CommonViewPage() {
           background: #ffffff;
           box-shadow: 0 6px 14px rgba(15, 23, 42, 0.04);
         }
+        .outlook-violet { background-color: #f5f3ff !important; border-color: #c4b5fd !important; }
+        .outlook-blue { background-color: #eff6ff !important; border-color: #93c5fd !important; }
+        .outlook-yellow { background-color: #fefce8 !important; border-color: #fde047 !important; }
+        .outlook-orange { background-color: #fff7ed !important; border-color: #fdba74 !important; }
+        .outlook-red { background-color: #fff1f2 !important; border-color: #fda4af !important; }
         .external-meeting-title {
           font-size: 13px;
           font-weight: 700;
@@ -12749,7 +12782,10 @@ export default function CommonViewPage() {
                       (internalMeeting) => internalMeeting.paired_external_meeting_id === meeting.id
                     )
                     return (
-                      <div key={meeting.id} className="external-meeting-card">
+                      <div
+                        key={meeting.id}
+                        className={`external-meeting-card ${meeting.calendar_imported ? outlookCategoryTone(meeting.calendar_categories) : ""}`}
+                      >
                         {isEditing ? (
                           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                             <input
@@ -14136,6 +14172,7 @@ export default function CommonViewPage() {
                             key={idx}
                             className={[
                               "week-table-entry",
+                              e.calendarImported ? outlookCategoryTone(e.calendarCategories) : "",
                               isOneTimeMeeting(e.recurrenceType ?? e.recurrence_type) ? "one-time-meeting" : "",
                             ]
                               .filter(Boolean)

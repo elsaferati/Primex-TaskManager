@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -110,6 +111,22 @@ def graph_platform(event: dict[str, Any]) -> str:
     return location or "OUTLOOK"
 
 
+def graph_event_categories(event: dict[str, Any]) -> list[str]:
+    return [
+        str(category).strip()
+        for category in (event.get("categories") or [])
+        if str(category).strip()
+    ]
+
+
+def is_annual_leave_event(event: dict[str, Any]) -> bool:
+    categories = {category.casefold() for category in graph_event_categories(event)}
+    if "pv" in categories:
+        return True
+    subject = str(event.get("subject") or "")
+    return re.search(r"(?<![A-Z0-9])PV(?![A-Z0-9])", subject, flags=re.IGNORECASE) is not None
+
+
 def choose_department_id(
     participants: list[User],
     departments: list[Department],
@@ -147,6 +164,7 @@ async def sync_external_calendar_events(
             str(row.microsoft_event_id): row for row in existing_rows if row.microsoft_event_id
         }
         seen_event_ids: set[str] = set()
+        unchanged_meeting_ids: list[Any] = []
         now = datetime.now(timezone.utc)
         created = updated = cancelled = skipped = 0
 
@@ -157,6 +175,16 @@ async def sync_external_calendar_events(
                 continue
             seen_event_ids.add(event_id)
             row = existing_by_event_id.get(event_id)
+            categories = graph_event_categories(event)
+            if is_annual_leave_event(event):
+                if row is not None:
+                    row.calendar_imported = True
+                    row.calendar_sync_status = "excluded"
+                    row.calendar_categories = categories
+                    row.calendar_change_key = event.get("changeKey")
+                    row.calendar_last_synced_at = now
+                skipped += 1
+                continue
             if event.get("isCancelled"):
                 if row is not None and row.calendar_sync_status != "cancelled":
                     row.calendar_imported = True
@@ -174,6 +202,17 @@ async def sync_external_calendar_events(
             attendee_emails = graph_attendee_emails(event, settings.MS_ORGANIZER_EMAIL)
             participants = [users_by_email[email] for email in attendee_emails if email in users_by_email]
             mapped_department_id = choose_department_id(participants, departments)
+            change_key = event.get("changeKey")
+            if (
+                row is not None
+                and row.calendar_imported
+                and row.calendar_sync_status == "active"
+                and change_key
+                and row.calendar_change_key == change_key
+                and (row.calendar_categories or []) == categories
+            ):
+                unchanged_meeting_ids.append(row.id)
+                continue
             if row is None:
                 if mapped_department_id is None:
                     skipped += 1
@@ -190,7 +229,8 @@ async def sync_external_calendar_events(
                     created_by=connected_by_user_id,
                     calendar_imported=True,
                     calendar_sync_status="active",
-                    calendar_change_key=event.get("changeKey"),
+                    calendar_change_key=change_key,
+                    calendar_categories=categories,
                     calendar_last_synced_at=now,
                 )
                 db.add(row)
@@ -207,7 +247,8 @@ async def sync_external_calendar_events(
                 row.meeting_type = "external"
                 row.calendar_imported = True
                 row.calendar_sync_status = "active"
-                row.calendar_change_key = event.get("changeKey")
+                row.calendar_change_key = change_key
+                row.calendar_categories = categories
                 row.calendar_last_synced_at = now
                 if was_calendar_imported and mapped_department_id is not None:
                     row.department_id = mapped_department_id
@@ -216,6 +257,13 @@ async def sync_external_calendar_events(
             await db.execute(delete(MeetingParticipant).where(MeetingParticipant.meeting_id == row.id))
             for participant in participants:
                 db.add(MeetingParticipant(meeting_id=row.id, user_id=participant.id))
+
+        if unchanged_meeting_ids:
+            await db.execute(
+                update(Meeting)
+                .where(Meeting.id.in_(unchanged_meeting_ids))
+                .values(calendar_last_synced_at=now)
+            )
 
         for row in existing_rows:
             if not row.calendar_imported or not row.microsoft_event_id or row.calendar_sync_status == "cancelled":
