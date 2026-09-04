@@ -996,13 +996,36 @@ async def revoke_icloud_sync_connection(
     await db.commit()
 
 
-@router.get("/icloud-sync/ping", response_model=dict[str, bool])
-async def ping_icloud_sync_connection(
+async def _ping_icloud_sync_connection(
+    request: Request,
+    x_primeflow_sync_token: str | None,
+    db: AsyncSession,
+) -> dict[str, bool | int | str]:
+    await _connection_from_sync_token(db, x_primeflow_sync_token)
+    body = await request.body()
+    return {
+        "ok": True,
+        "method": request.method,
+        "body_bytes": len(body),
+    }
+
+
+@router.get("/icloud-sync/ping")
+async def ping_icloud_sync_connection_get(
+    request: Request,
     x_primeflow_sync_token: str | None = Header(default=None, alias="X-PrimeFlow-Sync-Token"),
     db: AsyncSession = Depends(get_db),
-) -> dict[str, bool]:
-    await _connection_from_sync_token(db, x_primeflow_sync_token)
-    return {"ok": True}
+) -> dict[str, bool | int | str]:
+    return await _ping_icloud_sync_connection(request, x_primeflow_sync_token, db)
+
+
+@router.post("/icloud-sync/ping")
+async def ping_icloud_sync_connection_post(
+    request: Request,
+    x_primeflow_sync_token: str | None = Header(default=None, alias="X-PrimeFlow-Sync-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, bool | int | str]:
+    return await _ping_icloud_sync_connection(request, x_primeflow_sync_token, db)
 
 
 @router.post("/icloud-sync/import", response_model=GaIcloudSyncImportOut)
