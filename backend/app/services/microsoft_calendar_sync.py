@@ -6,6 +6,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,8 +40,23 @@ class MicrosoftCalendarSyncResult:
 
 
 def microsoft_calendar_sync_window(now: datetime) -> tuple[datetime, datetime]:
-    """Return the forward-only shared-calendar import window."""
-    return now, now + timedelta(days=max(settings.MS_CALENDAR_SYNC_FUTURE_DAYS, 1))
+    """Return Monday-Friday for this week and the configured following weeks."""
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    try:
+        app_timezone = ZoneInfo(settings.APP_TIMEZONE)
+    except Exception:
+        app_timezone = timezone.utc
+    local_now = now.astimezone(app_timezone)
+    current_monday = (local_now - timedelta(days=local_now.weekday())).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    following_weeks = max((settings.MS_CALENDAR_SYNC_FUTURE_DAYS + 6) // 7, 0)
+    end_after_last_friday = current_monday + timedelta(days=5 + following_weeks * 7)
+    return current_monday.astimezone(timezone.utc), end_after_last_friday.astimezone(timezone.utc)
 
 
 async def get_shared_calendar_token(

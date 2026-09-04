@@ -71,14 +71,44 @@ def test_calendar_categories_are_normalized_and_pv_events_are_excluded() -> None
     assert is_annual_leave_title_or_categories("PVX client meeting", ["Blue category"]) is False
 
 
-def test_calendar_sync_window_only_fetches_the_next_two_weeks(monkeypatch) -> None:
+def test_calendar_sync_window_fetches_current_week_and_next_two_full_weeks(monkeypatch) -> None:
     now = datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc)
     monkeypatch.setattr(
         "app.services.microsoft_calendar_sync.settings.MS_CALENDAR_SYNC_FUTURE_DAYS",
         14,
     )
+    monkeypatch.setattr(
+        "app.services.microsoft_calendar_sync.settings.APP_TIMEZONE",
+        "Europe/Budapest",
+    )
 
     start, end = microsoft_calendar_sync_window(now)
 
-    assert start == now
-    assert end == datetime(2026, 9, 18, 8, 0, tzinfo=timezone.utc)
+    # Monday 31 August at 00:00 through Friday 18 September in local time.
+    # The end is exclusive, so it is Saturday 19 September at 00:00 locally.
+    assert start == datetime(2026, 8, 30, 22, 0, tzinfo=timezone.utc)
+    assert end == datetime(2026, 9, 18, 22, 0, tzinfo=timezone.utc)
+
+
+def test_calendar_sync_window_is_stable_during_the_same_week(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.microsoft_calendar_sync.settings.MS_CALENDAR_SYNC_FUTURE_DAYS",
+        14,
+    )
+    monkeypatch.setattr(
+        "app.services.microsoft_calendar_sync.settings.APP_TIMEZONE",
+        "UTC",
+    )
+
+    monday_window = microsoft_calendar_sync_window(
+        datetime(2026, 8, 31, 1, 0, tzinfo=timezone.utc)
+    )
+    friday_window = microsoft_calendar_sync_window(
+        datetime(2026, 9, 4, 20, 0, tzinfo=timezone.utc)
+    )
+
+    assert monday_window == friday_window
+    assert monday_window == (
+        datetime(2026, 8, 31, 0, 0, tzinfo=timezone.utc),
+        datetime(2026, 9, 19, 0, 0, tzinfo=timezone.utc),
+    )
