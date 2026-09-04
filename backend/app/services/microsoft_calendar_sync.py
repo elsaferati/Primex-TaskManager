@@ -119,12 +119,20 @@ def graph_event_categories(event: dict[str, Any]) -> list[str]:
     ]
 
 
-def is_annual_leave_event(event: dict[str, Any]) -> bool:
-    categories = {category.casefold() for category in graph_event_categories(event)}
-    if "pv" in categories:
+def is_annual_leave_title_or_categories(title: str | None, categories: list[str] | None) -> bool:
+    normalized_categories = {
+        str(category).strip().casefold()
+        for category in (categories or [])
+        if str(category).strip()
+    }
+    if "pv" in normalized_categories:
         return True
-    subject = str(event.get("subject") or "")
-    return re.search(r"(?<![A-Z0-9])PV(?![A-Z0-9])", subject, flags=re.IGNORECASE) is not None
+    return re.search(r"(?<![A-Z0-9])PV(?![A-Z0-9])", str(title or ""), flags=re.IGNORECASE) is not None
+
+
+def is_annual_leave_event(event: dict[str, Any]) -> bool:
+    categories = graph_event_categories(event)
+    return is_annual_leave_title_or_categories(event.get("subject"), categories)
 
 
 def choose_department_id(

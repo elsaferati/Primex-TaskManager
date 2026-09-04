@@ -33,6 +33,7 @@ from app.services.meeting_system_tasks import (
 )
 from app.services.microsoft_calendar_sync import (
     get_shared_calendar_token,
+    is_annual_leave_title_or_categories,
     sync_external_calendar_events,
 )
 from app.api.routers.microsoft import resolve_redirect_uri
@@ -95,6 +96,17 @@ async def list_meetings(
         stmt = stmt.where(Meeting.meeting_type == meeting_type)
 
     meetings = (await db.execute(stmt.order_by(Meeting.starts_at, Meeting.created_at.desc()))).scalars().all()
+    # Older Microsoft rows may predate the sync-status/category migration. Keep
+    # PV calendar events out of TAK EXT even before the next background sync has
+    # had a chance to mark them as excluded.
+    meetings = [
+        meeting
+        for meeting in meetings
+        if not (
+            meeting.microsoft_event_id
+            and is_annual_leave_title_or_categories(meeting.title, meeting.calendar_categories)
+        )
+    ]
     
     # Load participants for all meetings
     meeting_ids = [m.id for m in meetings]

@@ -10,6 +10,7 @@ from app.services.microsoft_calendar_sync import (
     graph_meeting_url,
     graph_platform,
     is_annual_leave_event,
+    is_annual_leave_title_or_categories,
     parse_graph_datetime,
 )
 
@@ -64,3 +65,6 @@ def test_calendar_categories_are_normalized_and_pv_events_are_excluded() -> None
     assert is_annual_leave_event(categorized) is True
     assert is_annual_leave_event(titled) is True
     assert is_annual_leave_event(unrelated) is False
+    assert is_annual_leave_title_or_categories("ESH PV 31.08-14.09.2026", []) is True
+    assert is_annual_leave_title_or_categories("Annual leave", ["pv"]) is True
+    assert is_annual_leave_title_or_categories("PVX client meeting", ["Blue category"]) is False

@@ -1401,7 +1401,7 @@ export default function CommonViewPage() {
         owner: fallbackOwnerName || "Unknown",
         recurrenceType: meeting.recurrence_type || "none",
         calendarCategories: meeting.calendar_categories || [],
-        calendarImported: Boolean(meeting.calendar_imported),
+        calendarImported: Boolean(meeting.calendar_imported || meeting.microsoft_event_id),
       }
     },
     [formatTime, toISODate]
@@ -3635,7 +3635,7 @@ export default function CommonViewPage() {
               owner: ownerName,
               recurrenceType: meeting.recurrence_type || "none",
               calendarCategories: meeting.calendar_categories || [],
-              calendarImported: Boolean(meeting.calendar_imported),
+              calendarImported: Boolean(meeting.calendar_imported || meeting.microsoft_event_id),
             })
           }
         }
@@ -12061,7 +12061,7 @@ export default function CommonViewPage() {
           <div className="meeting-panel-header">
             <div>
               <div className="meeting-title">External Meetings</div>
-              <div className="meeting-subtitle">Every event from info@primexeu.com is shown here as TAK EXT.</div>
+              <div className="meeting-subtitle">Calendar events from info@primexeu.com are shown here as TAK EXT; PV events are excluded.</div>
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
               <button
