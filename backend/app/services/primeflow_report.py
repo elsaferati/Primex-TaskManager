@@ -30,7 +30,7 @@ STATUS_ORDER = {"IN_PROGRESS": 0, "TODO": 1, "WAITING_CLIENT": 2, "DONE": 3}
 STATUS_MARKERS = {
     "IN_PROGRESS": "🟡 IN PROGRESS",
     "TODO": "⚪ TODO",
-    "WAITING_CLIENT": "🟣 WAITING FOR CLIENT",
+    "WAITING_CLIENT": "🟣 WFE",
     "DONE": "✅ DONE",
 }
 REMINDER_CATEGORY_NORMALIZED = "pyetjet per 1h"
@@ -101,8 +101,8 @@ class ReportUndiscussedNote(BaseModel):
     created_at: datetime | None = None
 
 
-def _board_reminder_questions() -> list[ReportReminderQuestion]:
-    return [
+def _board_reminder_questions(report_day: date | None = None) -> list[ReportReminderQuestion]:
+    questions = [
         ReportReminderQuestion(text="Slotin paraprak/aktual"),
         ReportReminderQuestion(text="A ke filluar me slotin aktual?"),
         ReportReminderQuestion(text="Nese jo, kur?"),
@@ -112,6 +112,9 @@ def _board_reminder_questions() -> list[ReportReminderQuestion]:
         ReportReminderQuestion(text="Done? / Strikes? / Notes te reja? Data? AM/PM? Kujt?"),
         ReportReminderQuestion(text="BZ Notes", guidance="Secili i lexon vet para BZ me GA"),
     ]
+    if report_day is not None and report_day.weekday() == 3:
+        questions.append(ReportReminderQuestion(text="Planifikimi javor short"))
+    return questions
 
 
 class ReportDocument(BaseModel):
@@ -442,7 +445,7 @@ def build_report_document(
             )
             for title, tasks in definitions
         ],
-        board_reminders=_board_reminder_questions(),
+        board_reminders=_board_reminder_questions(report_day),
         reminders=list(reminders or []),
         undiscussed_notes=list(undiscussed_notes or []),
     )

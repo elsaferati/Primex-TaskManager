@@ -55,7 +55,7 @@ const TASK_PRIORITY_STYLES: Record<string, string> = {
 const TASK_STATUS_STYLES: Record<string, { label: string; dot: string; pill: string }> = {
   TODO: { label: "TODO", dot: "bg-slate-500", pill: "bg-slate-100 text-slate-700" },
   IN_PROGRESS: { label: "In progress", dot: "bg-amber-500", pill: "bg-amber-50 text-amber-700" },
-  WAITING_CLIENT: { label: "Waiting for Client", dot: "bg-[#B8860B]", pill: "bg-[#E2C15B] text-[#4F3A00]" },
+  WAITING_CLIENT: { label: "WFE", dot: "bg-[#B8860B]", pill: "bg-[#E2C15B] text-[#4F3A00]" },
   WAITING_CONFIRMATION: { label: "Waiting Confirmation", dot: "bg-blue-600", pill: "bg-blue-50 text-blue-700" },
   DONE: { label: "Done", dot: "bg-emerald-500", pill: "bg-emerald-50 text-emerald-700" },
 }
@@ -712,7 +712,7 @@ function normalizeTaskStatus(value?: string | null): NormalizedTaskStatus {
   const normalized = value.trim().toLowerCase().replace(/\s+/g, "_")
   if (["todo", "to_do", "to-do", "to do"].includes(normalized)) return "TODO"
   if (["in_progress", "in-progress", "in progress"].includes(normalized)) return "IN_PROGRESS"
-  if (["waiting_client", "waiting-client", "waiting for client"].includes(normalized)) return "WAITING_CLIENT"
+  if (["waiting_client", "waiting-client", "waiting for client", "wfe"].includes(normalized)) return "WAITING_CLIENT"
   if (["waiting_confirmation", "waiting-confirmation", "waiting confirmation"].includes(normalized)) return "WAITING_CONFIRMATION"
   if (["done"].includes(normalized)) return "DONE"
   return "UNKNOWN"
@@ -2718,7 +2718,7 @@ export default function NextWeekPlanPage() {
                     value="WAITING_CLIENT"
                     className="bg-[#F5E6B3] text-[#7A5A00] focus:bg-[#EBD58D] focus:text-[#7A5A00]"
                   >
-                    Waiting for Client
+                    WFE
                   </SelectItem>
                   <SelectItem
                     value="WAITING_CONFIRMATION"

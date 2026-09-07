@@ -208,6 +208,65 @@ def test_one_h_checklists_render_side_by_side_before_the_task_grid() -> None:
     assert "C5:H5" in {str(cell_range) for cell_range in sheet.merged_cells.ranges}
 
 
+def test_thursday_checklists_add_week_closing_questions_in_html_and_excel() -> None:
+    thursday = date(2026, 9, 3)
+    checklists_html = _one_h_checklists_html(thursday)
+
+    assert "Planifikimi javor short" in checklists_html
+    assert "Emails per missing info, per me vazhdu javen tjeter" in checklists_html
+    assert "Shikohen det qe mbesin vetem per neser (te premten)" in checklists_html
+
+    _, content, _ = _excel_table_attachment([], [], date(2026, 9, 4), checklist_date=thursday)
+    sheet = load_workbook(BytesIO(content)).active
+    assert "Planifikimi javor short" in sheet["E4"].value
+    assert "Emails per missing info, per me vazhdu javen tjeter" in sheet["A4"].value
+    assert "Shikohen det qe mbesin vetem per neser (te premten)" in sheet["A4"].value
+
+
+def test_tomorrow_report_uses_delivery_day_for_thursday_questions() -> None:
+    import asyncio
+
+    sent_thursday = asyncio.run(
+        build_tomorrow_print_report(date(2026, 9, 3), payload={"items": {}})
+    )
+    sent_wednesday = asyncio.run(
+        build_tomorrow_print_report(date(2026, 9, 2), payload={"items": {}})
+    )
+
+    assert sent_thursday["target_date"] == "2026-09-04"
+    assert "Planifikimi javor short" in sent_thursday["html"]
+    assert "Emails per missing info, per me vazhdu javen tjeter" in sent_thursday["plain_text"]
+    assert "Planifikimi javor short" not in sent_wednesday["html"]
+
+
+def test_friday_checklists_add_staff_questions_and_keep_board_unchanged() -> None:
+    friday = date(2026, 9, 4)
+    checklists_html = _one_h_checklists_html(friday)
+
+    assert "Barazimi i planifikimit javor - next week" in checklists_html
+    assert "Barazimi i realizimit javor - this week" in checklists_html
+    assert "Emails per missing info, per me vazhdu javen tjeter" in checklists_html
+    assert "Planifikimi javor short" not in checklists_html
+
+    _, content, _ = _excel_table_attachment([], [], date(2026, 9, 7), checklist_date=friday)
+    sheet = load_workbook(BytesIO(content)).active
+    assert "Barazimi i planifikimit javor - next week" in sheet["A4"].value
+    assert "Barazimi i realizimit javor - this week" in sheet["A4"].value
+    assert "Planifikimi javor short" not in sheet["E4"].value
+
+
+def test_tomorrow_report_uses_delivery_day_for_friday_questions() -> None:
+    import asyncio
+
+    report = asyncio.run(
+        build_tomorrow_print_report(date(2026, 9, 4), payload={"items": {}})
+    )
+
+    assert report["target_date"] == "2026-09-07"
+    assert "Barazimi i planifikimit javor - next week" in report["html"]
+    assert "Barazimi i realizimit javor - this week" in report["plain_text"]
+
+
 def test_email_table_removes_added_and_done_editor_markers() -> None:
     report_html = _html_table(
         [("1H 10:00", [{"title": "LH: [[added]]New[[/added]] [[done]]completed[[/done]] task"}], False)]

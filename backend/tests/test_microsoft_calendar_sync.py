@@ -11,6 +11,7 @@ from app.services.microsoft_calendar_sync import (
     graph_platform,
     is_annual_leave_event,
     is_annual_leave_title_or_categories,
+    is_common_view_visible_meeting,
     microsoft_calendar_sync_window,
     parse_graph_datetime,
 )
@@ -69,6 +70,42 @@ def test_calendar_categories_are_normalized_and_pv_events_are_excluded() -> None
     assert is_annual_leave_title_or_categories("ESH PV 31.08-14.09.2026", []) is True
     assert is_annual_leave_title_or_categories("Annual leave", ["pv"]) is True
     assert is_annual_leave_title_or_categories("PVX client meeting", ["Blue category"]) is False
+
+
+def test_report_meeting_visibility_matches_common_view() -> None:
+    visible = SimpleNamespace(
+        title="Client meeting",
+        calendar_categories=[],
+        calendar_imported=True,
+        microsoft_event_id="visible",
+        calendar_sync_status="active",
+    )
+    pv = SimpleNamespace(
+        title="DM PV 07.09-20.09.2026",
+        calendar_categories=[],
+        calendar_imported=True,
+        microsoft_event_id="pv",
+        calendar_sync_status="excluded",
+    )
+    cancelled = SimpleNamespace(
+        title="Old calendar meeting",
+        calendar_categories=[],
+        calendar_imported=True,
+        microsoft_event_id="cancelled",
+        calendar_sync_status="cancelled",
+    )
+    out_of_window = SimpleNamespace(
+        title="Old recurring meeting",
+        calendar_categories=[],
+        calendar_imported=True,
+        microsoft_event_id="old",
+        calendar_sync_status="out_of_window",
+    )
+
+    assert is_common_view_visible_meeting(visible) is True
+    assert is_common_view_visible_meeting(pv) is False
+    assert is_common_view_visible_meeting(cancelled) is False
+    assert is_common_view_visible_meeting(out_of_window) is False
 
 
 def test_calendar_sync_window_fetches_current_week_and_next_two_full_weeks(monkeypatch) -> None:

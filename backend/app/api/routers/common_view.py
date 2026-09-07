@@ -37,7 +37,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
 from app.services.one_h_slots import effective_slot_date
-from app.services.microsoft_calendar_sync import is_annual_leave_title_or_categories
+from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.system_task_schedule import matches_template_date
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
 
@@ -1114,14 +1114,9 @@ async def get_common_view(
         week_days = [week_start_date + timedelta(days=i) for i in range(7)]
 
         for meeting in meetings:
-            if meeting.calendar_sync_status in {"cancelled", "excluded", "out_of_window"}:
+            if not is_common_view_visible_meeting(meeting):
                 continue
             is_calendar_meeting = bool(meeting.calendar_imported or meeting.microsoft_event_id)
-            if is_calendar_meeting and is_annual_leave_title_or_categories(
-                meeting.title,
-                meeting.calendar_categories,
-            ):
-                continue
             owner_user = users_map.get(meeting.created_by) if meeting.created_by else None
             owner_name = owner_user.full_name if owner_user and owner_user.full_name else owner_user.username if owner_user else "Unknown"
             department_name = (

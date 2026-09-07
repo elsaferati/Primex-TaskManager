@@ -24,7 +24,7 @@ import type { GaNoteAttachment, Task, TaskFinishPeriod, User, UserLookup } from 
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To do" },
   { value: "IN_PROGRESS", label: "In progress" },
-  { value: "WAITING_CLIENT", label: "Waiting for Client" },
+  { value: "WAITING_CLIENT", label: "WFE" },
   { value: "WAITING_CONFIRMATION", label: "Waiting Confirmation" },
   { value: "DONE", label: "Done" },
 ] as const
@@ -348,7 +348,7 @@ export default function TaskDetailsPage() {
       let removedCurrentCopy = false
       if (statusValue) payload.status = statusValue
       if (isNoteOriginTask && statusValue && !["TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"].includes(statusValue)) {
-        toast.error("Note task status must be To Do, In Progress, Waiting Confirmation, or Done")
+        toast.error("Note task status must be To Do, In Progress, WFE, Waiting Confirmation, or Done")
         return
       }
       const confirmationValidation = isNoteOriginTask

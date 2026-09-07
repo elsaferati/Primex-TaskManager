@@ -19,6 +19,7 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.user import User
+from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.meetings_report import (
     PERSONAL_GA,
     TECHNICAL_TAG,
@@ -107,7 +108,7 @@ WAITING_CLIENT_COLUMNS = [
 PERSONAL_GROUPS = [
     ("TODO", "TODO"),
     ("IN PROGRESS", "IN_PROGRESS"),
-    ("WAITING FOR CLIENT", "WAITING_CLIENT"),
+    ("WFE", "WAITING_CLIENT"),
     ("WAITING CONFIRMATION", "WAITING_CONFIRMATION"),
     ("DONE", "DONE"),
 ]
@@ -636,7 +637,7 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
         elif title == SECTION_TITLES[7]:
             body = "\n".join(["NEW SYSTEM TASKS: 0", "", "PYETJE PER KONFIRMIM: 0"])
         elif title == SECTION_TITLES[8]:
-            body = "\n".join(["TODO: 0", "", "IN PROGRESS: 0", "", "WAITING FOR CLIENT: 0", "", "WAITING CONFIRMATION: 0", "", "DONE: 0"])
+            body = "\n".join(["TODO: 0", "", "IN PROGRESS: 0", "", "WFE: 0", "", "WAITING CONFIRMATION: 0", "", "DONE: 0"])
         elif title in {SECTION_TITLES[10], SECTION_TITLES[11]}:
             body = "TODO: 0\n\nIN PROGRESS: 0\n\nDONE: 0\n\nLATE: 0"
         else:
@@ -815,6 +816,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         department_codes,
     )
     meetings = (await db.execute(select(Meeting).where(Meeting.starts_at.is_not(None)))).scalars().all()
+    meetings = [meeting for meeting in meetings if is_common_view_visible_meeting(meeting)]
     today_meetings = [meeting for meeting in meetings if _meeting_occurs_on_date(meeting, report_day)]
     meeting_statuses = (
         await db.execute(

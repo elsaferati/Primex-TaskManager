@@ -624,7 +624,7 @@ def _normalize_task_status(value: str | None) -> str:
         return "TODO"
     if normalized == "INPROGRESS":
         return "IN_PROGRESS"
-    if normalized in {"WAITINGCLIENT", "WAITING_FOR_CLIENT"}:
+    if normalized in {"WAITINGCLIENT", "WAITING_FOR_CLIENT", "WFE"}:
         return "WAITING_CLIENT"
     if normalized == "WAITINGCONFIRMATION":
         return "WAITING_CONFIRMATION"

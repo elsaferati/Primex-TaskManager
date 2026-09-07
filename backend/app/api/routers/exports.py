@@ -65,6 +65,7 @@ from app.services.daily_report_logic import (
     task_is_visible_to_user,
 )
 from app.services.ga_time_table import get_ga_time_table_rows
+from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 
 
 router = APIRouter()
@@ -1107,7 +1108,7 @@ def _format_task_status(status: str | None) -> str:
     if status == "IN_PROGRESS":
         return "In Progress"
     if status == "WAITING_CLIENT":
-        return "Waiting for Client"
+        return "WFE"
     if status == "WAITING_CONFIRMATION":
         return "Waiting Confirmation"
     if status == "TODO":
@@ -5471,6 +5472,12 @@ async def export_common_xlsx(
             )
         )
         meetings = (await db.execute(meetings_stmt.order_by(Meeting.created_at.desc()))).scalars().all()
+        meetings = [
+            meeting
+            for meeting in meetings
+            if is_common_view_visible_meeting(meeting)
+            and str(meeting.meeting_type or "").strip().lower() == "external"
+        ]
 
     task_ids = [t.id for t in tasks]
     assignees_by_task = await _assignees_for_tasks(db, task_ids)

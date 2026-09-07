@@ -26,7 +26,7 @@ import { fetchUsersLookupCached } from "@/lib/users-cache"
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To do" },
   { value: "IN_PROGRESS", label: "In progress" },
-  { value: "WAITING_CLIENT", label: "Waiting for Client" },
+  { value: "WAITING_CLIENT", label: "WFE" },
   { value: "WAITING_CONFIRMATION", label: "Waiting for Confirmation" },
   { value: "DONE", label: "Done" },
 ] as const

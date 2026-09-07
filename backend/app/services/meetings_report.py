@@ -27,6 +27,7 @@ from app.models.user import User
 from app.services.common_leave import parse_common_view_annual_leave
 from app.services.daily_report_logic import business_days_between, planned_range_for_daily_report
 from app.services.daily_rlz_compliance import REASON_LABELS
+from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.primeflow_report import GmailService, report_timezone
 from app.services.primeflow_report import PrimeFlowClient
 from app.services.std_feedback_tickets import std_tickets_report_section
@@ -1193,6 +1194,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
 
     meeting_stmt = select(Meeting).where(Meeting.starts_at.is_not(None))
     meetings = (await db.execute(meeting_stmt)).scalars().all()
+    meetings = [meeting for meeting in meetings if is_common_view_visible_meeting(meeting)]
     today_meetings = [meeting for meeting in meetings if _meeting_occurs_on_date(meeting, report_day)]
     tomorrow_meetings = [meeting for meeting in meetings if _meeting_occurs_on_date(meeting, tomorrow)]
     external_meetings = [m for m in tomorrow_meetings if getattr(m, "meeting_type", None) == "external"]
@@ -1430,7 +1432,7 @@ def _normalize_report_status(value: str | None) -> str:
         return "TODO"
     if status in {"INPROGRESS", "IN-PROGRESS"}:
         return "IN_PROGRESS"
-    if status in {"WAITINGCLIENT", "WAITING_CLIENT", "WAITING_FOR_CLIENT"}:
+    if status in {"WAITINGCLIENT", "WAITING_CLIENT", "WAITING_FOR_CLIENT", "WFE"}:
         return "WAITING_CLIENT"
     if status in {"WAITING", "WAITING_CONFIRMATION", "PENDING_CONFIRMATION"}:
         return "WAITING_CONFIRMATION"
@@ -2474,7 +2476,8 @@ def _table_tone_from_label(label: str) -> str:
     if "IN PROGRESS" in normalized:
         return "in-progress"
     if (
-        "WAITING FOR CLIENT" in normalized
+        "WFE" in normalized
+        or "WAITING FOR CLIENT" in normalized
         or "WAITING CLIENT" in normalized
         or "WAITING_CLIENT" in normalized
         or "DT WFE" in normalized

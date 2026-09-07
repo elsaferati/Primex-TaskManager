@@ -110,6 +110,68 @@ class PrimeFlowReportTests(unittest.TestCase):
                 slot,
             )
 
+    def test_thursday_reports_add_week_closing_board_and_staff_questions(self) -> None:
+        thursday = date(2026, 9, 3)
+        reminders = asyncio.run(load_1h_reminder_questions("10:00", thursday))
+        document = build_report_document(
+            {"guardrails": {"truncated": {}}, "items": {}},
+            thursday,
+            "10:00",
+            reminders=reminders,
+        )
+
+        self.assertEqual(document.board_reminders[-1].text, "Planifikimi javor short")
+        self.assertEqual(
+            [question.text for question in document.reminders[-2:]],
+            [
+                "Emails per missing info, per me vazhdu javen tjeter",
+                "Shikohen det qe mbesin vetem per neser (te premten)",
+            ],
+        )
+
+    def test_friday_reports_add_week_balancing_staff_questions(self) -> None:
+        friday = date(2026, 9, 4)
+        reminders = asyncio.run(load_1h_reminder_questions("10:00", friday))
+        document = build_report_document(
+            {"guardrails": {"truncated": {}}, "items": {}},
+            friday,
+            "10:00",
+            reminders=reminders,
+        )
+
+        self.assertEqual(
+            [question.text for question in document.reminders[-3:]],
+            [
+                "Barazimi i planifikimit javor - next week",
+                "Barazimi i realizimit javor - this week",
+                "Emails per missing info, per me vazhdu javen tjeter",
+            ],
+        )
+        self.assertNotIn(
+            "Planifikimi javor short",
+            [question.text for question in document.board_reminders],
+        )
+
+    def test_other_weekdays_do_not_add_thursday_or_friday_questions(self) -> None:
+        monday = date(2026, 9, 7)
+        reminders = asyncio.run(load_1h_reminder_questions("10:00", monday))
+        document = build_report_document(
+            {"guardrails": {"truncated": {}}, "items": {}},
+            monday,
+            "10:00",
+            reminders=reminders,
+        )
+
+        all_questions = [
+            *(question.text for question in document.board_reminders),
+            *(question.text for question in document.reminders),
+        ]
+        self.assertNotIn("Planifikimi javor short", all_questions)
+        self.assertNotIn("Barazimi i planifikimit javor - next week", all_questions)
+        self.assertNotIn("Barazimi i realizimit javor - this week", all_questions)
+        self.assertNotIn("Emails per missing info, per me vazhdu javen tjeter", all_questions)
+        self.assertNotIn("Shikohen det qe mbesin vetem per neser (te premten)", all_questions)
+
     def test_undiscussed_notes_query_matches_open_px_notes_without_tasks(self) -> None:
         query = str(_undiscussed_px_notes_statement())
 

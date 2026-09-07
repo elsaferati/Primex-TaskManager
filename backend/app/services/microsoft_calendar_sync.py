@@ -151,6 +151,26 @@ def is_annual_leave_title_or_categories(title: str | None, categories: list[str]
     return re.search(r"(?<![A-Z0-9])PV(?![A-Z0-9])", str(title or ""), flags=re.IGNORECASE) is not None
 
 
+def is_common_view_visible_meeting(meeting: Meeting) -> bool:
+    """Keep report/export meeting visibility identical to Common View."""
+    if str(getattr(meeting, "calendar_sync_status", None) or "").strip().lower() in {
+        "cancelled",
+        "excluded",
+        "out_of_window",
+    }:
+        return False
+    is_calendar_meeting = bool(
+        getattr(meeting, "calendar_imported", False)
+        or getattr(meeting, "microsoft_event_id", None)
+    )
+    if is_calendar_meeting and is_annual_leave_title_or_categories(
+        getattr(meeting, "title", None),
+        getattr(meeting, "calendar_categories", None),
+    ):
+        return False
+    return True
+
+
 def is_annual_leave_event(event: dict[str, Any]) -> bool:
     categories = graph_event_categories(event)
     return is_annual_leave_title_or_categories(event.get("subject"), categories)

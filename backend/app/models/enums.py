@@ -61,6 +61,7 @@ class TaskStatus(str, enum.Enum):
             return cls.TODO
         normalized = str(value).strip().upper()
         aliases = {
+            "WFE": cls.WAITING_CLIENT,
             "WAITING_CLIENT": cls.IN_PROGRESS,
             "WAITING": cls.WAITING_CONFIRMATION,
             "PENDING_CONFIRMATION": cls.WAITING_CONFIRMATION,
