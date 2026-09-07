@@ -76,6 +76,24 @@ const PHASE_LABELS: Record<string, string> = {
   CLOSED: "Closed",
 }
 
+function taskRequiresRlzCompletionComment(task?: Task | null) {
+  if (!task) return false
+  if (task.system_template_origin_id) return true
+  if (task.ga_note_origin_id || task.plan_note_origin_id) return false
+  return !Boolean(task.is_bllok || task.is_1h_report || task.is_r1 || task.is_personal)
+}
+
+function taskUpdateErrorMessage(payload: unknown, fallback: string) {
+  if (!payload || typeof payload !== "object") return fallback
+  const detail = (payload as { detail?: unknown }).detail
+  if (typeof detail === "string" && detail.trim()) return detail
+  if (detail && typeof detail === "object") {
+    const message = (detail as { message?: unknown }).message
+    if (typeof message === "string" && message.trim()) return message
+  }
+  return fallback
+}
+
 const WEEKDAYS_SQ = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 const PROJECT_TYPES = [
@@ -1289,6 +1307,7 @@ export default function DepartmentKanban() {
   const [allTodayEditDueDate, setAllTodayEditDueDate] = React.useState("")
   const [allTodayEditFinishPeriod, setAllTodayEditFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
   const [allTodayEditDeadlineImportant, setAllTodayEditDeadlineImportant] = React.useState(false)
+  const [allTodayEditCompletionNote, setAllTodayEditCompletionNote] = React.useState("")
   const [allTodayUpdating, setAllTodayUpdating] = React.useState(false)
   const [markingWaitingTaskId, setMarkingWaitingTaskId] = React.useState<string | null>(null)
   const confirmerCandidates = React.useMemo(() => getConfirmerCandidates(users), [users])
@@ -4155,6 +4174,20 @@ export default function DepartmentKanban() {
     () => (allTodayEditingTaskId ? allTodayTaskLookup.get(allTodayEditingTaskId) ?? null : null),
     [allTodayEditingTaskId, allTodayTaskLookup]
   )
+  const allTodayCompletingRlzTask = Boolean(
+    allTodayEditingTask &&
+    allTodayEditStatus === "DONE" &&
+    taskStatusValue(allTodayEditingTask) !== "DONE" &&
+    taskRequiresRlzCompletionComment(allTodayEditingTask)
+  )
+  const allTodayActorIsAssignee = Boolean(
+    allTodayEditingTask && user?.id && isTaskAssignedToUser(allTodayEditingTask, user.id)
+  )
+  const allTodayUsesCompletionOverride = Boolean(
+    allTodayCompletingRlzTask &&
+    !allTodayActorIsAssignee &&
+    (user?.role === "ADMIN" || user?.role === "MANAGER")
+  )
   const todaySystemTasksSorted = React.useMemo(
     () => sortDoneLast(todaySystemTasks, (task) => taskStatusValue(task) === "DONE"),
     [sortDoneLast, todaySystemTasks]
@@ -5305,6 +5338,7 @@ export default function DepartmentKanban() {
     setAllTodayEditDueDate(toDateInputValue(task.due_date))
     setAllTodayEditFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
     setAllTodayEditDeadlineImportant(Boolean(task.is_deadline_important))
+    setAllTodayEditCompletionNote(task.user_comment || "")
   }
 
   const cancelAllTodayTaskEdit = () => {
@@ -5319,6 +5353,7 @@ export default function DepartmentKanban() {
     setAllTodayEditDueDate("")
     setAllTodayEditFinishPeriod(FINISH_PERIOD_NONE_VALUE)
     setAllTodayEditDeadlineImportant(false)
+    setAllTodayEditCompletionNote("")
   }
 
   const updateAllTodayTask = async () => {
@@ -5329,6 +5364,26 @@ export default function DepartmentKanban() {
       return
     }
     const isNoteOriginTask = Boolean(editingTask?.ga_note_origin_id || editingTask?.plan_note_origin_id)
+    const isCompletingRlzTask = Boolean(
+      editingTask &&
+      allTodayEditStatus === "DONE" &&
+      taskStatusValue(editingTask) !== "DONE" &&
+      taskRequiresRlzCompletionComment(editingTask)
+    )
+    const actorIsAssignee = Boolean(editingTask && user?.id && isTaskAssignedToUser(editingTask, user.id))
+    const usesCompletionOverride = Boolean(
+      isCompletingRlzTask &&
+      !actorIsAssignee &&
+      (user?.role === "ADMIN" || user?.role === "MANAGER")
+    )
+    if (isCompletingRlzTask && !allTodayEditCompletionNote.trim()) {
+      toast.error(
+        usesCompletionOverride
+          ? "Shkruaj arsyen pse po e mbyll këtë detyrë për përgjegjësin."
+          : "Shkruaj komentin e rezultatit para se ta mbyllësh detyrën."
+      )
+      return
+    }
     const confirmationValidation = validateWaitingConfirmation(allTodayEditStatus, allTodayEditConfirmationAssigneeId)
     if (confirmationValidation) {
       toast.error(confirmationValidation)
@@ -5336,62 +5391,76 @@ export default function DepartmentKanban() {
     }
     setAllTodayUpdating(true)
     try {
+      if (isCompletingRlzTask && actorIsAssignee) {
+        const comment = allTodayEditCompletionNote.trim()
+        if (comment !== (editingTask?.user_comment || "").trim()) {
+          const commentRes = await apiFetch(`/tasks/${allTodayEditingTaskId}/comment`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ comment }),
+          })
+          if (!commentRes.ok) {
+            const data = await commentRes.json().catch(() => null)
+            toast.error(taskUpdateErrorMessage(data, "Failed to save result comment"))
+            return
+          }
+        }
+      }
       const isProjectLinked = hasProjectId(editingTask?.project_id)
       const startDateValue = allTodayEditStartDate ? new Date(allTodayEditStartDate).toISOString() : null
       const dueDateValue = allTodayEditDueDate ? new Date(allTodayEditDueDate).toISOString() : null
       const res = await apiFetch(`/tasks/${allTodayEditingTaskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(isNoteOriginTask ? {
-          status: allTodayEditStatus,
-          start_date: startDateValue,
-          due_date: dueDateValue,
-          finish_period: allTodayEditFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : allTodayEditFinishPeriod,
-          is_deadline_important: allTodayEditDeadlineImportant,
-          priority: allTodayEditType === "high" ? "HIGH" : "NORMAL",
-          is_bllok: allTodayEditType === "blocked",
-          is_1h_report: allTodayEditType === "hourly",
-          is_r1: allTodayEditType === "r1",
-          is_personal: allTodayEditType === "personal",
-        } : {
-          title: buildMarkedAppendOnlyText(editingTask?.title, allTodayEditTitle.trim()),
-          description: allTodayEditDescription.trim() || null,
-          ...(isProjectLinked
-            ? {
-                priority: allTodayEditType === "high" ? "HIGH" : "NORMAL",
-                is_bllok: allTodayEditType === "blocked",
-                is_1h_report: allTodayEditType === "hourly",
-                is_r1: allTodayEditType === "r1",
-                is_personal: allTodayEditType === "personal",
-                ...(isWaitingConfirmation(allTodayEditStatus)
-                  ? { confirmation_assignee_id: allTodayEditConfirmationAssigneeId }
-                  : {}),
-              }
-            : {
-                is_bllok: allTodayEditType === "blocked",
-                is_1h_report: allTodayEditType === "hourly",
-                is_r1: allTodayEditType === "r1",
-                is_personal: allTodayEditType === "personal",
-              }),
-          status: allTodayEditStatus,
-          start_date: startDateValue,
-          due_date: dueDateValue,
-          finish_period: allTodayEditFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : allTodayEditFinishPeriod,
-          is_deadline_important: allTodayEditDeadlineImportant,
-          ...(isWaitingConfirmation(allTodayEditStatus)
-            ? { confirmation_assignee_id: allTodayEditConfirmationAssigneeId }
+        body: JSON.stringify({
+          ...(isNoteOriginTask ? {
+            status: allTodayEditStatus,
+            start_date: startDateValue,
+            due_date: dueDateValue,
+            finish_period: allTodayEditFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : allTodayEditFinishPeriod,
+            is_deadline_important: allTodayEditDeadlineImportant,
+            priority: allTodayEditType === "high" ? "HIGH" : "NORMAL",
+            is_bllok: allTodayEditType === "blocked",
+            is_1h_report: allTodayEditType === "hourly",
+            is_r1: allTodayEditType === "r1",
+            is_personal: allTodayEditType === "personal",
+          } : {
+            title: buildMarkedAppendOnlyText(editingTask?.title, allTodayEditTitle.trim()),
+            description: allTodayEditDescription.trim() || null,
+            ...(isProjectLinked
+              ? {
+                  priority: allTodayEditType === "high" ? "HIGH" : "NORMAL",
+                  is_bllok: allTodayEditType === "blocked",
+                  is_1h_report: allTodayEditType === "hourly",
+                  is_r1: allTodayEditType === "r1",
+                  is_personal: allTodayEditType === "personal",
+                  ...(isWaitingConfirmation(allTodayEditStatus)
+                    ? { confirmation_assignee_id: allTodayEditConfirmationAssigneeId }
+                    : {}),
+                }
+              : {
+                  is_bllok: allTodayEditType === "blocked",
+                  is_1h_report: allTodayEditType === "hourly",
+                  is_r1: allTodayEditType === "r1",
+                  is_personal: allTodayEditType === "personal",
+                }),
+            status: allTodayEditStatus,
+            start_date: startDateValue,
+            due_date: dueDateValue,
+            finish_period: allTodayEditFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : allTodayEditFinishPeriod,
+            is_deadline_important: allTodayEditDeadlineImportant,
+            ...(isWaitingConfirmation(allTodayEditStatus)
+              ? { confirmation_assignee_id: allTodayEditConfirmationAssigneeId }
+              : {}),
+          }),
+          ...(usesCompletionOverride
+            ? { completion_override_reason: allTodayEditCompletionNote.trim() }
             : {}),
         }),
       })
       if (!res.ok) {
-        let detail = "Failed to update task"
-        try {
-          const data = (await res.json()) as { detail?: string }
-          if (typeof data?.detail === "string") detail = data.detail
-        } catch {
-          // ignore
-        }
-        toast.error(detail)
+        const data = await res.json().catch(() => null)
+        toast.error(taskUpdateErrorMessage(data, "Failed to update task"))
         return
       }
       const updated = (await res.json()) as Task
@@ -7300,6 +7369,38 @@ export default function DepartmentKanban() {
                         </Select>
                       </div>
                     </div>
+                    <div
+                      className={`space-y-2 rounded-xl border p-3 ${
+                        allTodayCompletingRlzTask
+                          ? allTodayUsesCompletionOverride
+                            ? "border-amber-300 bg-amber-50"
+                            : "border-blue-300 bg-blue-50"
+                          : "border-slate-200 bg-slate-50"
+                      }`}
+                    >
+                      <Label className="text-slate-800">
+                        {allTodayUsesCompletionOverride ? "Reason for closing this task" : "Result comment"}
+                        {allTodayCompletingRlzTask ? <span className="ml-1 text-rose-600">*</span> : null}
+                      </Label>
+                      <Textarea
+                        value={allTodayEditCompletionNote}
+                        onChange={(event) => setAllTodayEditCompletionNote(event.target.value)}
+                        rows={3}
+                        placeholder={
+                          allTodayUsesCompletionOverride
+                            ? "Explain why you are closing it for the assignee..."
+                            : "Briefly write what was completed..."
+                        }
+                        className="min-h-20 resize-y border-slate-200 bg-white"
+                      />
+                      <p className="text-xs text-slate-600">
+                        {allTodayUsesCompletionOverride
+                          ? "Required when closing another user's task; saved in the audit log."
+                          : allTodayCompletingRlzTask
+                            ? "Required for Done. The comment is saved before the task is closed."
+                            : "Optional now; it becomes required when Status is Done."}
+                      </p>
+                    </div>
                     {isWaitingConfirmation(allTodayEditStatus) ? (
                       <div className="space-y-2">
                         <Label className="text-slate-700">Confirm by (Manager/Admin/GA)</Label>
@@ -7380,6 +7481,7 @@ export default function DepartmentKanban() {
                           (!(allTodayEditingTask?.ga_note_origin_id || allTodayEditingTask?.plan_note_origin_id) && !allTodayEditTitle.trim()) ||
                           !allTodayEditStatus ||
                           allTodayUpdating ||
+                          (allTodayCompletingRlzTask && !allTodayEditCompletionNote.trim()) ||
                           (!(allTodayEditingTask?.ga_note_origin_id || allTodayEditingTask?.plan_note_origin_id) && isWaitingConfirmation(allTodayEditStatus) && !allTodayEditConfirmationAssigneeId) ||
                           !canEditAllTodayTask(allTodayEditingTask)
                         }

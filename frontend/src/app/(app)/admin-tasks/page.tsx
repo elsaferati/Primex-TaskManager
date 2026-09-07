@@ -1990,10 +1990,6 @@ export default function AdminTasksPage() {
   const allTasksThisWeekTo = toISODate(addDays(getMonday(todayDate), 4))
   const allTasksNextWeekFrom = toISODate(addDays(getMonday(todayDate), 7))
   const allTasksNextWeekTo = toISODate(addDays(getMonday(todayDate), 11))
-  const setAllTasksQuickRange = (from: string, to: string) => {
-    setAllTasksDateFrom(from)
-    setAllTasksDateTo(to)
-  }
   const [taskStatusUpdating, setTaskStatusUpdating] = React.useState<Record<string, boolean>>({})
   const [systemStatusOverrides, setSystemStatusOverrides] = React.useState<Record<string, string>>({})
   const [fastEditOpen, setFastEditOpen] = React.useState(false)
@@ -2043,6 +2039,19 @@ export default function AdminTasksPage() {
   const commonWeekISOs = React.useMemo(() => getWeekdays(commonWeekStart).map(toISODate), [commonWeekStart])
   const thisCommonWeekIso = React.useMemo(() => toISODate(getMonday(new Date())), [])
   const nextCommonWeekIso = React.useMemo(() => toISODate(addDays(getMonday(new Date()), 7)), [])
+  const setAllTasksQuickRange = (from: string, to: string) => {
+    setAllTasksDateFrom(from)
+    setAllTasksDateTo(to)
+
+    if (
+      (from === todayIso && to === todayIso) ||
+      (from === allTasksThisWeekFrom && to === allTasksThisWeekTo)
+    ) {
+      setCommonWeekStart(getMonday(todayDate))
+    } else if (from === allTasksNextWeekFrom && to === allTasksNextWeekTo) {
+      setCommonWeekStart(addDays(getMonday(todayDate), 7))
+    }
+  }
   const [commonUsers, setCommonUsers] = React.useState<User[]>([])
   const [commonDepartments, setCommonDepartments] = React.useState<Department[]>([])
   const [commonData, setCommonData] = React.useState({
@@ -5658,39 +5667,37 @@ export default function AdminTasksPage() {
     return map
   }, [gaTimeEntries, gaTimeRows])
 
-  const gaInternalMeetingsByCell = React.useMemo(() => {
-    const map = new Map<string, InternalItem[]>()
-    for (const meeting of commonFiltered.internal) {
-      if (!commonWeekISOs.includes(meeting.date)) continue
+  const gaMeetingsByCell = React.useMemo(() => {
+    type TimeTableMeeting =
+      | { kind: "internal"; meeting: InternalItem }
+      | { kind: "external"; meeting: ExternalItem }
+    const map = new Map<string, TimeTableMeeting[]>()
+    const addMeeting = (item: TimeTableMeeting) => {
+      const { meeting } = item
+      if (!commonWeekISOs.includes(meeting.date)) return
       const startMinutes = parseTimeToMinutes(meeting.time)
-      if (startMinutes === null) continue
+      if (startMinutes === null) return
       const rowStart = resolveGaTimeRowStart(minutesToTimeValue(startMinutes), gaTimeRows)
-      if (!gaTimeRows.some((row) => row.start === rowStart)) continue
-      const dayOfWeek = toDayOfWeek(meeting.date)
-      const key = `${dayOfWeek}|${rowStart}`
+      if (!gaTimeRows.some((row) => row.start === rowStart)) return
+      const key = `${toDayOfWeek(meeting.date)}|${rowStart}`
       const list = map.get(key) || []
-      list.push(meeting)
+      list.push(item)
       map.set(key, list)
     }
-    return map
-  }, [commonFiltered.internal, commonWeekISOs, gaTimeRows])
 
-  const gaExternalMeetingsByCell = React.useMemo(() => {
-    const map = new Map<string, ExternalItem[]>()
-    for (const meeting of commonFiltered.external) {
-      if (!commonWeekISOs.includes(meeting.date)) continue
-      const startMinutes = parseTimeToMinutes(meeting.time)
-      if (startMinutes === null) continue
-      const rowStart = resolveGaTimeRowStart(minutesToTimeValue(startMinutes), gaTimeRows)
-      if (!gaTimeRows.some((row) => row.start === rowStart)) continue
-      const dayOfWeek = toDayOfWeek(meeting.date)
-      const key = `${dayOfWeek}|${rowStart}`
-      const list = map.get(key) || []
-      list.push(meeting)
-      map.set(key, list)
+    for (const meeting of commonFiltered.internal) addMeeting({ kind: "internal", meeting })
+    for (const meeting of commonFiltered.external) addMeeting({ kind: "external", meeting })
+    for (const meetings of map.values()) {
+      meetings.sort((a, b) => {
+        const timeDifference =
+          (parseTimeToMinutes(a.meeting.time) ?? Number.MAX_SAFE_INTEGER) -
+          (parseTimeToMinutes(b.meeting.time) ?? Number.MAX_SAFE_INTEGER)
+        if (timeDifference) return timeDifference
+        return a.meeting.title.localeCompare(b.meeting.title)
+      })
     }
     return map
-  }, [commonFiltered.external, commonWeekISOs, gaTimeRows])
+  }, [commonFiltered.external, commonFiltered.internal, commonWeekISOs, gaTimeRows])
 
   const createGaTimeEntry = React.useCallback(
     async (
@@ -7099,14 +7106,14 @@ export default function AdminTasksPage() {
                   <Button
                     variant={toISODate(commonWeekStart) === thisCommonWeekIso ? "default" : "outline"}
                     size="sm"
-                    onClick={() => setCommonWeekStart(getMonday(new Date()))}
+                    onClick={() => setAllTasksQuickRange(allTasksThisWeekFrom, allTasksThisWeekTo)}
                   >
                     This Week
                   </Button>
                   <Button
                     variant={toISODate(commonWeekStart) === nextCommonWeekIso ? "default" : "outline"}
                     size="sm"
-                    onClick={() => setCommonWeekStart(addDays(getMonday(new Date()), 7))}
+                    onClick={() => setAllTasksQuickRange(allTasksNextWeekFrom, allTasksNextWeekTo)}
                   >
                     Next Week
                   </Button>
@@ -7267,25 +7274,17 @@ export default function AdminTasksPage() {
                           const dayOfWeek = toDayOfWeek(iso)
                           const cellKey = `${dayOfWeek}|${slot.start}`
                           const entries = gaTimeEntriesByCell.get(cellKey) || []
-                          const internalMeetings = gaInternalMeetingsByCell.get(cellKey) || []
-                          const externalMeetings = gaExternalMeetingsByCell.get(cellKey) || []
+                          const meetings = gaMeetingsByCell.get(cellKey) || []
                           return (
                             <td key={`ga-print-${cellKey}`} className="ga-time-cell">
                               <div className="ga-time-cell-content">
-                                {internalMeetings.map((meeting, index) => (
+                                {meetings.map(({ kind, meeting }, index) => (
                                   <div
-                                    key={`ga-print-internal-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
-                                    className="ga-time-entry ga-time-internal-meeting"
+                                    key={`ga-print-meeting-${kind}-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
+                                    className={`ga-time-entry ${kind === "internal" ? "ga-time-internal-meeting" : "ga-time-external-meeting"}`}
                                   >
-                                    <span><strong>TAK INT:</strong> {meeting.title}</span>
-                                  </div>
-                                ))}
-                                {externalMeetings.map((meeting, index) => (
-                                  <div
-                                    key={`ga-print-external-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
-                                    className="ga-time-entry ga-time-external-meeting"
-                                  >
-                                    <span><strong>TAK EXT:</strong> {meeting.title}</span>
+                                    <span className="ga-time-meeting-time">{formatTimeLabel(meeting.time)}</span>
+                                    <span><strong>{kind === "internal" ? "TAK INT:" : "TAK EXT:"}</strong> {meeting.title}</span>
                                   </div>
                                 ))}
                                 {entries.map((entry) => (
@@ -7297,7 +7296,7 @@ export default function AdminTasksPage() {
                                       <GaTimeRichTextContent value={entry.content} backgroundColor={entry.background_color} />
                                     </div>
                                   ))}
-                                {!entries.length && !internalMeetings.length && !externalMeetings.length && !slot.isSpecial ? (
+                                {!entries.length && !meetings.length && !slot.isSpecial ? (
                                   <span className="week-table-empty">-</span>
                                 ) : null}
                               </div>
@@ -7339,14 +7338,14 @@ export default function AdminTasksPage() {
                 <Button
                   variant={toISODate(commonWeekStart) === thisCommonWeekIso ? "default" : "outline"}
                   size="sm"
-                  onClick={() => setCommonWeekStart(getMonday(new Date()))}
+                  onClick={() => setAllTasksQuickRange(allTasksThisWeekFrom, allTasksThisWeekTo)}
                 >
                   This Week
                 </Button>
                 <Button
                   variant={toISODate(commonWeekStart) === nextCommonWeekIso ? "default" : "outline"}
                   size="sm"
-                  onClick={() => setCommonWeekStart(addDays(getMonday(new Date()), 7))}
+                  onClick={() => setAllTasksQuickRange(allTasksNextWeekFrom, allTasksNextWeekTo)}
                 >
                   Next Week
                 </Button>
@@ -7451,8 +7450,7 @@ export default function AdminTasksPage() {
                       const dayOfWeek = toDayOfWeek(iso)
                       const cellKey = `${dayOfWeek}|${slot.start}`
                       const entries = gaTimeEntriesByCell.get(cellKey) || []
-                      const internalMeetings = gaInternalMeetingsByCell.get(cellKey) || []
-                      const externalMeetings = gaExternalMeetingsByCell.get(cellKey) || []
+                      const meetings = gaMeetingsByCell.get(cellKey) || []
                       return (
                         <td
                           key={`${cellKey}`}
@@ -7524,22 +7522,14 @@ export default function AdminTasksPage() {
                                 : ""
                             }`}
                           >
-                            {internalMeetings.map((meeting, index) => (
+                            {meetings.map(({ kind, meeting }, index) => (
                               <div
-                                key={`ga-internal-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
-                                className="ga-time-entry ga-time-internal-meeting"
+                                key={`ga-meeting-${kind}-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
+                                className={`ga-time-entry ${kind === "internal" ? "ga-time-internal-meeting" : "ga-time-external-meeting"}`}
                                 title={`${formatTimeLabel(meeting.time)} · ${meeting.title}`}
                               >
-                                <span><strong>TAK INT:</strong> {meeting.title}</span>
-                              </div>
-                            ))}
-                            {externalMeetings.map((meeting, index) => (
-                              <div
-                                key={`ga-external-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
-                                className="ga-time-entry ga-time-external-meeting"
-                                title={`${formatTimeLabel(meeting.time)} · ${meeting.title}`}
-                              >
-                                <span><strong>TAK EXT:</strong> {meeting.title}</span>
+                                <span className="ga-time-meeting-time">{formatTimeLabel(meeting.time)}</span>
+                                <span><strong>{kind === "internal" ? "TAK INT:" : "TAK EXT:"}</strong> {meeting.title}</span>
                               </div>
                             ))}
                             {entries.map((entry, entryIndex) => {
@@ -9095,6 +9085,16 @@ export default function AdminTasksPage() {
         .admin-week-table .ga-time-entry > span {
           min-width: 0;
           overflow-wrap: anywhere;
+        }
+        .admin-week-table .ga-time-meeting-time {
+          flex: 0 0 auto;
+          align-self: flex-start;
+          margin-top: 2px;
+          font-size: 8px;
+          font-weight: 700;
+          line-height: 1;
+          white-space: nowrap;
+          opacity: 0.72;
         }
         .admin-week-table .ga-time-draggable {
           cursor: grab;

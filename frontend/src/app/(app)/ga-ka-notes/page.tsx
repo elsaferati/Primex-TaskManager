@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { Bold, Calendar as CalendarIcon, Check, Clock, Image as ImageIcon, List, ListOrdered, ListTodo, Paperclip, Pencil, Printer, Mic, Square, Trash2, Upload } from "lucide-react"
+import { Bold, Calendar as CalendarIcon, Check, Clock, Cloud, Image as ImageIcon, List, ListOrdered, ListTodo, Paperclip, Pencil, Printer, Mic, Square, Trash2, Upload } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -4140,17 +4140,31 @@ export default function GaKaNotesPage() {
               </div>
               {attachmentsDialogCanAddFiles ? (
                 <div className="space-y-2">
-                  <Label>Add files</Label>
+                  <div className="flex items-center justify-between gap-3">
+                    <Label>Add files</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      disabled={uploadingAttachments}
+                      onClick={() => attachmentUploadInputRef.current?.click()}
+                    >
+                      <Cloud className="h-4 w-4 text-blue-600" />
+                      Choose from OneDrive / computer
+                    </Button>
+                  </div>
                   <Input
                     ref={attachmentUploadInputRef}
                     type="file"
                     multiple
+                    className="sr-only"
                     onChange={handleAttachmentUploadSelection}
                     disabled={uploadingAttachments}
                   />
                   {attachmentUploadFiles.length === 0 ? (
                     <div className="text-xs text-muted-foreground">
-                      No files selected. Max {MAX_ATTACHMENT_FILES} files, {MAX_ATTACHMENT_MB}MB each.
+                      Select files from your computer or from the locally synchronized OneDrive folder. Max {MAX_ATTACHMENT_FILES} files, {MAX_ATTACHMENT_MB}MB each.
                     </div>
                   ) : (
                     <div className="space-y-2 rounded-md border bg-slate-50 p-2">

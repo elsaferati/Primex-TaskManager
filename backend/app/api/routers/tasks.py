@@ -293,6 +293,17 @@ def _compute_status_from_completed(total: int | None, completed: int) -> TaskSta
     return TaskStatus.DONE
 
 
+def _product_count_status_for_output(
+    stored_status: str | TaskStatus,
+    total: int | None,
+    completed: int,
+) -> TaskStatus | None:
+    """Keep an explicitly completed product task completed in API responses."""
+    if _enum_value(stored_status) == TaskStatus.DONE.value:
+        return TaskStatus.DONE
+    return _compute_status_from_completed(total, completed)
+
+
 def _should_auto_status_from_product_counts(
     project: Project | None,
     phase: str | ProjectPhaseStatus | None,
@@ -1528,7 +1539,7 @@ async def list_tasks(
         status_override: TaskStatus | None = None
         if is_mst_tt_project and t.phase in (ProjectPhaseStatus.PRODUCT.value, ProjectPhaseStatus.CONTROL.value):
             total, completed = _extract_total_and_completed(t.daily_products, t.internal_notes)
-            status_override = _compute_status_from_completed(total, completed)
+            status_override = _product_count_status_for_output(t.status, total, completed)
         if t.id in question_status_overrides:
             status_override = question_status_overrides[t.id]
         if not include_done and status_override == TaskStatus.DONE:
@@ -1776,7 +1787,7 @@ async def get_task(
         project = (await db.execute(select(Project).where(Project.id == task.project_id))).scalar_one_or_none()
         if project is not None and _is_mst_or_tt_project(project):
             total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
-            status_override = _compute_status_from_completed(total, completed)
+            status_override = _product_count_status_for_output(task.status, total, completed)
     question_status_overrides = await _question_task_status_overrides(db, [task], user.id)
     if task.id in question_status_overrides:
         status_override = question_status_overrides[task.id]
