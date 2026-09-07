@@ -7268,7 +7268,13 @@ export default function DepartmentKanban() {
                                     }}
                                   >
                                     <option value={ONE_H_REPORT_SLOT_NONE_VALUE}>No slot</option>
-                                    {ONE_H_REPORT_SLOT_OPTIONS.map((slot) => (
+                                    {ONE_H_REPORT_SLOT_OPTIONS.filter((slot) =>
+                                      row.period === "AM"
+                                        ? ["10:00", "11:00", "11:50"].includes(slot)
+                                        : row.period === "PM"
+                                          ? ["14:20", "16:00"].includes(slot)
+                                          : true,
+                                    ).map((slot) => (
                                       <option key={slot} value={slot}>
                                         {slot}
                                       </option>
