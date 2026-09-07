@@ -596,6 +596,7 @@ async def calendar_items(
                     meeting_type=meeting.meeting_type, starts_at=window[0], ends_at=window[1], status="CREATED",
                     participant_ids=[], teams_url=meeting.meeting_url,
                     microsoft_event_id=meeting.microsoft_event_id,
+                    calendar_categories=meeting.calendar_categories or [],
                 )
             )
         day_cursor += timedelta(days=1)
@@ -608,6 +609,7 @@ async def calendar_items(
                 starts_at=row.starts_at, ends_at=row.ends_at, status=row.status,
                 participant_ids=await _participant_ids(db, row.id), teams_url=row.teams_url,
                 microsoft_event_id=row.microsoft_event_id,
+                calendar_categories=[],
             )
         )
     return sorted(result, key=lambda item: item.starts_at)

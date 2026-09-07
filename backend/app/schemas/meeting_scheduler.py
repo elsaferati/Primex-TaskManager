@@ -113,6 +113,7 @@ class MeetingScheduleCalendarItem(BaseModel):
     participant_ids: list[uuid.UUID] = []
     teams_url: str | None = None
     microsoft_event_id: str | None = None
+    calendar_categories: list[str] = Field(default_factory=list)
 
 
 class MeetingScheduleRejectIn(BaseModel):
