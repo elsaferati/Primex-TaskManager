@@ -582,6 +582,8 @@ def test_non_daily_or_weekly_meetings_get_blue_borders_in_email_and_excel() -> N
     _, content, _ = _excel_table_attachment([], meetings, date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
     assert sheet["C8"].border.left.color.rgb.endswith("2563EB")
+    assert sheet["C8"].fill.fgColor.rgb.endswith("DCECFF")
+    assert sheet["D8"].fill.fgColor.rgb.endswith("C9A98A")
     assert sheet["D8"].border.left.style == "thin"
 
 
@@ -622,6 +624,9 @@ def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
     assert report_html.count("border:2px solid #2563EB") == 2
     assert report_html.count('data-meeting-row="true"') == 3
     assert report_html.count('rowspan="2"') == 2
+    assert 'bgcolor="#DCECFF"' in report_html
+    assert 'bgcolor="#FFE38F"' in report_html
+    assert report_html.count('bgcolor="#C9A98A"') >= 4
     assert report_html.index("Today one-off") < report_html.index("Today early internal")
     assert report_html.index("Tomorrow weekly") < report_html.index("Tomorrow second")
 

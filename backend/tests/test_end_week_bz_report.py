@@ -43,7 +43,7 @@ def test_meeting_time_column_is_before_title() -> None:
     )
     row = _meeting_rows([meeting], {"m1": "held"}, {})[0]
     assert row[2] == "12:30"  # Europe/Tirane report timezone in September.
-    assert row[3] == "Client sync"
+    assert row[3] == "Client sync [[mc:meeting-brown]]"
     assert row[4:] == ["WEEKLY", "HELD"]
 
 
@@ -53,6 +53,7 @@ def test_one_time_meeting_gets_shared_blue_border_marker() -> None:
         recurrence_type="none", participants=[],
     )
     row = _meeting_rows([meeting], {}, {})[0]
+    assert "[[mc:meeting-blue]]" in row[3]
     assert "[[mt:non_daily_weekly]]" in row[3]
     assert row[4] == "ONE-TIME"
 

@@ -16,6 +16,7 @@ from app.models.plan_note import PlanNote
 from app.models.task import Task
 from app.models.user import User
 from app.services.after_break_report import _ascii_table, _task_covers_day
+from app.services.meeting_palette import meeting_report_tone
 from app.services.meetings_report import (
     _assignee_names,
     _clean_task_title,
@@ -138,7 +139,7 @@ def _meeting_rows(
             for participant in (meeting.participants or [])
             if _initials(participant_names.get(participant.user_id)) != "-"
         })
-        title = _clean_task_title(meeting.title)
+        title = f"{_clean_task_title(meeting.title)} [[mc:{meeting_report_tone(meeting)}]]"
         recurrence = _meeting_recurrence(meeting)
         if recurrence not in {"DAILY", "WEEKLY", "MONTHLY"}:
             title = f"{title} [[mt:non_daily_weekly]]"
