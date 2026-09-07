@@ -291,6 +291,7 @@ type PersonalItem = {
   isDone?: boolean
 } & FastTaskItemMeta
 type ExternalItem = {
+  id?: string
   title: string
   date: string
   time: string
@@ -300,8 +301,14 @@ type ExternalItem = {
   department?: string
   recurrenceType?: string | null
   recurrence_type?: string | null
+  calendarCategories?: string[]
+  calendarImported?: boolean
+  calendar_categories?: string[]
+  calendar_imported?: boolean
+  microsoft_event_id?: string | null
 }
 type InternalItem = {
+  id?: string
   title: string
   date: string
   time: string
@@ -312,6 +319,28 @@ type InternalItem = {
   recurrenceType?: string | null
   recurrence_type?: string | null
 }
+
+const outlookCategoryTone = (categories?: string[]) => {
+  const values = (categories || []).map((category) => category.trim().toLowerCase())
+  if (values.some((category) => category.includes("red"))) return "outlook-red"
+  if (values.some((category) => category === "tak int" || category.includes("yellow"))) return "outlook-yellow"
+  if (values.some((category) => category.includes("daily") || category.includes("weekly"))) return "outlook-orange"
+  if (
+    values.some(
+      (category) =>
+        category.includes("blue") ||
+        category.includes("event") ||
+        category.includes("evvent") ||
+        category.includes("fizik")
+    )
+  )
+    return "outlook-blue"
+  return "outlook-violet"
+}
+
+const isCalendarAnnualLeave = (title?: string, categories?: string[]) =>
+  (categories || []).some((category) => category.trim().toLowerCase() === "pv") ||
+  /(^|[^a-z0-9])pv([^a-z0-9]|$)/i.test(title || "")
 type R1Item = {
   title: string
   date: string
@@ -1380,12 +1409,15 @@ export default function CommonViewPage() {
       const dateSource = resolvedDate ?? validCreatedAt
       if (!dateSource) return null
       return {
+        id: `meeting:${meeting.id}`,
         title: meeting.title || (meetingType === "external" ? "External meeting" : "Internal meeting"),
         date: toISODate(dateSource),
         time: resolvedDate ? formatTime(resolvedDate) : "TBD",
         platform: meeting.platform?.trim() || "TBD",
         owner: fallbackOwnerName || "Unknown",
         recurrenceType: meeting.recurrence_type || "none",
+        calendarCategories: meeting.calendar_categories || [],
+        calendarImported: Boolean(meeting.calendar_imported || meeting.microsoft_event_id),
       }
     },
     [formatTime, toISODate]
@@ -1501,6 +1533,8 @@ export default function CommonViewPage() {
   const [showMeetingTemplateForm, setShowMeetingTemplateForm] = React.useState(false)
   const [externalMeetingsOpen, setExternalMeetingsOpen] = React.useState(false)
   const [externalMeetings, setExternalMeetings] = React.useState<Meeting[]>([])
+  const [syncingExternalCalendar, setSyncingExternalCalendar] = React.useState(false)
+  const reloadMeetingListsRef = React.useRef<() => Promise<void>>(async () => undefined)
   const [externalMeetingListFilter, setExternalMeetingListFilter] = React.useState<"next" | "past" | "all">("next")
   const [externalMeetingTitle, setExternalMeetingTitle] = React.useState("")
   const [externalMeetingPlatform, setExternalMeetingPlatform] = React.useState("")
@@ -1535,6 +1569,8 @@ export default function CommonViewPage() {
   const [internalMeetingRecurrenceDay, setInternalMeetingRecurrenceDay] = React.useState("1")
   const [internalMeetingDepartmentId, setInternalMeetingDepartmentId] = React.useState("")
   const [internalMeetingParticipantIds, setInternalMeetingParticipantIds] = React.useState<string[]>([])
+  const [internalMeetingPairExternalId, setInternalMeetingPairExternalId] = React.useState<string | null>(null)
+  const [internalMeetingPairExternalTitle, setInternalMeetingPairExternalTitle] = React.useState("")
   const [internalMeetingPersonsOpen, setInternalMeetingPersonsOpen] = React.useState(false)
   const [internalMeetingPersonSearch, setInternalMeetingPersonSearch] = React.useState("")
   const internalMeetingPersonsRef = React.useRef<HTMLDivElement | null>(null)
@@ -1546,7 +1582,13 @@ export default function CommonViewPage() {
         .map((meeting) => {
           const owner = meeting.created_by ? users.find((u) => u.id === meeting.created_by) : null
           const ownerName = owner?.full_name || owner?.username || "Unknown"
-          return mapMeetingToCommonItem(meeting, meetingType, ownerName)
+          const item = mapMeetingToCommonItem(meeting, meetingType, ownerName)
+          if (!item) return null
+          const assignees = (meeting.participant_ids || [])
+            .map((participantId) => users.find((candidate) => candidate.id === participantId))
+            .map((participant) => participant?.full_name || participant?.username || participant?.email || "")
+            .filter(Boolean)
+          return { ...item, assignees }
         })
         .filter((item): item is ExternalItem | InternalItem => item !== null)
 
@@ -1796,6 +1838,10 @@ export default function CommonViewPage() {
   const [editingExternalMeetingRecurrenceMonth, setEditingExternalMeetingRecurrenceMonth] = React.useState("1")
   const [editingExternalMeetingRecurrenceDay, setEditingExternalMeetingRecurrenceDay] = React.useState("1")
   const [editingExternalMeetingDepartmentId, setEditingExternalMeetingDepartmentId] = React.useState("")
+  const [editingExternalMeetingParticipantIds, setEditingExternalMeetingParticipantIds] = React.useState<string[]>([])
+  const [editingExternalMeetingPersonsOpen, setEditingExternalMeetingPersonsOpen] = React.useState(false)
+  const [editingExternalMeetingPersonSearch, setEditingExternalMeetingPersonSearch] = React.useState("")
+  const editingExternalMeetingPersonsRef = React.useRef<HTMLDivElement | null>(null)
   const [showEditWeekendDays, setShowEditWeekendDays] = React.useState(false)
   const [updatingExternalMeeting, setUpdatingExternalMeeting] = React.useState(false)
   const [deletingExternalMeetingId, setDeletingExternalMeetingId] = React.useState<string | null>(null)
@@ -2074,17 +2120,26 @@ export default function CommonViewPage() {
     return Number.isNaN(startsAt.getTime()) ? null : startsAt
   }, [])
   const externalMeetingsVisible = React.useMemo(() => {
-    if (externalMeetingListFilter === "all") return externalMeetingsSorted
+    const activeMeetings = externalMeetingsSorted.filter(
+      (meeting) => meeting.calendar_sync_status !== "cancelled"
+    )
+    if (selectedDates.size) {
+      return activeMeetings.filter((meeting) => {
+        const meetingDate = getExternalMeetingListDate(meeting)
+        return meetingDate ? selectedDates.has(toISODate(meetingDate)) : false
+      })
+    }
+    if (externalMeetingListFilter === "all") return activeMeetings
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-    return externalMeetingsSorted.filter((meeting) => {
+    return activeMeetings.filter((meeting) => {
       const meetingDate = getExternalMeetingListDate(meeting)
       if (!meetingDate) return false
       return externalMeetingListFilter === "past"
         ? meetingDate.getTime() < today.getTime()
         : meetingDate.getTime() >= today.getTime()
     })
-  }, [externalMeetingListFilter, externalMeetingsSorted, getExternalMeetingListDate])
+  }, [externalMeetingListFilter, externalMeetingsSorted, getExternalMeetingListDate, selectedDates, toISODate])
   const internalMeetingsSorted = React.useMemo(() => {
     return [...internalMeetings].sort((a, b) => {
       const aResolved = resolveExternalMeetingDate(a)
@@ -2794,6 +2849,23 @@ export default function CommonViewPage() {
           date: parsed.everyday ? weekStartIso : item.date,
         }
       })
+      const normalizedExternal = payload.items.external
+        .map((item) => {
+          const calendarCategories = item.calendarCategories ?? item.calendar_categories ?? []
+          return {
+            ...item,
+            recurrenceType: item.recurrenceType ?? item.recurrence_type ?? "none",
+            calendarCategories,
+            calendarImported: Boolean(
+              item.calendarImported ?? item.calendar_imported ?? item.microsoft_event_id
+            ),
+          } as ExternalItem
+        })
+        .filter((item) => !isCalendarAnnualLeave(item.title, item.calendarCategories))
+      const normalizedInternal = payload.items.internal.map((item) => ({
+        ...item,
+        recurrenceType: item.recurrenceType ?? item.recurrence_type ?? "none",
+      })) as InternalItem[]
       setCommonData((prev) => {
         let next = { ...prev }
         for (const includeKey of payload.included) {
@@ -2811,6 +2883,10 @@ export default function CommonViewPage() {
               next = { ...next, r1: normalizedR1 }
             } else if (bucket === "problems") {
               next = { ...next, problems: normalizedProblems }
+            } else if (bucket === "external") {
+              next = { ...next, external: normalizedExternal }
+            } else if (bucket === "internal") {
+              next = { ...next, internal: normalizedInternal }
             } else {
               next = { ...next, [bucket]: payload.items[bucket] }
             }
@@ -3606,12 +3682,19 @@ export default function CommonViewPage() {
             const ownerName = ownerUser?.full_name || ownerUser?.username || "Unknown"
 
             allData.external.push({
+              id: `meeting:${meeting.id}`,
               title: meeting.title || "External meeting",
               date: toISODate(dateSource),
               time: resolvedDate ? formatTime(resolvedDate) : "TBD",
               platform: meeting.platform?.trim() || "TBD",
               owner: ownerName,
+              assignees: (meeting.participant_ids || [])
+                .map((participantId) => loadedUsers.find((candidate) => candidate.id === participantId))
+                .map((participant) => participant?.full_name || participant?.username || participant?.email || "")
+                .filter(Boolean),
               recurrenceType: meeting.recurrence_type || "none",
+              calendarCategories: meeting.calendar_categories || [],
+              calendarImported: Boolean(meeting.calendar_imported || meeting.microsoft_event_id),
             })
           }
         }
@@ -3632,6 +3715,7 @@ export default function CommonViewPage() {
             const ownerName = ownerUser?.full_name || ownerUser?.username || "Unknown"
 
             allData.internal.push({
+              id: `meeting:${meeting.id}`,
               title: meeting.title || "Internal meeting",
               date: toISODate(dateSource),
               time: resolvedDate ? formatTime(resolvedDate) : "TBD",
@@ -3730,20 +3814,67 @@ export default function CommonViewPage() {
     }
   }, [apiFetch, authLoading, userId, user?.role, user?.department_id, weekStart, commonViewAggregateEnabled, commonViewIncludeStages, fetchCommonViewStage])
 
+  const reloadMeetingLists = React.useCallback(async () => {
+    const meetingsBase = commonDepartmentId
+      ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
+      : "/meetings?include_all_departments=true"
+    const [externalRes, internalRes] = await Promise.all([
+      apiFetch(`${meetingsBase}&meeting_type=external`),
+      apiFetch(`${meetingsBase}&meeting_type=internal`),
+    ])
+    if (externalRes?.ok) {
+      const meetings = (await externalRes.json()) as Meeting[]
+      setExternalMeetings(meetings)
+      syncCommonMeetingBucket(
+        "external",
+        meetings.filter((meeting) => meeting.calendar_sync_status !== "cancelled")
+      )
+    }
+    if (internalRes?.ok) {
+      const meetings = (await internalRes.json()) as Meeting[]
+      setInternalMeetings(meetings)
+      syncCommonMeetingBucket("internal", meetings)
+    }
+    COMMON_VIEW_CACHE.clear()
+  }, [apiFetch, commonDepartmentId, syncCommonMeetingBucket])
+
+  React.useEffect(() => {
+    reloadMeetingListsRef.current = reloadMeetingLists
+  }, [reloadMeetingLists])
+
+  const syncAndReloadExternalMeetings = React.useCallback(async (showFeedback = false) => {
+    setSyncingExternalCalendar(true)
+    try {
+      const syncRes = await apiFetch("/meetings/sync-microsoft-calendar", { method: "POST" })
+      if (!syncRes?.ok) {
+        if (showFeedback) {
+          const detail = await syncRes
+            ?.json()
+            .then((body) => (typeof body?.detail === "string" ? body.detail : null))
+            .catch(() => null)
+          toast.error(detail || "Microsoft Calendar sync failed.")
+        }
+        return
+      }
+      await reloadMeetingLists()
+      if (showFeedback) {
+        toast.success("Microsoft Calendar synchronized.")
+      }
+    } catch (error) {
+      console.error("Microsoft Calendar sync failed", error)
+      if (showFeedback) toast.error("Microsoft Calendar sync failed.")
+    } finally {
+      setSyncingExternalCalendar(false)
+    }
+  }, [apiFetch, reloadMeetingLists])
+
   React.useEffect(() => {
     if (!externalMeetingsOpen) return
-    const run = async () => {
-      const meetingsBase = commonDepartmentId
-        ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
-        : "/meetings?include_all_departments=true"
-      const meetingsRes = await apiFetch(`${meetingsBase}&meeting_type=external`)
-      if (meetingsRes?.ok) {
-        const meetings = (await meetingsRes.json()) as Meeting[]
-        setExternalMeetings(meetings)
-      }
-    }
-    void run()
-  }, [externalMeetingsOpen, apiFetch, commonDepartmentId])
+    // The backend scheduler keeps Microsoft Calendar synchronized. Opening the
+    // panel should only read persisted meetings instead of starting another
+    // potentially long-running calendar import.
+    void reloadMeetingListsRef.current()
+  }, [externalMeetingsOpen])
 
   React.useEffect(() => {
     if (!internalMeetingsOpen) return
@@ -5801,6 +5932,17 @@ export default function CommonViewPage() {
     return false
   }, [user, isAdmin, isManager])
 
+  const startLinkedInternalMeeting = React.useCallback((meeting: Meeting) => {
+    setInternalMeetingPairExternalId(meeting.id)
+    setInternalMeetingPairExternalTitle(meeting.title || "External meeting")
+    setInternalMeetingTitle(meeting.title || "")
+    setInternalMeetingPlatform(meeting.platform || "")
+    setInternalMeetingDepartmentId(meeting.department_id || "")
+    setInternalMeetingParticipantIds(meeting.participant_ids || [])
+    setExternalMeetingsOpen(false)
+    setInternalMeetingsOpen(true)
+  }, [])
+
   const startEditExternalMeeting = React.useCallback((meeting: Meeting) => {
     if (!canEditExternalMeeting(meeting)) return
     setEditingExternalMeetingId(meeting.id)
@@ -5833,6 +5975,7 @@ export default function CommonViewPage() {
       (meeting.recurrence_days_of_week || []).some((day) => day >= 5)
     )
     setEditingExternalMeetingDepartmentId(meeting.department_id || "")
+    setEditingExternalMeetingParticipantIds(meeting.participant_ids || [])
   }, [canEditExternalMeeting])
 
   const cancelEditExternalMeeting = React.useCallback(() => {
@@ -5847,6 +5990,9 @@ export default function CommonViewPage() {
     setEditingExternalMeetingRecurrenceMonth("1")
     setEditingExternalMeetingRecurrenceDay("1")
     setEditingExternalMeetingDepartmentId("")
+    setEditingExternalMeetingParticipantIds([])
+    setEditingExternalMeetingPersonsOpen(false)
+    setEditingExternalMeetingPersonSearch("")
     setShowEditWeekendDays(false)
   }, [])
 
@@ -5914,6 +6060,7 @@ export default function CommonViewPage() {
               ? [Number(editingExternalMeetingRecurrenceDay)]
               : null,
         department_id: editingExternalMeetingDepartmentId || null,
+        participant_ids: editingExternalMeetingParticipantIds,
       }
       const res = await apiFetch(`/meetings/${editingExternalMeetingId}`, {
         method: "PATCH",
@@ -5959,6 +6106,7 @@ export default function CommonViewPage() {
     editingExternalMeetingRecurrenceMonth,
     editingExternalMeetingRecurrenceDay,
     editingExternalMeetingDepartmentId,
+    editingExternalMeetingParticipantIds,
     commonDepartmentId,
     apiFetch,
     cancelEditExternalMeeting,
@@ -6149,6 +6297,7 @@ export default function CommonViewPage() {
         department_id: departmentId,
         project_id: null,
         participant_ids: internalMeetingParticipantIds,
+        paired_external_meeting_id: internalMeetingPairExternalId,
       }
       const res = await apiFetch("/meetings", {
         method: "POST",
@@ -6180,6 +6329,8 @@ export default function CommonViewPage() {
       setInternalMeetingRecurrenceMonth("1")
       setInternalMeetingRecurrenceDay("1")
       setInternalMeetingParticipantIds([])
+      setInternalMeetingPairExternalId(null)
+      setInternalMeetingPairExternalTitle("")
       setInternalMeetingPersonsOpen(false)
       setInternalMeetingPersonSearch("")
     } finally {
@@ -6198,6 +6349,7 @@ export default function CommonViewPage() {
     internalMeetingRecurrenceDay,
     internalMeetingDepartmentId,
     internalMeetingParticipantIds,
+    internalMeetingPairExternalId,
     user?.department_id,
     user?.email,
     user?.full_name,
@@ -6589,6 +6741,28 @@ export default function CommonViewPage() {
   }, [externalMeetingPersonsOpen])
 
   React.useEffect(() => {
+    if (!editingExternalMeetingPersonsOpen) return
+    const closePersonsMenu = () => {
+      setEditingExternalMeetingPersonsOpen(false)
+      setEditingExternalMeetingPersonSearch("")
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const picker = editingExternalMeetingPersonsRef.current
+      if (!picker || picker.contains(event.target as Node)) return
+      closePersonsMenu()
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closePersonsMenu()
+    }
+    document.addEventListener("mousedown", handlePointerDown)
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [editingExternalMeetingPersonsOpen])
+
+  React.useEffect(() => {
     if (!internalMeetingPersonsOpen) return
     const closePersonsMenu = () => {
       setInternalMeetingPersonsOpen(false)
@@ -6827,6 +7001,7 @@ export default function CommonViewPage() {
       dateLabel: formatDateHuman(x.date),
       accentClass: [
         "swimlane-accent external",
+        x.calendarImported ? outlookCategoryTone(x.calendarCategories) : "",
         isOneTimeMeeting(x.recurrenceType ?? x.recurrence_type) ? "one-time-meeting" : "",
       ]
         .filter(Boolean)
@@ -8558,6 +8733,9 @@ export default function CommonViewPage() {
         .external-person-picker {
           position: relative;
         }
+        .external-person-picker.compact {
+          width: min(100%, 320px);
+        }
         .external-person-picker-trigger {
           width: 100%;
           min-height: 36px;
@@ -8732,6 +8910,11 @@ export default function CommonViewPage() {
           background: #ffffff;
           box-shadow: 0 6px 14px rgba(15, 23, 42, 0.04);
         }
+        .outlook-violet { background-color: #f5f3ff !important; border-color: #c4b5fd !important; }
+        .outlook-blue { background-color: #eff6ff !important; border-color: #93c5fd !important; }
+        .outlook-yellow { background-color: #fefce8 !important; border-color: #fde047 !important; }
+        .outlook-orange { background-color: #fff7ed !important; border-color: #fdba74 !important; }
+        .outlook-red { background-color: #fff1f2 !important; border-color: #fda4af !important; }
         .external-meeting-title {
           font-size: 13px;
           font-weight: 700;
@@ -11968,14 +12151,24 @@ export default function CommonViewPage() {
           <div className="meeting-panel-header">
             <div>
               <div className="meeting-title">External Meetings</div>
-              <div className="meeting-subtitle">Show all external meetings and add new ones.</div>
+              <div className="meeting-subtitle">Calendar events from info@primexeu.com are shown here as TAK EXT; PV events are excluded.</div>
             </div>
-            <button className="btn-surface" type="button" onClick={() => setExternalMeetingsOpen(false)}>
-              Close
-            </button>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                className="btn-surface"
+                type="button"
+                disabled={syncingExternalCalendar}
+                onClick={() => void syncAndReloadExternalMeetings(true)}
+              >
+                {syncingExternalCalendar ? "Syncing..." : "Sync Calendar"}
+              </button>
+              <button className="btn-surface" type="button" onClick={() => setExternalMeetingsOpen(false)}>
+                Close
+              </button>
+            </div>
           </div>
-          <div className="external-meetings-grid">
-            <div className="external-meeting-form">
+          <div className="external-meetings-grid" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
+            <div className="external-meeting-form" style={{ display: "none" }} aria-hidden="true">
               <div className="external-meeting-form-title">
                 {externalMeetingCreateInternal ? "Add TAK EXT + TAK INT" : "Add TAK EXT"}
               </div>
@@ -12644,23 +12837,29 @@ export default function CommonViewPage() {
             </div>
             <div className="external-meeting-list">
               <div className="external-meeting-list-header">
-                <div className="external-meeting-form-title">All external meetings</div>
-                <div className="external-meeting-filter" aria-label="External meetings filter">
-                  {([
-                    ["next", "Next"],
-                    ["past", "Past"],
-                    ["all", "All"],
-                  ] as const).map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      className={externalMeetingListFilter === value ? "active" : ""}
-                      onClick={() => setExternalMeetingListFilter(value)}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                <div className="external-meeting-form-title">
+                  {selectedDates.size
+                    ? `External meetings for ${Array.from(selectedDates).sort().map(formatDateHuman).join(", ")}`
+                    : "All external meetings"}
                 </div>
+                {!selectedDates.size ? (
+                  <div className="external-meeting-filter" aria-label="External meetings filter">
+                    {([
+                      ["next", "Next"],
+                      ["past", "Past"],
+                      ["all", "All"],
+                    ] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={externalMeetingListFilter === value ? "active" : ""}
+                        onClick={() => setExternalMeetingListFilter(value)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
               {externalMeetingsVisible.length ? (
                 <div className="external-meeting-cards">
@@ -12675,8 +12874,14 @@ export default function CommonViewPage() {
                       })
                       .filter(Boolean)
                     const isEditing = editingExternalMeetingId === meeting.id
+                    const linkedInternalMeeting = internalMeetings.find(
+                      (internalMeeting) => internalMeeting.paired_external_meeting_id === meeting.id
+                    )
                     return (
-                      <div key={meeting.id} className="external-meeting-card">
+                      <div
+                        key={meeting.id}
+                        className={`external-meeting-card ${meeting.calendar_imported || meeting.microsoft_event_id ? outlookCategoryTone(meeting.calendar_categories) : ""}`}
+                      >
                         {isEditing ? (
                           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                             <input
@@ -12856,6 +13061,127 @@ export default function CommonViewPage() {
                                 ))}
                               </select>
                             </div>
+                            <div className="external-person-picker compact" ref={editingExternalMeetingPersonsRef}>
+                              <button
+                                className={`external-person-picker-trigger ${editingExternalMeetingPersonsOpen ? "active" : ""}`}
+                                type="button"
+                                onClick={() => {
+                                  setEditingExternalMeetingPersonsOpen((current) => {
+                                    if (current) setEditingExternalMeetingPersonSearch("")
+                                    return !current
+                                  })
+                                }}
+                                aria-haspopup="dialog"
+                                aria-expanded={editingExternalMeetingPersonsOpen}
+                              >
+                                <span>
+                                  {editingExternalMeetingParticipantIds.length
+                                    ? "Assigned PrimeFlow users"
+                                    : "Assign PrimeFlow users"}
+                                </span>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                                  {editingExternalMeetingParticipantIds.length ? (
+                                    <span className="external-person-picker-count">
+                                      {editingExternalMeetingParticipantIds.length}
+                                    </span>
+                                  ) : null}
+                                  <span aria-hidden="true">{editingExternalMeetingPersonsOpen ? "^" : "v"}</span>
+                                </span>
+                              </button>
+                              {editingExternalMeetingPersonsOpen ? (
+                                <div
+                                  className="external-person-picker-menu"
+                                  role="dialog"
+                                  aria-label="Assign PrimeFlow users to external meeting"
+                                >
+                                  <input
+                                    className="external-person-picker-search"
+                                    type="search"
+                                    value={editingExternalMeetingPersonSearch}
+                                    onChange={(event) => setEditingExternalMeetingPersonSearch(event.target.value)}
+                                    placeholder="Search users..."
+                                    aria-label="Search PrimeFlow users"
+                                    autoFocus
+                                  />
+                                  <div className="external-person-picker-list" role="group">
+                                    {commonUserFilterOptions
+                                      .filter(
+                                        (option) =>
+                                          option.isActive
+                                          && option.label.toLowerCase().includes(
+                                            editingExternalMeetingPersonSearch.trim().toLowerCase()
+                                          )
+                                      )
+                                      .map((option) => (
+                                        <label key={option.id} className="external-person-picker-option">
+                                          <input
+                                            type="checkbox"
+                                            checked={editingExternalMeetingParticipantIds.includes(option.id)}
+                                            onChange={(event) => {
+                                              setEditingExternalMeetingParticipantIds((current) =>
+                                                event.target.checked
+                                                  ? Array.from(new Set([...current, option.id]))
+                                                  : current.filter((id) => id !== option.id)
+                                              )
+                                            }}
+                                          />
+                                          <span>{option.label}</span>
+                                        </label>
+                                      ))}
+                                    {!commonUserFilterOptions.some(
+                                      (option) =>
+                                        option.isActive
+                                        && option.label.toLowerCase().includes(
+                                          editingExternalMeetingPersonSearch.trim().toLowerCase()
+                                        )
+                                    ) ? (
+                                      <div className="external-person-picker-empty">No users found</div>
+                                    ) : null}
+                                  </div>
+                                  <div className="external-person-picker-footer">
+                                    <button
+                                      className="external-person-picker-done"
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingExternalMeetingPersonsOpen(false)
+                                        setEditingExternalMeetingPersonSearch("")
+                                      }}
+                                    >
+                                      Done
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : null}
+                              {editingExternalMeetingParticipantIds.length ? (
+                                <div className="external-person-chips" aria-label="Assigned PrimeFlow users">
+                                  {editingExternalMeetingParticipantIds.slice(0, 3).map((id) => {
+                                    const person = commonUserFilterOptions.find((option) => option.id === id)
+                                    if (!person) return null
+                                    return (
+                                      <button
+                                        key={person.id}
+                                        className="external-person-chip"
+                                        type="button"
+                                        title={`Remove ${person.label}`}
+                                        onClick={() =>
+                                          setEditingExternalMeetingParticipantIds((current) =>
+                                            current.filter((itemId) => itemId !== person.id)
+                                          )
+                                        }
+                                      >
+                                        <span>{person.label}</span>
+                                        <span className="external-person-chip-remove" aria-hidden="true">&times;</span>
+                                      </button>
+                                    )
+                                  })}
+                                  {editingExternalMeetingParticipantIds.length > 3 ? (
+                                    <span className="external-person-chip">
+                                      +{editingExternalMeetingParticipantIds.length - 3}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
                             <div style={{ display: "flex", gap: "8px" }}>
                               <button
                                 className="btn-surface"
@@ -12881,6 +13207,11 @@ export default function CommonViewPage() {
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                               <div style={{ flex: 1 }}>
                                 <div className="external-meeting-title">{meeting.title || "External meeting"}</div>
+                                {meeting.calendar_imported ? (
+                                  <div className="external-meeting-meta">
+                                    <span>{meeting.calendar_sync_status === "cancelled" ? "Cancelled in Outlook" : "Microsoft Calendar"}</span>
+                                  </div>
+                                ) : null}
                                 <div className="external-meeting-meta">
                                   <span>{formatExternalMeetingWhen(meeting)}</span>
                                   <span>{meeting.platform || "Platform TBD"}</span>
@@ -12901,6 +13232,20 @@ export default function CommonViewPage() {
                                 ) : null}
                                 <div className="external-meeting-meta" style={{ marginTop: "8px" }}>
                                   <span>Status: {renderMeetingStatusControl(meeting)}</span>
+                                </div>
+                                <div style={{ marginTop: "8px" }}>
+                                  {linkedInternalMeeting ? (
+                                    <span className="external-meeting-person-count">TAK INT linked</span>
+                                  ) : meeting.calendar_sync_status !== "cancelled" ? (
+                                    <button
+                                      className="btn-surface"
+                                      type="button"
+                                      onClick={() => startLinkedInternalMeeting(meeting)}
+                                      style={{ fontSize: "12px", padding: "4px 8px" }}
+                                    >
+                                      Create linked TAK INT
+                                    </button>
+                                  ) : null}
                                 </div>
                               </div>
                               {((isAdmin || isManager) && (
@@ -12992,7 +13337,9 @@ export default function CommonViewPage() {
                 </div>
               ) : (
                 <div className="external-meeting-empty">
-                  {externalMeetingListFilter === "past"
+                  {selectedDates.size
+                    ? "No external meetings for the selected date."
+                    : externalMeetingListFilter === "past"
                     ? "No past external meetings."
                     : externalMeetingListFilter === "next"
                       ? "No upcoming external meetings."
@@ -13017,7 +13364,38 @@ export default function CommonViewPage() {
           </div>
           <div className="external-meetings-grid">
             <div className="external-meeting-form">
-              <div className="external-meeting-form-title">Add meeting</div>
+              <div className="external-meeting-form-title">
+                {internalMeetingPairExternalId ? "Add linked TAK INT" : "Add meeting"}
+              </div>
+              {internalMeetingPairExternalId ? (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "8px",
+                    marginBottom: "10px",
+                    padding: "8px 10px",
+                    border: "1px solid #bfdbfe",
+                    borderRadius: "8px",
+                    background: "#eff6ff",
+                    fontSize: "12px",
+                  }}
+                >
+                  <span>Linked with TAK EXT: {internalMeetingPairExternalTitle}</span>
+                  <button
+                    className="btn-surface"
+                    type="button"
+                    onClick={() => {
+                      setInternalMeetingPairExternalId(null)
+                      setInternalMeetingPairExternalTitle("")
+                    }}
+                    style={{ padding: "3px 7px", fontSize: "11px" }}
+                  >
+                    Remove link
+                  </button>
+                </div>
+              ) : null}
               <div className="external-meeting-fields">
                 <input
                   className="input"
@@ -14013,6 +14391,7 @@ export default function CommonViewPage() {
                             key={idx}
                             className={[
                               "week-table-entry",
+                              e.calendarImported ? outlookCategoryTone(e.calendarCategories) : "",
                               isOneTimeMeeting(e.recurrenceType ?? e.recurrence_type) ? "one-time-meeting" : "",
                             ]
                               .filter(Boolean)

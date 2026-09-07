@@ -13,33 +13,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
 from app.api.routers.microsoft import resolve_redirect_uri
+from app.config import settings
 from app.db import get_db
 from app.integrations.microsoft import (
-    compute_expires_at,
-    create_calendar_teams_event,
+    create_calendar_event,
     fetch_calendar_schedule,
-    refresh_access_token,
 )
 from app.models.meeting import Meeting, MeetingParticipant
+from app.models.enums import NotificationType, UserRole
 from app.models.meeting_schedule_request import (
     MeetingScheduleApproval,
     MeetingScheduleRequest,
     MeetingScheduleRequestParticipant,
     MeetingSchedulingStandard,
 )
-from app.models.microsoft_token import MicrosoftToken
 from app.models.user import User
 from app.schemas.meeting_scheduler import (
     MeetingScheduleApprovalOut,
     MeetingScheduleCalendarItem,
     MeetingScheduleRequestCreate,
     MeetingScheduleRequestOut,
+    MeetingScheduleRejectIn,
     MeetingScheduleValidationIn,
     MeetingScheduleValidationOut,
     MeetingSchedulingStandardCreate,
     MeetingSchedulingStandardOut,
 )
 from app.services.meeting_scheduler import meeting_occurrence_window, microsoft_schedule_conflicts, validate_meeting_schedule
+from app.services.microsoft_calendar_sync import get_shared_calendar_token
+from app.services.notifications import add_notification, publish_notification
 
 
 router = APIRouter()
@@ -106,50 +108,51 @@ async def _request_out(db: AsyncSession, row: MeetingScheduleRequest) -> Meeting
         teams_url=row.teams_url,
         final_meeting_id=row.final_meeting_id,
         last_error=row.last_error,
+        rejection_reason=row.rejection_reason,
+        rejected_by_user_id=row.rejected_by_user_id,
+        rejected_at=row.rejected_at,
         created_by_user_id=row.created_by_user_id,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
 
 
-async def _microsoft_token_for_user(
-    db: AsyncSession, *, user_id: uuid.UUID, request: Request
-) -> MicrosoftToken | None:
-    token = (
-        await db.execute(select(MicrosoftToken).where(MicrosoftToken.user_id == user_id))
-    ).scalar_one_or_none()
-    if token is None:
-        return None
-    if token.expires_at <= datetime.now(timezone.utc) + timedelta(seconds=30):
-        token_data = await refresh_access_token(token.refresh_token, resolve_redirect_uri(request))
-        token.access_token = token_data["access_token"]
-        if token_data.get("refresh_token"):
-            token.refresh_token = token_data["refresh_token"]
-        token.scope = token_data.get("scope")
-        token.expires_at = compute_expires_at(int(token_data.get("expires_in", 3600)))
-        await db.flush()
-    return token
-
-
 async def _with_microsoft_validation(
     db: AsyncSession,
     *,
     payload: MeetingScheduleValidationIn | MeetingScheduleRequestCreate,
-    current_user_id: uuid.UUID,
     request: Request,
     validation: MeetingScheduleValidationOut,
 ) -> MeetingScheduleValidationOut:
     try:
-        token = await _microsoft_token_for_user(db, user_id=current_user_id, request=request)
+        token = await get_shared_calendar_token(db, redirect_uri=resolve_redirect_uri(request))
     except httpx.HTTPError:
         token = None
     if token is None:
+        if payload.meeting_type == "external":
+            return validation.model_copy(
+                update={
+                    "can_create": False,
+                    "errors": [
+                        *validation.errors,
+                        "Kalendari qendror Microsoft nuk është lidhur. TAK EXT nuk mund të dërgohet për aprovim.",
+                    ],
+                }
+            )
         return validation.model_copy(
-            update={"warnings": [*validation.warnings, "Microsoft nuk është lidhur; free/busy nuk u kontrollua."]}
+            update={
+                "warnings": [
+                    *validation.warnings,
+                    "Kalendari qendror Microsoft nuk është lidhur; free/busy nuk u kontrollua.",
+                ]
+            }
         )
     emails = list(
         (await db.execute(select(User.email).where(User.id.in_(payload.participant_ids)))).scalars().all()
     )
+    if payload.meeting_type == "external":
+        emails.append(settings.MS_ORGANIZER_EMAIL)
+    emails = list(dict.fromkeys(email.strip().casefold() for email in emails if email and email.strip()))
     buffer_minutes = 0
     if payload.standard_id is not None:
         standard = (
@@ -166,6 +169,16 @@ async def _with_microsoft_validation(
             schedule, starts_at=checked_start, ends_at=checked_end
         )
     except httpx.HTTPError:
+        if payload.meeting_type == "external":
+            return validation.model_copy(
+                update={
+                    "can_create": False,
+                    "errors": [
+                        *validation.errors,
+                        "Microsoft Calendar nuk është i disponueshëm. TAK EXT nuk mund të dërgohet për aprovim.",
+                    ],
+                }
+            )
         return validation.model_copy(
             update={"warnings": [*validation.warnings, "Microsoft free/busy nuk mundi të kontrollohej."]}
         )
@@ -174,7 +187,7 @@ async def _with_microsoft_validation(
     return validation.model_copy(
         update={
             "can_create": False,
-            "errors": [*validation.errors, "Microsoft Calendar tregon se një pjesëmarrës është i zënë."],
+            "errors": [*validation.errors, "Intervali është i zënë në Microsoft Calendar."],
             "conflicts": [*validation.conflicts, *microsoft_conflicts],
         }
     )
@@ -223,7 +236,6 @@ async def validate_slot(
     return await _with_microsoft_validation(
         db,
         payload=payload,
-        current_user_id=user.id,
         request=request,
         validation=validation,
     )
@@ -239,7 +251,7 @@ async def create_request(
     ensure_department_access(user, payload.department_id)
     validation = await validate_meeting_schedule(db, payload)
     validation = await _with_microsoft_validation(
-        db, payload=payload, current_user_id=user.id, request=request, validation=validation
+        db, payload=payload, request=request, validation=validation
     )
     if not validation.can_create:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=validation.model_dump(mode="json"))
@@ -254,8 +266,32 @@ async def create_request(
     await db.flush()
     for participant_id in dict.fromkeys(payload.participant_ids):
         db.add(MeetingScheduleRequestParticipant(request_id=row.id, user_id=participant_id))
+    approvers = list(
+        (
+            await db.execute(
+                select(User).where(
+                    User.is_active.is_(True),
+                    User.role.in_([UserRole.ADMIN, UserRole.MANAGER]),
+                    User.id != user.id,
+                )
+            )
+        ).scalars().all()
+    )
+    notifications = [
+        add_notification(
+            db=db,
+            user_id=approver.id,
+            type=NotificationType.assignment,
+            title="Meeting request waiting for approval",
+            body=f'{user.full_name or user.username or user.email} requested "{row.title}".',
+            data={"href": "/meeting-scheduler", "meeting_request_id": str(row.id)},
+        )
+        for approver in approvers
+    ]
     await db.commit()
     await db.refresh(row)
+    for approver, notification in zip(approvers, notifications):
+        await publish_notification(user_id=approver.id, notification=notification)
     return await _request_out(db, row)
 
 
@@ -304,7 +340,6 @@ async def _provision_request(
     validation = await _with_microsoft_validation(
         db,
         payload=payload,
-        current_user_id=row.created_by_user_id,
         request=request,
         validation=validation,
     )
@@ -317,48 +352,13 @@ async def _provision_request(
     teams_url = None
     microsoft_event_id = None
     if row.meeting_type == "external":
-        try:
-            token = await _microsoft_token_for_user(db, user_id=row.created_by_user_id, request=request)
-        except httpx.HTTPError:
-            token = None
-        if token is None:
-            row.status = "CREATION_FAILED"
-            row.last_error = "Krijuesi duhet ta lidhë Microsoft account para krijimit në Teams."
+        await _provision_external_calendar_event(db, row=row, request=request, participant_ids=participant_ids)
+        if row.status == "CREATION_FAILED":
             return
-        participants = (
-            await db.execute(select(User).where(User.id.in_(participant_ids)))
-        ).scalars().all()
-        attendee_map = {
-            user.email.casefold(): {"email": user.email, "name": user.full_name}
-            for user in participants
-            if user.email
-        }
-        if row.client_email:
-            attendee_map[row.client_email.casefold()] = {
-                "email": row.client_email,
-                "name": row.client_name or row.client_email,
-            }
-        row.status = "CREATING_TEAMS"
-        try:
-            event = await create_calendar_teams_event(
-                token.access_token,
-                subject=row.title,
-                start=row.starts_at,
-                end=row.ends_at,
-                attendees=list(attendee_map.values()),
-                body_html=f"<p>{escape(row.notes or '')}</p>",
-                transaction_id=str(row.id),
-            )
-        except httpx.HTTPStatusError as exc:
-            row.status = "CREATION_FAILED"
-            row.last_error = f"Microsoft Graph returned {exc.response.status_code}. Reconnect Microsoft and retry."
-            return
-        except httpx.HTTPError as exc:
-            row.status = "CREATION_FAILED"
-            row.last_error = f"Microsoft Graph connection failed: {exc.__class__.__name__}"
-            return
-        microsoft_event_id = str(event.get("id") or "") or None
-        teams_url = (event.get("onlineMeeting") or {}).get("joinUrl") or event.get("onlineMeetingUrl")
+        # The helper stores the Graph result temporarily on the request so the
+        # local TAK EXT row and the imported calendar row share the same ID.
+        microsoft_event_id = row.microsoft_event_id
+        teams_url = row.teams_url
 
     meeting = Meeting(
         title=row.title,
@@ -376,11 +376,61 @@ async def _provision_request(
     await db.flush()
     for participant_id in participant_ids:
         db.add(MeetingParticipant(meeting_id=meeting.id, user_id=participant_id))
-    row.microsoft_event_id = microsoft_event_id
-    row.teams_url = teams_url
     row.final_meeting_id = meeting.id
     row.status = "CREATED"
     row.last_error = None
+
+
+async def _provision_external_calendar_event(
+    db: AsyncSession,
+    *,
+    row: MeetingScheduleRequest,
+    request: Request,
+    participant_ids: list[uuid.UUID],
+) -> None:
+    try:
+        token = await get_shared_calendar_token(db, redirect_uri=resolve_redirect_uri(request))
+    except httpx.HTTPError:
+        token = None
+    if token is None:
+        row.status = "CREATION_FAILED"
+        row.last_error = "Administratori duhet ta lidhë calendar-in info@primexeu.com para krijimit të takimit."
+        return
+    participants = (
+        await db.execute(select(User).where(User.id.in_(participant_ids)))
+    ).scalars().all()
+    attendee_map = {
+        user.email.casefold(): {"email": user.email, "name": user.full_name}
+        for user in participants
+        if user.email
+    }
+    if row.client_email:
+        attendee_map[row.client_email.casefold()] = {
+            "email": row.client_email,
+            "name": row.client_name or row.client_email,
+        }
+    row.status = "CREATING_TEAMS"
+    try:
+        event = await create_calendar_event(
+            token.access_token,
+            subject=row.title,
+            start=row.starts_at,
+            end=row.ends_at,
+            attendees=list(attendee_map.values()),
+            body_html=f"<p>{escape(row.notes or '')}</p>",
+            transaction_id=str(row.id),
+            create_online_meeting=True,
+        )
+    except httpx.HTTPStatusError as exc:
+        row.status = "CREATION_FAILED"
+        row.last_error = f"Microsoft Graph returned {exc.response.status_code}. Reconnect Microsoft and retry."
+        return
+    except httpx.HTTPError as exc:
+        row.status = "CREATION_FAILED"
+        row.last_error = f"Microsoft Graph connection failed: {exc.__class__.__name__}"
+        return
+    row.microsoft_event_id = str(event.get("id") or "") or None
+    row.teams_url = (event.get("onlineMeeting") or {}).get("joinUrl") or event.get("onlineMeetingUrl")
 
 
 @router.post("/requests/{request_id}/approve", response_model=MeetingScheduleRequestOut)
@@ -400,6 +450,11 @@ async def approve_request(
         raise HTTPException(status_code=404, detail="Meeting request not found")
     if row.status in {"CREATED", "REJECTED", "CANCELED"}:
         raise HTTPException(status_code=409, detail=f"Request is already {row.status.lower()}")
+    if row.created_by_user_id == user.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The request creator cannot approve their own meeting request",
+        )
     ensure_department_access(user, row.department_id)
     existing = (
         await db.execute(
@@ -424,8 +479,21 @@ async def approve_request(
     if approval_count >= APPROVALS_REQUIRED and row.status != "CREATED":
         row.status = "APPROVED"
         await _provision_request(db, row=row, request=request)
+    notification = add_notification(
+        db=db,
+        user_id=row.created_by_user_id,
+        type=NotificationType.status_change,
+        title=("Meeting created" if row.status == "CREATED" else "Meeting request approved"),
+        body=(
+            f'"{row.title}" was created after two approvals.'
+            if row.status == "CREATED"
+            else f'"{row.title}" now has {approval_count}/{APPROVALS_REQUIRED} approvals.'
+        ),
+        data={"href": "/meeting-scheduler", "meeting_request_id": str(row.id)},
+    )
     await db.commit()
     await db.refresh(row)
+    await publish_notification(user_id=row.created_by_user_id, notification=notification)
     return await _request_out(db, row)
 
 
@@ -454,6 +522,7 @@ async def retry_request(
 @router.post("/requests/{request_id}/reject", response_model=MeetingScheduleRequestOut)
 async def reject_request(
     request_id: uuid.UUID,
+    payload: MeetingScheduleRejectIn,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> MeetingScheduleRequestOut:
@@ -465,9 +534,21 @@ async def reject_request(
         raise HTTPException(status_code=409, detail="Created meetings cannot be rejected")
     ensure_department_access(user, row.department_id)
     row.status = "REJECTED"
+    row.rejection_reason = payload.reason.strip()
+    row.rejected_by_user_id = user.id
+    row.rejected_at = datetime.now(timezone.utc)
     await db.execute(delete(MeetingScheduleApproval).where(MeetingScheduleApproval.request_id == row.id))
+    notification = add_notification(
+        db=db,
+        user_id=row.created_by_user_id,
+        type=NotificationType.status_change,
+        title="Meeting request rejected",
+        body=f'"{row.title}" was rejected: {row.rejection_reason}',
+        data={"href": "/meeting-scheduler", "meeting_request_id": str(row.id)},
+    )
     await db.commit()
     await db.refresh(row)
+    await publish_notification(user_id=row.created_by_user_id, notification=notification)
     return await _request_out(db, row)
 
 
@@ -514,6 +595,7 @@ async def calendar_items(
                     id=f"{meeting.id}:{window[0].date().isoformat()}", source="meeting", title=meeting.title,
                     meeting_type=meeting.meeting_type, starts_at=window[0], ends_at=window[1], status="CREATED",
                     participant_ids=[], teams_url=meeting.meeting_url,
+                    microsoft_event_id=meeting.microsoft_event_id,
                 )
             )
         day_cursor += timedelta(days=1)
@@ -525,6 +607,7 @@ async def calendar_items(
                 id=str(row.id), source="request", title=row.title, meeting_type=row.meeting_type,
                 starts_at=row.starts_at, ends_at=row.ends_at, status=row.status,
                 participant_ids=await _participant_ids(db, row.id), teams_url=row.teams_url,
+                microsoft_event_id=row.microsoft_event_id,
             )
         )
     return sorted(result, key=lambda item: item.starts_at)

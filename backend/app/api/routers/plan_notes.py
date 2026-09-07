@@ -103,6 +103,7 @@ def _note_out(note: PlanNote) -> PlanNoteOut:
         project_id=note.project_id,
         department_id=note.department_id,
         planned_for_date=note.planned_for_date,
+        planning_brief=note.planning_brief,
         created_at=note.created_at,
         updated_at=note.updated_at,
         attachments=[_attachment_out(a) for a in (note.attachments or [])],
@@ -273,6 +274,7 @@ async def create_plan_note(
         project_id=payload.project_id,
         department_id=department_id,
         planned_for_date=payload.planned_for_date,
+        planning_brief=(payload.planning_brief.model_dump(mode="json") if payload.planning_brief else None),
     )
     db.add(note)
     await db.commit()
@@ -293,6 +295,7 @@ async def update_plan_note(
     await _ensure_note_access(note, user, db)
 
     old_content = note.content
+    old_planning_brief = note.planning_brief
     update_data = payload.model_dump(exclude_unset=True)
 
     if "content" in update_data:
@@ -314,6 +317,47 @@ async def update_plan_note(
         note.next_week = bool(update_data["next_week"])
     if "planned_for_date" in update_data:
         note.planned_for_date = update_data["planned_for_date"]
+    planning_brief_changed = "planning_brief" in update_data and update_data["planning_brief"] != old_planning_brief
+    if "planning_brief" in update_data:
+        brief = payload.planning_brief
+        note.planning_brief = brief.model_dump(mode="json") if brief else None
+
+    planning_notifications = []
+    if planning_brief_changed:
+        add_audit_log(
+            db=db,
+            actor_user_id=user.id,
+            entity_type="plan_note",
+            entity_id=note.id,
+            action="planning_brief_updated",
+            before=old_planning_brief,
+            after=note.planning_brief,
+        )
+        assigned_tasks = (
+            await db.execute(
+                select(Task.id, Task.assigned_to)
+                .where(Task.plan_note_origin_id == note.id)
+                .where(Task.is_active.is_(True))
+                .where(Task.assigned_to.is_not(None))
+            )
+        ).all()
+        notified_user_ids = set()
+        for task_id, assigned_user_id in assigned_tasks:
+            if assigned_user_id in notified_user_ids:
+                continue
+            notified_user_ids.add(assigned_user_id)
+            if assigned_user_id == user.id:
+                continue
+            planning_notifications.append(
+                add_notification(
+                    db=db,
+                    user_id=assigned_user_id,
+                    type=NotificationType.status_change,
+                    title="PX JAV planning updated",
+                    body=notification_task_preview(note.content),
+                    data={"task_id": str(task_id), "plan_note_id": str(note.id)},
+                )
+            )
 
     if "content" in update_data and update_data["content"] != old_content:
         new_task_title = _plan_note_task_title(note.content)
@@ -344,6 +388,11 @@ async def update_plan_note(
                 )
 
     await db.commit()
+    for notification in planning_notifications:
+        try:
+            await publish_notification(user_id=notification.user_id, notification=notification)
+        except Exception:
+            pass
     await db.refresh(note)
     return _note_out(note)
 

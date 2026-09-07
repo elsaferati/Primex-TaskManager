@@ -109,9 +109,6 @@ async def validate_meeting_schedule(
             errors.append("Standardi nuk përputhet me llojin e takimit.")
 
     if standard is not None:
-        prefix = (standard.title_prefix or "").strip()
-        if prefix and not payload.title.strip().casefold().startswith(prefix.casefold()):
-            errors.append(f'Titulli duhet të fillojë me "{prefix}".')
         tz = _app_timezone()
         local_start = starts_at.astimezone(tz)
         local_end = ends_at.astimezone(tz)
@@ -148,16 +145,39 @@ async def validate_meeting_schedule(
     for meeting, participant_id in meeting_rows:
         meetings[meeting.id] = meeting
         meeting_participants.setdefault(meeting.id, set()).add(participant_id)
+
+    # A single shared organizer cannot host overlapping TAK EXT meetings.
+    # Check every TAK EXT, regardless of whether participants overlap.
+    if payload.meeting_type == "external":
+        external_meetings = (
+            await db.execute(
+                select(Meeting).where(
+                    Meeting.meeting_type == "external",
+                    Meeting.starts_at.is_not(None),
+                    or_(
+                        Meeting.calendar_sync_status.is_(None),
+                        Meeting.calendar_sync_status != "cancelled",
+                    ),
+                )
+            )
+        ).scalars().all()
+        for external_meeting in external_meetings:
+            meetings.setdefault(external_meeting.id, external_meeting)
+
     for meeting_id, meeting in meetings.items():
         window = meeting_occurrence_window(meeting, starts_at)
         if window and _overlaps(conflict_window_start, conflict_window_end, *window):
             conflicts.append(
                 MeetingScheduleConflict(
-                    source="primeflow",
+                    source=(
+                        "tak_ext"
+                        if payload.meeting_type == "external" and meeting.meeting_type == "external"
+                        else "primeflow"
+                    ),
                     title=meeting.title,
                     starts_at=window[0],
                     ends_at=window[1],
-                    participant_ids=sorted(meeting_participants[meeting_id], key=str),
+                    participant_ids=sorted(meeting_participants.get(meeting_id, set()), key=str),
                 )
             )
 
@@ -182,18 +202,54 @@ async def validate_meeting_schedule(
     for request_row, participant_id in request_rows:
         requests[request_row.id] = request_row
         request_participants.setdefault(request_row.id, set()).add(participant_id)
+
+    # Pending TAK EXT requests also reserve their interval. Otherwise two
+    # requests with different participants could both reach approval.
+    if payload.meeting_type == "external":
+        external_request_stmt = (
+            select(MeetingScheduleRequest)
+            .where(MeetingScheduleRequest.meeting_type == "external")
+            .where(MeetingScheduleRequest.status.in_(ACTIVE_REQUEST_STATUSES))
+            .where(
+                MeetingScheduleRequest.starts_at < conflict_window_end,
+                MeetingScheduleRequest.ends_at > conflict_window_start,
+            )
+        )
+        if exclude_request_id is not None:
+            external_request_stmt = external_request_stmt.where(
+                MeetingScheduleRequest.id != exclude_request_id
+            )
+        external_requests = (await db.execute(external_request_stmt)).scalars().all()
+        for external_request in external_requests:
+            requests.setdefault(external_request.id, external_request)
+
     for request_id, request_row in requests.items():
         conflicts.append(
             MeetingScheduleConflict(
-                source="request",
+                source=(
+                    "tak_ext_request"
+                    if payload.meeting_type == "external" and request_row.meeting_type == "external"
+                    else "request"
+                ),
                 title=request_row.title,
                 starts_at=request_row.starts_at,
                 ends_at=request_row.ends_at,
-                participant_ids=sorted(request_participants[request_id], key=str),
+                participant_ids=sorted(request_participants.get(request_id, set()), key=str),
             )
         )
 
-    if conflicts:
+    external_conflict = next(
+        (conflict for conflict in conflicts if conflict.source in {"tak_ext", "tak_ext_request"}),
+        None,
+    )
+    if external_conflict is not None:
+        conflict_start = external_conflict.starts_at.astimezone(_app_timezone()).strftime("%d.%m.%Y %H:%M")
+        conflict_end = external_conflict.ends_at.astimezone(_app_timezone()).strftime("%H:%M")
+        errors.append(
+            f'Nuk mund të krijohet TAK EXT. Intervali konflikton me "{external_conflict.title}" '
+            f'({conflict_start}–{conflict_end}).'
+        )
+    elif conflicts:
         errors.append("Një ose më shumë pjesëmarrës janë të zënë në këtë orar.")
 
     return MeetingScheduleValidationOut(

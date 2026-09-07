@@ -100,7 +100,13 @@ jobs:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           REPORT_STORAGE_DIR: ${{ vars.REPORT_STORAGE_DIR }}
+          MS_CLIENT_ID: ${{ vars.MS_CLIENT_ID || secrets.MS_CLIENT_ID }}
+          MS_TENANT_ID: ${{ vars.MS_TENANT_ID || secrets.MS_TENANT_ID }}
+          MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
         run: |
+          if not defined MS_CLIENT_ID (echo ::error::MS_CLIENT_ID is missing from GitHub Actions Variables or Secrets & exit /b 1)
+          if not defined MS_TENANT_ID (echo ::error::MS_TENANT_ID is missing from GitHub Actions Variables or Secrets & exit /b 1)
+          if not defined MS_CLIENT_SECRET (echo ::error::MS_CLIENT_SECRET is missing from GitHub Actions Secrets & exit /b 1)
           echo NEXT_PUBLIC_API_BASE_URL=https://api-flow.primexeu.com > frontend\.env.local
           echo DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus > backend\.env
           echo DB_POOL_SIZE=20 >> backend\.env
@@ -113,6 +119,13 @@ jobs:
           echo APP_TIMEZONE=Europe/Budapest >> backend\.env
           echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend\.env
           echo FRONTEND_URL=https://primeflow.primexeu.com >> backend\.env
+          echo MS_CLIENT_ID=%MS_CLIENT_ID% >> backend\.env
+          echo MS_TENANT_ID=%MS_TENANT_ID% >> backend\.env
+          echo MS_CLIENT_SECRET=%MS_CLIENT_SECRET% >> backend\.env
+          echo MS_REDIRECT_URI=https://api-flow.primexeu.com/api/microsoft/callback >> backend\.env
+          echo MS_ORGANIZER_EMAIL=info@primexeu.com >> backend\.env
+          echo MS_CALENDAR_SYNC_PAST_DAYS=0 >> backend\.env
+          echo MS_CALENDAR_SYNC_FUTURE_DAYS=14 >> backend\.env
           echo DEVELOPMENT_CLIENTS_PATH=\\192.168.10.8\Files\10_ZHVILLIM\05_CLIENTS >> backend\.env
           echo PRODUCT_CLIENTS_PATH=\\192.168.10.8\Klientat\05_CLIENTS >> backend\.env
           echo PRIMEFLOW_API_BASE_URL=https://api-flow.primexeu.com >> backend\.env
@@ -383,6 +396,10 @@ jobs:
           $env:REDIS_ENABLED = "false"
           $env:REDIS_URL = "redis://127.0.0.1:6379/0"
           $env:APP_TIMEZONE = "Europe/Budapest"
+          # The primary API on port 8000 exclusively owns the shared Outlook
+          # calendar scheduler. Running it here as well causes duplicate imports
+          # and competing long-lived database work.
+          $env:MS_CALENDAR_SYNC_ENABLED = "false"
           $env:APP_BUILD_SHA = "${{ github.sha }}"
           $env:RUNNER_TRACKING_ID = ""
           cmd /c "pm2 start `"$python`" --name $processName --cwd `"$PWD`" -- -m uvicorn app.main:app --host 0.0.0.0 --port $port --timeout-keep-alive 15 --backlog 2048"

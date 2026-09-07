@@ -21,7 +21,7 @@ import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
-import type { Department, PlanNote, PlanNoteAttachment, Project, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
+import type { Department, PlanNote, PlanNoteAttachment, Project, PxJavPlanningBrief, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
@@ -75,6 +75,30 @@ type ContentFilter = "all" | "emails"
 type NextWeekFilter = "all" | "checked" | "unchecked"
 type TextMarkRange = { start: number; end: number }
 type DoneMarkRange = TextMarkRange
+type PlanningTextField = "dl" | "dg_kush" | "kush" | "sq"
+function planningBriefProgress(brief?: PxJavPlanningBrief | null) {
+  if (!brief) return 0
+  return [
+    Boolean(brief.dl?.trim()),
+    typeof brief.dg === "boolean" && (!brief.dg || Boolean(brief.dg_kush?.trim())),
+    Boolean(brief.hapat?.trim()),
+    Boolean(brief.kush?.trim()),
+    Boolean(brief.sq?.trim()),
+  ].filter(Boolean).length
+}
+
+function planningBriefDraft(brief?: PxJavPlanningBrief | null): PxJavPlanningBrief {
+  return {
+    dl: brief?.dl || "",
+    dg: typeof brief?.dg === "boolean" ? brief.dg : null,
+    dg_kush: brief?.dg_kush || "",
+    dg_kush_user_ids: brief?.dg_kush_user_ids || [],
+    hapat: brief?.hapat || "",
+    kush: brief?.kush || "",
+    kush_user_ids: brief?.kush_user_ids || [],
+    sq: brief?.sq || "",
+  }
+}
 type NoteTaskInfo = {
   assignees: TaskAssignee[]
   description: string | null
@@ -861,6 +885,8 @@ export default function NextWeekPlanPage() {
   const [noteTaskInfo, setNoteTaskInfo] = React.useState<Map<string, NoteTaskInfo>>(new Map())
   const [savingCommentIds, setSavingCommentIds] = React.useState<Record<string, boolean>>({})
   const [savingNextWeekIds, setSavingNextWeekIds] = React.useState<Record<string, boolean>>({})
+  const [savingPlanningIds, setSavingPlanningIds] = React.useState<Record<string, boolean>>({})
+  const planningSaveVersionsRef = React.useRef<Map<string, number>>(new Map())
   const [editNoteId, setEditNoteId] = React.useState<string | null>(null)
   const [editContent, setEditContent] = React.useState("")
   const [editDoneRanges, setEditDoneRanges] = React.useState<DoneMarkRange[]>([])
@@ -887,6 +913,109 @@ export default function NextWeekPlanPage() {
   const [internalMeetingTaskStartsAt, setInternalMeetingTaskStartsAt] = React.useState("")
   const [creatingInternalMeetingFromTask, setCreatingInternalMeetingFromTask] = React.useState(false)
   const internalMeetingDepartmentIdRef = React.useRef<string | null>(null)
+
+  const savePlanningBrief = React.useCallback(async (
+    noteId: string,
+    brief: PxJavPlanningBrief,
+    previousBrief: PxJavPlanningBrief | null,
+  ) => {
+    const version = (planningSaveVersionsRef.current.get(noteId) || 0) + 1
+    planningSaveVersionsRef.current.set(noteId, version)
+    setSavingPlanningIds((current) => ({ ...current, [noteId]: true }))
+    try {
+      const hasAnswer = Boolean(
+        brief.dl?.trim() ||
+        typeof brief.dg === "boolean" ||
+        brief.hapat?.trim() ||
+        brief.kush?.trim() ||
+        brief.sq?.trim()
+      )
+      const res = await apiFetch(`/plan-notes/${noteId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          planning_brief: hasAnswer
+            ? {
+                dl: brief.dl?.trim() || null,
+                dg: typeof brief.dg === "boolean" ? brief.dg : null,
+                dg_kush: brief.dg === true ? brief.dg_kush?.trim() || null : null,
+                dg_kush_user_ids: brief.dg === true ? brief.dg_kush_user_ids || [] : [],
+                hapat: brief.hapat?.trim() || null,
+                kush: brief.kush?.trim() || null,
+                kush_user_ids: brief.kush_user_ids || [],
+                sq: brief.sq?.trim() || null,
+              }
+            : null,
+        }),
+      })
+      if (!res?.ok) {
+        let message = "Planifikimi nuk u ruajt"
+        try {
+          const payload = (await res?.json()) as { detail?: string }
+          if (payload?.detail) message = payload.detail
+        } catch {
+          // Keep fallback message.
+        }
+        throw new Error(message)
+      }
+
+      const updated = (await res.json()) as PlanNote
+      if (planningSaveVersionsRef.current.get(noteId) === version) {
+        setNotes((current) => current.map((note) => (note.id === updated.id ? updated : note)))
+      }
+    } catch (error) {
+      if (planningSaveVersionsRef.current.get(noteId) === version) {
+        setNotes((current) => current.map((note) => (
+          note.id === noteId ? { ...note, planning_brief: previousBrief } : note
+        )))
+      }
+      toast.error(error instanceof Error ? error.message : "Planifikimi nuk u ruajt")
+    } finally {
+      if (planningSaveVersionsRef.current.get(noteId) === version) {
+        setSavingPlanningIds((current) => {
+          const next = { ...current }
+          delete next[noteId]
+          return next
+        })
+      }
+    }
+  }, [apiFetch])
+
+  const updatePlanningBriefDraft = React.useCallback((
+    noteId: string,
+    patch: Partial<PxJavPlanningBrief>,
+  ) => {
+    setNotes((current) => current.map((item) => (
+      item.id === noteId
+        ? { ...item, planning_brief: { ...planningBriefDraft(item.planning_brief), ...patch } }
+        : item
+    )))
+  }, [])
+
+  const savePlanningInput = React.useCallback((
+    note: PlanNote,
+    field: PlanningTextField,
+    value: string,
+    previousBriefJson: string,
+  ) => {
+    let previousBrief: PxJavPlanningBrief | null = null
+    try {
+      previousBrief = JSON.parse(previousBriefJson) as PxJavPlanningBrief | null
+    } catch {
+      previousBrief = note.planning_brief ?? null
+    }
+
+    const previousValue = planningBriefDraft(previousBrief)[field] || ""
+    if (value.trim() === previousValue.trim()) return
+
+    const nextBrief = {
+      ...planningBriefDraft(note.planning_brief),
+      [field]: value,
+      ...(field === "dg_kush" ? { dg_kush_user_ids: [] } : {}),
+      ...(field === "kush" ? { kush_user_ids: [] } : {}),
+    }
+    void savePlanningBrief(note.id, nextBrief, previousBrief)
+  }, [savePlanningBrief])
 
   const loadDepartments = React.useCallback(async () => {
     const res = await apiFetch("/departments")
@@ -2677,6 +2806,7 @@ export default function NextWeekPlanPage() {
                 
                 // Clone the table and clean up React-specific attributes
                 const clonedTable = table.cloneNode(true) as HTMLElement
+                clonedTable.querySelectorAll('[data-planning-editor="true"]').forEach((row) => row.remove())
                 const allElements = clonedTable.querySelectorAll('*')
                 allElements.forEach((el) => {
                   // Remove React event handlers and other attributes
@@ -2924,20 +3054,19 @@ export default function NextWeekPlanPage() {
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           ) : (
             <div className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full">
-              <div className="w-full min-w-[1220px] sm:min-w-[1280px]">
-                <table className="w-full table-fixed caption-bottom text-sm min-w-[1220px] sm:min-w-[1280px]">
+              <div className="w-full min-w-[1480px] sm:min-w-[1560px]">
+                <table className="w-full table-fixed caption-bottom text-sm min-w-[1480px] sm:min-w-[1560px]">
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
                       <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NR</th>
                       <th className="min-w-[300px] w-[300px] max-w-[300px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
+                      <th className="min-w-[320px] w-[320px] max-w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PLANIFIKIM</th>
                       <th className="min-w-[180px] w-[180px] max-w-[180px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KOMENT</th>
                       <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Diskutuar YES/JO?">DISK</th>
                       <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-1 text-center align-middle font-medium whitespace-normal leading-tight text-xs" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>JAV TJT?</th>
                       <th className="w-[96px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
                       <th className="w-[44px] min-w-[44px] max-w-[44px] border border-slate-600 bg-white text-foreground h-10 px-1 text-center align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NGA</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PER</th>
-                      <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DEP</th>
-                      <th className="w-[62px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PRJK</th>
                       <th className="min-w-[76px] w-[76px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Linked task start date">START</th>
                       <th className="w-[90px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DET</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>INT</th>
@@ -2957,16 +3086,11 @@ export default function NextWeekPlanPage() {
                           ? "bg-blue-100 text-blue-800 border border-blue-200"
                           : "bg-slate-200 text-slate-700"
                     const noteDepartment = note.department_id ? departmentMap.get(note.department_id) : null
-                    const noteProject = note.project_id ? projectMap.get(note.project_id) : null
                     const taskInfo = noteTaskInfo.get(note.id)
                     const taskDepartment = taskInfo?.taskDepartmentId
                       ? departmentMap.get(taskInfo.taskDepartmentId)
                       : null
-                    const taskProject = taskInfo?.taskProjectId
-                      ? projectMap.get(taskInfo.taskProjectId)
-                      : null
                     const displayDepartment = noteDepartment || taskDepartment
-                    const displayProject = noteProject || taskProject
                     const projectId = note.project_id || taskInfo?.taskProjectId || null
                     const project = projectId ? projectMap.get(projectId) : null
                     const projectDepartment = project?.department_id
@@ -3015,22 +3139,28 @@ export default function NextWeekPlanPage() {
                                 : "bg-slate-100"
                         : "bg-sky-200"
 
-                    // Only show department if:
-                    // 1. Note has a project (always show projects)
-                    // 2. We're currently filtering by department/project (on a specific page)
-                    // 3. Note's department_id is different from user's department (explicitly set, not auto-assigned)
-                    const isFilteredView = departmentId !== "ALL" || projectId !== "NONE"
-                    const isExplicitDepartment = note.department_id && note.department_id !== user?.department_id
-                    const shouldShowDepartment = displayDepartment && (displayProject || isFilteredView || isExplicitDepartment)
                     const mobileDeptAbbrev = displayDepartment ? abbreviateDepartmentName(displayDepartment.name) : null
                     const showMobileDeptBadge =
                       mobileDeptAbbrev === "DEV" || mobileDeptAbbrev === "GDS" || mobileDeptAbbrev === "PCM"
                     const commentValue = note.comment ?? ""
                     const isSavingComment = Boolean(savingCommentIds[note.id])
                     const isSavingNextWeek = Boolean(savingNextWeekIds[note.id])
+                    const isSavingPlanning = Boolean(savingPlanningIds[note.id])
+                    const planningNames = (ids?: string[], fallback?: string | null) => {
+                      const names = (ids || []).map((id) => {
+                        const person = users.find((item) => item.id === id)
+                        return person?.full_name || person?.username || id
+                      })
+                      return names.length
+                        ? names.join(", ")
+                        : fallback !== undefined && fallback !== null
+                          ? fallback
+                          : "—"
+                    }
 
                     return (
-                      <tr key={note.id} className="hover:bg-muted/50 border-b transition-colors">
+                      <React.Fragment key={note.id}>
+                      <tr className="hover:bg-muted/50 border-b transition-colors">
                         <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>{idx + 1}</td>
                         <td className={`min-w-[300px] w-[300px] max-w-[300px] whitespace-pre-wrap break-words border border-slate-600 p-2 align-middle ${shenimiCellClass}`} style={{ verticalAlign: 'bottom' }}>
                           <div className="flex flex-col gap-1">
@@ -3202,8 +3332,112 @@ export default function NextWeekPlanPage() {
                                   Closed
                                 </Badge>
                               ) : null}
-
-
+                            </div>
+                          </div>
+                        </td>
+                        <td className="relative min-w-[320px] w-[320px] max-w-[320px] border border-slate-600 p-0.5 align-top">
+                          {savingPlanningIds[note.id] ? (
+                            <span className="absolute right-1 top-0.5 z-10 text-[9px] font-medium text-violet-600">Duke ruajtur...</span>
+                          ) : null}
+                          <div className="divide-y overflow-hidden rounded border border-slate-200 bg-white">
+                            <div className="grid min-h-6 grid-cols-[44px_minmax(0,1fr)]">
+                              <label htmlFor={`planning-dl-${note.id}`} className="bg-slate-50 px-1 py-0.5 text-[10px] font-semibold">DL</label>
+                              <Input
+                                id={`planning-dl-${note.id}`}
+                                value={note.planning_brief?.dl || ""}
+                                onFocus={(event) => { event.currentTarget.dataset.previousBrief = JSON.stringify(note.planning_brief ?? null) }}
+                                onChange={(event) => updatePlanningBriefDraft(note.id, { dl: event.target.value })}
+                                onBlur={(event) => savePlanningInput(note, "dl", event.currentTarget.value, event.currentTarget.dataset.previousBrief ?? "null")}
+                                onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur() }}
+                                disabled={isClosed || isSavingPlanning}
+                                className="h-6 rounded-none border-0 px-1.5 text-[11px] shadow-none focus-visible:ring-1"
+                              />
+                            </div>
+                            <div className="grid min-h-6 grid-cols-[44px_minmax(0,1fr)]">
+                              <label className="bg-slate-50 px-1 py-0.5 text-[10px] font-semibold">DG</label>
+                              <div className="flex min-w-0 items-center gap-1 p-0.5">
+                                <Select
+                                  value={typeof note.planning_brief?.dg !== "boolean" ? "__unset__" : note.planning_brief.dg ? "yes" : "no"}
+                                  onValueChange={(value) => {
+                                    const previousBrief = note.planning_brief ? planningBriefDraft(note.planning_brief) : null
+                                    const nextBrief = {
+                                      ...planningBriefDraft(note.planning_brief),
+                                      dg: value === "__unset__" ? null : value === "yes",
+                                      dg_kush: value === "yes" ? note.planning_brief?.dg_kush || "" : "",
+                                      dg_kush_user_ids: value === "yes" ? note.planning_brief?.dg_kush_user_ids || [] : [],
+                                    }
+                                    updatePlanningBriefDraft(note.id, nextBrief)
+                                    void savePlanningBrief(note.id, nextBrief, previousBrief)
+                                  }}
+                                  disabled={isClosed || isSavingPlanning}
+                                >
+                                  <SelectTrigger className="h-6 w-[82px] shrink-0 px-2 text-[10px]"><SelectValue /></SelectTrigger>
+                                  <SelectContent><SelectItem value="__unset__">—</SelectItem><SelectItem value="no">Jo</SelectItem><SelectItem value="yes">Po</SelectItem></SelectContent>
+                                </Select>
+                                {note.planning_brief?.dg === true ? (
+                                  <div className="flex min-w-0 flex-1 items-center gap-1">
+                                    <span className="shrink-0 text-[10px] font-semibold text-slate-600">KUSH:</span>
+                                    <Input
+                                      value={note.planning_brief.dg_kush || planningNames(note.planning_brief.dg_kush_user_ids, "")}
+                                      onFocus={(event) => { event.currentTarget.dataset.previousBrief = JSON.stringify(note.planning_brief ?? null) }}
+                                      onChange={(event) => updatePlanningBriefDraft(note.id, { dg_kush: event.target.value, dg_kush_user_ids: [] })}
+                                      onBlur={(event) => savePlanningInput(note, "dg_kush", event.currentTarget.value, event.currentTarget.dataset.previousBrief ?? "null")}
+                                      onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur() }}
+                                      placeholder="Shkruaj kush"
+                                      aria-label="DG - Nëse po, kush"
+                                      disabled={isClosed || isSavingPlanning}
+                                      className="h-6 min-w-0 rounded-sm px-2 text-xs"
+                                    />
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="grid min-h-6 grid-cols-[44px_minmax(0,1fr)]">
+                              <label htmlFor={`planning-hapat-${note.id}`} className="bg-slate-50 px-1 py-0.5 text-[10px] font-semibold">HAPAT</label>
+                              <div className="flex items-center p-0.5">
+                                <Select
+                                  value={note.planning_brief?.hapat === "Po" ? "yes" : note.planning_brief?.hapat === "Jo" ? "no" : "__unset__"}
+                                  onValueChange={(value) => {
+                                    const previousBrief = note.planning_brief ? planningBriefDraft(note.planning_brief) : null
+                                    const nextBrief = {
+                                      ...planningBriefDraft(note.planning_brief),
+                                      hapat: value === "yes" ? "Po" : value === "no" ? "Jo" : "",
+                                    }
+                                    updatePlanningBriefDraft(note.id, nextBrief)
+                                    void savePlanningBrief(note.id, nextBrief, previousBrief)
+                                  }}
+                                  disabled={isClosed || isSavingPlanning}
+                                >
+                                  <SelectTrigger id={`planning-hapat-${note.id}`} className="h-6 w-[82px] px-2 text-[10px]"><SelectValue /></SelectTrigger>
+                                  <SelectContent><SelectItem value="__unset__">—</SelectItem><SelectItem value="no">Jo</SelectItem><SelectItem value="yes">Po</SelectItem></SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div className="grid min-h-6 grid-cols-[44px_minmax(0,1fr)]">
+                              <label htmlFor={`planning-kush-${note.id}`} className="bg-slate-50 px-1 py-0.5 text-[10px] font-semibold">KUSH</label>
+                              <Input
+                                id={`planning-kush-${note.id}`}
+                                value={note.planning_brief?.kush || planningNames(note.planning_brief?.kush_user_ids, "")}
+                                onFocus={(event) => { event.currentTarget.dataset.previousBrief = JSON.stringify(note.planning_brief ?? null) }}
+                                onChange={(event) => updatePlanningBriefDraft(note.id, { kush: event.target.value, kush_user_ids: [] })}
+                                onBlur={(event) => savePlanningInput(note, "kush", event.currentTarget.value, event.currentTarget.dataset.previousBrief ?? "null")}
+                                onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur() }}
+                                disabled={isClosed || isSavingPlanning}
+                                className="h-6 rounded-none border-0 px-1.5 text-[11px] shadow-none focus-visible:ring-1"
+                              />
+                            </div>
+                            <div className="grid min-h-6 grid-cols-[44px_minmax(0,1fr)]">
+                              <label htmlFor={`planning-sq-${note.id}`} className="bg-slate-50 px-1 py-0.5 text-[10px] font-semibold">SQ</label>
+                              <Input
+                                id={`planning-sq-${note.id}`}
+                                value={note.planning_brief?.sq || ""}
+                                onFocus={(event) => { event.currentTarget.dataset.previousBrief = JSON.stringify(note.planning_brief ?? null) }}
+                                onChange={(event) => updatePlanningBriefDraft(note.id, { sq: event.target.value })}
+                                onBlur={(event) => savePlanningInput(note, "sq", event.currentTarget.value, event.currentTarget.dataset.previousBrief ?? "null")}
+                                onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur() }}
+                                disabled={isClosed || isSavingPlanning}
+                                className="h-6 rounded-none border-0 px-1.5 text-[11px] shadow-none focus-visible:ring-1"
+                              />
                             </div>
                           </div>
                         </td>
@@ -3316,20 +3550,6 @@ export default function NextWeekPlanPage() {
                             </div>
                           )}
                         </td>
-                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
-                          {shouldShowDepartment && displayDepartment ? (
-                            <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200 whitespace-normal text-left">
-                              {abbreviateDepartmentName(displayDepartment.name)}
-                            </Badge>
-                          ) : null}
-                        </td>
-                        <td className="border border-slate-600 p-1 align-middle whitespace-nowrap w-[62px]" style={{ verticalAlign: 'bottom' }}>
-                          {displayProject ? (
-                            <Badge variant="outline" className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200 whitespace-normal text-left">
-                              {displayProject.title || displayProject.name || "Project"}
-                            </Badge>
-                          ) : null}
-                        </td>
                         <td className="border border-slate-600 p-1 align-middle w-[76px]" style={{ verticalAlign: 'bottom' }}>
                           {hasTask && taskInfo?.startDate ? (
                             <div className="flex items-center justify-center text-center">
@@ -3421,6 +3641,7 @@ export default function NextWeekPlanPage() {
                           </div>
                         </td>
                       </tr>
+                      </React.Fragment>
                     )
                   })}
                 </tbody>
@@ -3641,6 +3862,14 @@ export default function NextWeekPlanPage() {
           </DialogHeader>
           {taskDialogNote ? (
             <div className="space-y-3">
+              {taskDialogNote.planning_brief ? (
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
+                  <span>Ky task do ta marrë automatikisht planifikimin nga PX JAV.</span>
+                  <Badge variant="outline" className="shrink-0 border-violet-200 bg-white text-violet-700">
+                    {planningBriefProgress(taskDialogNote.planning_brief)}/5
+                  </Badge>
+                </div>
+              ) : null}
               <div className="space-y-2">
                 <Label>Title</Label>
                 <Textarea

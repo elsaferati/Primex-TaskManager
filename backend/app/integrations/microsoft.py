@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 
@@ -73,19 +73,70 @@ async def fetch_calendar_events(access_token: str, start: datetime, end: datetim
     params = {
         "startDateTime": format_datetime(start),
         "endDateTime": format_datetime(end),
-        "$select": "id,subject,start,end,location,isAllDay,organizer,bodyPreview",
+        "$select": (
+            "id,iCalUId,changeKey,subject,start,end,location,categories,isAllDay,isCancelled,isOnlineMeeting,organizer,attendees,"
+            "bodyPreview,onlineMeeting,onlineMeetingUrl,webLink,type,seriesMasterId"
+        ),
         "$orderby": "start/dateTime",
-        "$top": "50",
+        "$top": "250",
     }
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "Prefer": 'outlook.timezone="UTC"',
+        "Prefer": 'outlook.timezone="UTC", IdType="ImmutableId"',
     }
+    events: list[dict[str, Any]] = []
+    url: str | None = f"{GRAPH_BASE_URL}/me/calendarView"
     async with httpx.AsyncClient(timeout=15.0) as client:
-        res = await client.get(f"{GRAPH_BASE_URL}/me/calendarView", params=params, headers=headers)
+        next_params: dict[str, str] | None = params
+        while url:
+            res = await client.get(url, params=next_params, headers=headers)
+            res.raise_for_status()
+            data = res.json()
+            events.extend(data.get("value", []))
+            url = data.get("@odata.nextLink")
+            next_params = None
+    return events
+
+
+async def update_calendar_event(
+    access_token: str,
+    event_id: str,
+    *,
+    subject: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    location: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if subject is not None:
+        payload["subject"] = subject
+    if start is not None:
+        payload["start"] = {"dateTime": format_datetime(start).removesuffix("Z"), "timeZone": "UTC"}
+    if end is not None:
+        payload["end"] = {"dateTime": format_datetime(end).removesuffix("Z"), "timeZone": "UTC"}
+    if location is not None:
+        payload["location"] = {"displayName": location}
+    if not payload:
+        return {}
+    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        res = await client.patch(
+            f"{GRAPH_BASE_URL}/me/events/{quote(event_id, safe='')}",
+            json=payload,
+            headers=headers,
+        )
     res.raise_for_status()
-    data = res.json()
-    return data.get("value", [])
+    return res.json()
+
+
+async def delete_calendar_event(access_token: str, event_id: str) -> None:
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        res = await client.delete(
+            f"{GRAPH_BASE_URL}/me/events/{quote(event_id, safe='')}",
+            headers=headers,
+        )
+    res.raise_for_status()
 
 
 async def fetch_calendar_schedule(
@@ -116,7 +167,7 @@ async def fetch_calendar_schedule(
     return res.json().get("value", [])
 
 
-async def create_calendar_teams_event(
+async def create_calendar_event(
     access_token: str,
     *,
     subject: str,
@@ -125,8 +176,9 @@ async def create_calendar_teams_event(
     attendees: list[dict[str, str]],
     body_html: str | None,
     transaction_id: str,
+    create_online_meeting: bool,
 ) -> dict[str, Any]:
-    """Create a calendar-backed Teams event; Outlook sends invitations to attendees."""
+    """Create an organizer-calendar event; Outlook sends invitations to attendees."""
     payload = {
         "subject": subject,
         "body": {"contentType": "HTML", "content": body_html or ""},
@@ -139,16 +191,33 @@ async def create_calendar_teams_event(
             }
             for item in attendees
         ],
-        "isOnlineMeeting": True,
-        "onlineMeetingProvider": "teamsForBusiness",
         "responseRequested": True,
         "transactionId": transaction_id,
     }
+    if create_online_meeting:
+        payload["isOnlineMeeting"] = True
+        payload["onlineMeetingProvider"] = "teamsForBusiness"
     headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
     async with httpx.AsyncClient(timeout=20.0) as client:
         res = await client.post(f"{GRAPH_BASE_URL}/me/events", json=payload, headers=headers)
     res.raise_for_status()
     return res.json()
+
+
+async def fetch_user_profile(access_token: str) -> dict[str, Any]:
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        res = await client.get(
+            f"{GRAPH_BASE_URL}/me",
+            params={"$select": "displayName,mail,userPrincipalName"},
+            headers=headers,
+        )
+    res.raise_for_status()
+    return res.json()
+
+
+def microsoft_account_email(profile: dict[str, Any]) -> str:
+    return str(profile.get("mail") or profile.get("userPrincipalName") or "").strip().casefold()
 
 
 def compute_expires_at(expires_in: int) -> datetime:

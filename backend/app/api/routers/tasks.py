@@ -45,6 +45,7 @@ from app.schemas.task import (
     TaskRemoveFromDayRequest,
     TaskUpdate,
 )
+from app.schemas.plan_note import PxJavPlanningBrief
 from pydantic import BaseModel, Field
 from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, notification_task_preview, publish_notification
@@ -1093,10 +1094,15 @@ async def _create_pcm_control_for_product(
     project: Project | None,
 ) -> Task | None:
     """Create exactly one linked CONTROL for a new PCM MST/TT PRODUCT task."""
+    phase_value = (
+        product_task.phase.value
+        if isinstance(product_task.phase, ProjectPhaseStatus)
+        else str(product_task.phase or "")
+    )
     if (
         project is None
         or product_task.project_id is None
-        or str(product_task.phase or "").upper() != ProjectPhaseStatus.PRODUCT.value
+        or phase_value.upper() != ProjectPhaseStatus.PRODUCT.value
         or not _is_mst_or_tt_project(project)
         or project.department_id is None
     ):
@@ -1787,6 +1793,17 @@ async def get_task(
         status_override = question_status_overrides[task.id]
 
     dto = _task_to_out(task, dto_assignees or [], status_override=status_override)
+    if task.plan_note_origin_id is not None:
+        planning_brief_payload = (
+            await db.execute(
+                select(PlanNote.planning_brief).where(PlanNote.id == task.plan_note_origin_id)
+            )
+        ).scalar_one_or_none()
+        dto.planning_brief = (
+            PxJavPlanningBrief.model_validate(planning_brief_payload)
+            if planning_brief_payload
+            else None
+        )
     rows = (
         await db.execute(
             select(TaskAlignmentUser.user_id).where(TaskAlignmentUser.task_id == task.id)

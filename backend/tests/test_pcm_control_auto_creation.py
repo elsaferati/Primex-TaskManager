@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.api.routers.tasks import _create_pcm_control_for_product
-from app.models.enums import TaskPriority
+from app.models.enums import ProjectPhaseStatus, TaskPriority
 
 
 class TestPcmControlAutoCreation(unittest.IsolatedAsyncioTestCase):
@@ -26,7 +26,7 @@ class TestPcmControlAutoCreation(unittest.IsolatedAsyncioTestCase):
             status="TODO",
             priority=TaskPriority.NORMAL,
             finish_period=None,
-            phase="PRODUCT",
+            phase=ProjectPhaseStatus.PRODUCT,
             start_date=None,
             is_deadline_important=False,
         )

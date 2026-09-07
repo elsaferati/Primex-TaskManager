@@ -13,6 +13,7 @@ from app.auth.security import ACCESS_TOKEN_TYPE, decode_token, require_token_typ
 from app.api.routers import api_router
 from app.config import settings
 from app.services.meetings_report_scheduler import run_meetings_report_scheduler_forever
+from app.services.microsoft_calendar_sync_scheduler import run_microsoft_calendar_sync_forever
 from app.services.after_break_report_scheduler import run_after_break_report_scheduler_forever
 from app.services.end_week_bz_report_scheduler import run_end_week_bz_report_scheduler_forever
 from app.services.morning_report_scheduler import run_morning_report_scheduler_forever
@@ -53,6 +54,7 @@ morning_report_scheduler_task: asyncio.Task | None = None
 tomorrow_print_report_scheduler_task: asyncio.Task | None = None
 today_print_report_scheduler_task: asyncio.Task | None = None
 std_feedback_sync_task: asyncio.Task | None = None
+microsoft_calendar_sync_task: asyncio.Task | None = None
 
 @app.get("/health")
 async def health() -> dict:
@@ -61,7 +63,7 @@ async def health() -> dict:
 
 @app.on_event("startup")
 async def _startup() -> None:
-    global listener_task, scheduler_task, system_task_daily_reconciliation_task, meetings_report_scheduler_task, after_break_report_scheduler_task, end_week_bz_report_scheduler_task, morning_report_scheduler_task, tomorrow_print_report_scheduler_task, today_print_report_scheduler_task, std_feedback_sync_task
+    global listener_task, scheduler_task, system_task_daily_reconciliation_task, meetings_report_scheduler_task, after_break_report_scheduler_task, end_week_bz_report_scheduler_task, morning_report_scheduler_task, tomorrow_print_report_scheduler_task, today_print_report_scheduler_task, std_feedback_sync_task, microsoft_calendar_sync_task
     if settings.REDIS_ENABLED:
         listener_task = asyncio.create_task(start_notification_listener())
     if settings.SYSTEM_TASK_SCHEDULER_ENABLED:
@@ -79,11 +81,13 @@ async def _startup() -> None:
         today_print_report_scheduler_task = asyncio.create_task(run_today_print_report_scheduler_forever())
     if settings.STD_FEEDBACK_SYNC_ENABLED:
         std_feedback_sync_task = asyncio.create_task(run_std_feedback_ticket_sync_forever())
+    if settings.MS_CALENDAR_SYNC_ENABLED:
+        microsoft_calendar_sync_task = asyncio.create_task(run_microsoft_calendar_sync_forever())
 
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
-    global listener_task, scheduler_task, system_task_daily_reconciliation_task, meetings_report_scheduler_task, after_break_report_scheduler_task, end_week_bz_report_scheduler_task, morning_report_scheduler_task, tomorrow_print_report_scheduler_task, today_print_report_scheduler_task, std_feedback_sync_task
+    global listener_task, scheduler_task, system_task_daily_reconciliation_task, meetings_report_scheduler_task, after_break_report_scheduler_task, end_week_bz_report_scheduler_task, morning_report_scheduler_task, tomorrow_print_report_scheduler_task, today_print_report_scheduler_task, std_feedback_sync_task, microsoft_calendar_sync_task
     if listener_task is not None:
         listener_task.cancel()
         try:
@@ -154,6 +158,13 @@ async def _shutdown() -> None:
         except asyncio.CancelledError:
             pass
         std_feedback_sync_task = None
+    if microsoft_calendar_sync_task is not None:
+        microsoft_calendar_sync_task.cancel()
+        try:
+            await microsoft_calendar_sync_task
+        except asyncio.CancelledError:
+            pass
+        microsoft_calendar_sync_task = None
 
 
 @app.websocket("/ws/notifications")

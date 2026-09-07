@@ -14,6 +14,10 @@ class MeetingOut(BaseModel):
     ends_at: datetime | None = None
     meeting_url: str | None = None
     microsoft_event_id: str | None = None
+    calendar_imported: bool = False
+    calendar_sync_status: str | None = None
+    calendar_categories: list[str] = Field(default_factory=list)
+    calendar_last_synced_at: datetime | None = None
     meeting_type: str
     recurrence_type: str | None = None
     recurrence_days_of_week: list[int] | None = None
@@ -26,6 +30,7 @@ class MeetingOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     participant_ids: list[uuid.UUID] = []
+    paired_external_meeting_id: uuid.UUID | None = None
 
 
 class MeetingCreateOut(MeetingOut):
@@ -47,6 +52,7 @@ class MeetingCreate(BaseModel):
     participant_ids: list[uuid.UUID] = []
     create_internal_meeting: bool | None = None
     internal_starts_at: datetime | None = None
+    paired_external_meeting_id: uuid.UUID | None = None
 
 
 class MeetingUpdate(BaseModel):

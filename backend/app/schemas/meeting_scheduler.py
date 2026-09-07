@@ -9,7 +9,6 @@ from pydantic import BaseModel, EmailStr, Field, model_validator
 class MeetingSchedulingStandardBase(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     meeting_type: str = Field(pattern="^(internal|external)$")
-    title_prefix: str | None = Field(default=None, max_length=80)
     default_duration_minutes: int = Field(default=60, ge=5, le=480)
     buffer_minutes: int = Field(default=0, ge=0, le=180)
     workday_start: str = Field(default="08:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -95,6 +94,9 @@ class MeetingScheduleRequestOut(MeetingScheduleRequestBase):
     teams_url: str | None = None
     final_meeting_id: uuid.UUID | None = None
     last_error: str | None = None
+    rejection_reason: str | None = None
+    rejected_by_user_id: uuid.UUID | None = None
+    rejected_at: datetime | None = None
     created_by_user_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
@@ -110,3 +112,8 @@ class MeetingScheduleCalendarItem(BaseModel):
     status: str
     participant_ids: list[uuid.UUID] = []
     teams_url: str | None = None
+    microsoft_event_id: str | None = None
+
+
+class MeetingScheduleRejectIn(BaseModel):
+    reason: str = Field(min_length=2, max_length=2000)
