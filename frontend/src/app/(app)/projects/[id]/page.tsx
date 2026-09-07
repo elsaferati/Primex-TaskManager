@@ -98,7 +98,7 @@ const ME_FILTER = "__me__"
 const TASK_STATUS_LABELS: Record<(typeof TASK_STATUSES)[number], string> = {
   TODO: "To Do",
   IN_PROGRESS: "In Progress",
-  WAITING_CLIENT: "Waiting for Client",
+  WAITING_CLIENT: "WFE",
   WAITING_CONFIRMATION: "Waiting Confirmation",
   DONE: "Done",
 }
@@ -180,6 +180,7 @@ function matchesAssignee(task: Task, filterId: string, currentUserId?: string | 
 
 function statusLabel(status?: string) {
   if (!status) return "-"
+  if (status === "WAITING_CLIENT") return "WFE"
   return status
     .replace(/_/g, " ")
     .toLowerCase()

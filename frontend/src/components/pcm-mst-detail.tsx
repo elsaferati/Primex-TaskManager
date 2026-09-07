@@ -181,7 +181,7 @@ const PROJECT_STATUS_BADGES: Record<string, { label: string; className: string }
     className: "border-amber-200 bg-amber-50 text-amber-700",
   },
   WAITING_CLIENT: {
-    label: "Waiting for Client",
+    label: "WFE",
     className: "border-[#B8860B] bg-[#E2C15B] text-[#4F3A00]",
   },
   WAITING_CONFIRMATION: {

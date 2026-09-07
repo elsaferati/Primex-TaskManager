@@ -68,6 +68,30 @@ ONE_H_STAFF_CHECKLIST = (
     ("Sqaro slotin paraprak pastaj aktual", ""),
     ("BZ Det nga Stafi per GA", "Komunikimi GA temas Det nga Stafi/ KA email"),
 )
+THURSDAY_ONE_H_BOARD_CHECKLIST = (("Planifikimi javor short", ""),)
+THURSDAY_ONE_H_STAFF_CHECKLIST = (
+    ("Emails per missing info, per me vazhdu javen tjeter", ""),
+    ("Shikohen det qe mbesin vetem per neser (te premten)", ""),
+)
+FRIDAY_ONE_H_STAFF_CHECKLIST = (
+    ("Barazimi i planifikimit javor - next week", ""),
+    ("Barazimi i realizimit javor - this week", ""),
+    ("Emails per missing info, per me vazhdu javen tjeter", ""),
+)
+
+
+def _one_h_checklists_for_day(
+    report_day: date | None,
+) -> tuple[tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]]:
+    """Return Board and Staff checklists with Thursday/Friday closing checks."""
+    if report_day is not None and report_day.weekday() == 3:
+        return (
+            ONE_H_BOARD_CHECKLIST + THURSDAY_ONE_H_BOARD_CHECKLIST,
+            ONE_H_STAFF_CHECKLIST + THURSDAY_ONE_H_STAFF_CHECKLIST,
+        )
+    if report_day is not None and report_day.weekday() == 4:
+        return ONE_H_BOARD_CHECKLIST, ONE_H_STAFF_CHECKLIST + FRIDAY_ONE_H_STAFF_CHECKLIST
+    return ONE_H_BOARD_CHECKLIST, ONE_H_STAFF_CHECKLIST
 
 # Gmail can remove style blocks from message bodies. Keep the styles that form
 # the report grid inline so the received email matches the preview.
@@ -525,8 +549,9 @@ def _is_non_routine_meeting(item: dict[str, Any]) -> bool:
     return recurrence not in {"daily", "weekly"}
 
 
-def _one_h_checklists_html() -> str:
+def _one_h_checklists_html(report_day: date | None = None) -> str:
     """The two preparation checklists shown above every 1H Shtypi task grid."""
+    board_questions, staff_questions = _one_h_checklists_for_day(report_day)
 
     def checklist(title: str, questions: tuple[tuple[str, str], ...], *, board: bool = False) -> str:
         separators = (
@@ -552,10 +577,10 @@ def _one_h_checklists_html() -> str:
         'data-one-h-checklist-columns="true" style="width:100%;border-collapse:collapse;margin:0 0 14px;">'
         '<tr>'
         '<td width="50%" valign="top" style="width:50%;padding:0 6px 0 0;vertical-align:top;">'
-        f"{checklist('STAFF - HAPAT PER 1H', ONE_H_STAFF_CHECKLIST)}"
+        f"{checklist('STAFF - HAPAT PER 1H', staff_questions)}"
         '</td>'
         '<td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
-        f"{checklist('PYETJET PER 1H - BORD', ONE_H_BOARD_CHECKLIST, board=True)}"
+        f"{checklist('PYETJET PER 1H - BORD', board_questions, board=True)}"
         '</td>'
         '</tr></table>'
     )
@@ -878,6 +903,7 @@ def _excel_table_attachment(
     comment_initials: list[str] | None = None,
     meeting_sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]] | None = None,
     closing_sections: list[ClosingSection] | None = None,
+    checklist_date: date | None = None,
 ) -> tuple[str, bytes, str]:
     """Create the same printable grid as an XLSX attachment for email recipients."""
     workbook = Workbook()
@@ -983,9 +1009,10 @@ def _excel_table_attachment(
     def write_checklists(row_number: int) -> int:
         """Write each preparation list as a title row plus one compact content row."""
         checklist_fill = PatternFill("solid", fgColor="EEF2FF")
+        board_questions, staff_questions = _one_h_checklists_for_day(checklist_date)
         for start_column, end_column, title, questions in (
-            (1, 4, "STAFF - HAPAT PER 1H", ONE_H_STAFF_CHECKLIST),
-            (5, 8, "PYETJET PER 1H - BORD", ONE_H_BOARD_CHECKLIST),
+            (1, 4, "STAFF - HAPAT PER 1H", staff_questions),
+            (5, 8, "PYETJET PER 1H - BORD", board_questions),
         ):
             sheet.merge_cells(start_row=row_number, start_column=start_column, end_row=row_number, end_column=end_column)
             title_cell = sheet.cell(row_number, start_column, title)
@@ -1945,6 +1972,7 @@ async def _build_print_report(
     db: AsyncSession | None = None,
     closing_report_day: date | None = None,
     include_docx: bool = False,
+    checklist_date: date | None = None,
 ) -> dict[str, Any]:
     if payload is None:
         base_url = settings.PRIMEFLOW_API_BASE_URL
@@ -2003,9 +2031,10 @@ async def _build_print_report(
     )
     report_date = target_date.strftime("%d.%m.%Y")
     report_title = subject_for(target_date, report_day_label)
+    board_questions, staff_questions = _one_h_checklists_for_day(checklist_date)
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
 <div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">{report_title}</div>
-{_one_h_checklists_html()}{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
+{_one_h_checklists_html(checklist_date)}{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
     content_html = (
         '<div data-today-print-report="true" style="margin:18px 0 14px">'
         + re.sub(r"^.*?<body[^>]*>|</body>.*$", "", html_body, flags=re.S)
@@ -2017,13 +2046,13 @@ async def _build_print_report(
         "PYETJET PER 1H - BORD",
         *(
             f"{index}. {question}" + (f" ({description})" if description else "")
-            for index, (question, description) in enumerate(ONE_H_BOARD_CHECKLIST, 1)
+            for index, (question, description) in enumerate(board_questions, 1)
         ),
         "",
         "STAFF - HAPAT PER 1H",
         *(
             f"{index}. {question}" + (f" ({description})" if description else "")
-            for index, (question, description) in enumerate(ONE_H_STAFF_CHECKLIST, 1)
+            for index, (question, description) in enumerate(staff_questions, 1)
         ),
         "",
     ]
@@ -2066,6 +2095,7 @@ async def _build_print_report(
                 task_rows, meeting_rows, target_date, include_meetings=include_meetings,
                 comment_initials=comment_initials, meeting_sections=meeting_sections,
                 closing_sections=closing_sections,
+                checklist_date=checklist_date,
             )
         ]
         if include_png:
@@ -2099,6 +2129,7 @@ async def build_tomorrow_print_report(
         report_day_label="NESER",
         db=db,
         closing_report_day=delivery_date,
+        checklist_date=delivery_date,
         payload=payload,
     )
 
@@ -2109,7 +2140,8 @@ async def build_today_print_report(
     """Build today's task grid plus today/next-working-day meeting sections."""
     return await _build_print_report(
         report_date, include_attachment=include_attachment, include_meetings=True,
-        include_png=True, first_meeting_day_label="SOT", report_day_label="SOT", payload=payload
+        include_png=True, first_meeting_day_label="SOT", report_day_label="SOT",
+        checklist_date=report_date, payload=payload
     )
 
 

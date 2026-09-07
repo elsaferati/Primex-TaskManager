@@ -561,6 +561,7 @@ function initialsWithDots(src: string) {
 
 function statusLabel(status?: string) {
   if (!status) return "-"
+  if (status === "WAITING_CLIENT") return "WFE"
   return status
     .replace(/_/g, " ")
     .toLowerCase()

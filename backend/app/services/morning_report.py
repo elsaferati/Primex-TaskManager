@@ -21,6 +21,7 @@ from app.services.after_break_report import (
     _personal_section,
 )
 from app.services.common_leave import parse_common_view_annual_leave
+from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.daily_report_logic import daily_report_tyo_label, planned_range_for_daily_report
 from app.services.meetings_report import (
     PERSONAL_GA,
@@ -132,7 +133,7 @@ def _default_body(title: str) -> str:
         )
     if title == GA_HV_DV_TASKS_TITLE:
         return "\n\n".join(f"{task_title}: 0" for task_title in (GA_TASKS_TITLE, HV_TASKS_TITLE, DV_TASKS_TITLE))
-    return "\n\n".join(["TODO: 0", "IN PROGRESS: 0", "WAITING FOR CLIENT: 0", "WAITING CONFIRMATION: 0", "DONE: 0"])
+    return "\n\n".join(["TODO: 0", "IN PROGRESS: 0", "WFE: 0", "WAITING CONFIRMATION: 0", "DONE: 0"])
 
 
 def _is_manual_email_line(line: str) -> bool:
@@ -537,6 +538,7 @@ async def _day_context_section(
             common_block_lines.append(f"- {_entry_person(entry, names)}: {_display_title(entry.title)}")
 
     meetings = (await db.execute(select(Meeting).where(Meeting.starts_at.is_not(None)))).scalars().all()
+    meetings = [meeting for meeting in meetings if is_common_view_visible_meeting(meeting)]
     today_meetings = [meeting for meeting in meetings if _meeting_occurs_on_date(meeting, report_day)]
     external_meetings = [meeting for meeting in today_meetings if meeting.meeting_type == "external"]
     internal_meetings = [meeting for meeting in today_meetings if meeting.meeting_type != "external"]

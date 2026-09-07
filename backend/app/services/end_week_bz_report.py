@@ -17,6 +17,7 @@ from app.models.task import Task
 from app.models.user import User
 from app.services.after_break_report import _ascii_table, _task_covers_day
 from app.services.meeting_palette import meeting_report_tone
+from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.meetings_report import (
     _assignee_names,
     _clean_task_title,
@@ -189,6 +190,7 @@ async def build_end_week_bz_report_sections(db: AsyncSession, report_day: date) 
     at_eight = [task for task in open_for_day if title_has_eight_am_indicator(task.title) or _local_time(task.due_date) == "08:00"]
 
     meetings = (await db.execute(select(Meeting).options(selectinload(Meeting.participants)).where(Meeting.starts_at.is_not(None)))).scalars().unique().all()
+    meetings = [meeting for meeting in meetings if is_common_view_visible_meeting(meeting)]
     meetings = [meeting for meeting in meetings if _meeting_occurs_on_date(meeting, report_day)]
     statuses = (await db.execute(select(MeetingOccurrenceStatus).where(MeetingOccurrenceStatus.occurrence_date == report_day))).scalars().all()
     status_map = {row.meeting_id: row.status for row in statuses}
@@ -208,7 +210,7 @@ async def build_end_week_bz_report_sections(db: AsyncSession, report_day: date) 
         counts[f"P: {group}"] = len(grouped)
 
     wfc_lines: list[str] = []
-    for label, status in (("WAITING FOR CLIENT", "WAITING_CLIENT"), ("WAITING CONFIRMATION", "WAITING_CONFIRMATION")):
+    for label, status in (("WFE", "WAITING_CLIENT"), ("WAITING CONFIRMATION", "WAITING_CONFIRMATION")):
         grouped = [task for task in waiting if _normalize_report_status(task.status) == status]
         if wfc_lines:
             wfc_lines.append("")

@@ -7,6 +7,9 @@ def test_waiting_client_is_a_supported_task_status() -> None:
     assert TaskStatus.WAITING_CLIENT.value == "WAITING_CLIENT"
     assert _normalize_task_status("Waiting for Client") == "WAITING_CLIENT"
     assert _normalize_report_status("Waiting for Client") == "WAITING_CLIENT"
+    assert _normalize_task_status("WFE") == "WAITING_CLIENT"
+    assert _normalize_report_status("WFE") == "WAITING_CLIENT"
+    assert TaskStatus("WFE") == TaskStatus.WAITING_CLIENT
 
 
 def test_waiting_client_remains_visible_without_daily_override() -> None:

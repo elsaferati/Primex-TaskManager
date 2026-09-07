@@ -124,8 +124,10 @@ async def configured_recipients(report_type: str = "ONE_H") -> dict[str, list[st
     return result
 
 
-async def load_1h_reminder_questions(slot: str | None = None) -> list[ReportReminderQuestion]:
-    """Return the fixed 1H staff steps, with the pre-break check only at 11:50."""
+async def load_1h_reminder_questions(
+    slot: str | None = None, report_day: date | None = None
+) -> list[ReportReminderQuestion]:
+    """Return the 1H staff steps, including Thursday/Friday week-closing checks."""
     reminders = [
         ReportReminderQuestion(text="Hap doc dhe det"),
         ReportReminderQuestion(text="Share screen side by side DET/REZULTATIN"),
@@ -141,6 +143,19 @@ async def load_1h_reminder_questions(slot: str | None = None) -> list[ReportRemi
             guidance="Komunikimi GA temas Det nga Stafi/ KA email",
         )
     )
+    if report_day is not None and report_day.weekday() == 3:
+        reminders.extend([
+            ReportReminderQuestion(text="Emails per missing info, per me vazhdu javen tjeter"),
+            ReportReminderQuestion(
+                text="Shikohen det qe mbesin vetem per neser (te premten)"
+            ),
+        ])
+    elif report_day is not None and report_day.weekday() == 4:
+        reminders.extend([
+            ReportReminderQuestion(text="Barazimi i planifikimit javor - next week"),
+            ReportReminderQuestion(text="Barazimi i realizimit javor - this week"),
+            ReportReminderQuestion(text="Emails per missing info, per me vazhdu javen tjeter"),
+        ])
     return reminders
 
 
@@ -282,7 +297,7 @@ async def generate_fresh(
     data: dict | None = None,
 ) -> ReportDocument:
     data = data or await _load_common_view(day)
-    reminders = await load_1h_reminder_questions(slot)
+    reminders = await load_1h_reminder_questions(slot, day)
     undiscussed_notes = await load_undiscussed_notes()
     title_overrides, description_overrides = await _text_overrides_for_1h_interval(
         data, day, slot, interval_end=strike_interval_end(day, slot),

@@ -27,8 +27,8 @@ def test_personal_tasks_are_split_into_ga_ka_and_px() -> None:
 
 def test_wfc_columns_and_both_status_labels_are_explicit() -> None:
     assert [name for name, _ in WFC_COLUMNS] == ["NR", "WHO", "TYPE", "DEP", "AM/PM", "TITLE", "STATUS"]
-    sections = normalize_sections([{"section_key": "WFC TASKS", "title": "WFC TASKS", "body": "WAITING FOR CLIENT: 0\n\nWAITING CONFIRMATION: 0"}])
-    assert "WAITING FOR CLIENT" in sections[1]["body"]
+    sections = normalize_sections([{"section_key": "WFC TASKS", "title": "WFC TASKS", "body": "WFE: 0\n\nWAITING CONFIRMATION: 0"}])
+    assert "WFE" in sections[1]["body"]
     assert "WAITING CONFIRMATION" in sections[1]["body"]
     assert _is_wfc_task(SimpleNamespace(status="WAITING_CLIENT", completed_at=None))
     assert _is_wfc_task(SimpleNamespace(status="WAITING_CONFIRMATION", completed_at=None))

@@ -787,7 +787,7 @@ function systemFrequencyReportLabel(freq?: SystemTaskTemplate["frequency"] | str
 function reportStatusLabel(status?: Task["status"] | null) {
   if (!status) return "-"
   if (status === "IN_PROGRESS") return "In Progress"
-  if (status === "WAITING_CLIENT") return "Waiting for Client"
+  if (status === "WAITING_CLIENT") return "WFE"
   if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "TODO") return "TO DO"
   if (status === "DONE") return "Done"
@@ -812,7 +812,7 @@ function normalizeDailyReportStatusKey(status?: string | null) {
 function dailyReportStatusChipLabel(key: string) {
   if (key === "TODO") return "TO DO"
   if (key === "IN_PROGRESS") return "IN PROGRESS"
-  if (key === "WAITING_CLIENT") return "WAITING FOR CLIENT"
+  if (key === "WAITING_CLIENT") return "WFE"
   if (key === "WAITING_CONFIRMATION") return "WAITING CONFIRMATION"
   if (key === "DONE") return "DONE"
   return key.replace(/_/g, " ")
@@ -900,7 +900,7 @@ function formatSystemOccurrenceStatus(status?: string | null) {
   if (!status) return "-"
   if (status === "TODO") return "TO DO"
   if (status === "IN_PROGRESS") return "In Progress"
-  if (status === "WAITING_CLIENT") return "Waiting for Client"
+  if (status === "WAITING_CLIENT") return "WFE"
   if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "NOT_DONE") return "Not Done"
   if (status === "DONE") return "Done"

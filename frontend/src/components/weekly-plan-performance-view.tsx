@@ -121,6 +121,7 @@ const formatPlannerStatusLabel = (value?: string | null) => {
     .toUpperCase()
     .replace(/\s+/g, "_")
   if (normalized === "IN_PROGRESS") return "In Progress"
+  if (normalized === "WAITING_CLIENT") return "WFE"
   if (normalized === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (normalized === "DONE") return "Done"
   return "To Do"

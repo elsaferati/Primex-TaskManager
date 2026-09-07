@@ -491,7 +491,7 @@ function getDisplayPriority(task: Task): TaskPriority {
 function reportStatusLabel(status?: Task["status"] | null) {
   if (!status) return "-"
   if (status === "IN_PROGRESS") return "In Progress"
-  if (status === "WAITING_CLIENT") return "Waiting for Client"
+  if (status === "WAITING_CLIENT") return "WFE"
   if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "TODO") return "To Do"
   if (status === "DONE") return "Done"
@@ -508,7 +508,7 @@ function formatSystemOccurrenceStatus(status?: string | null) {
   if (!status) return "-"
   if (status === "TODO") return "To Do"
   if (status === "IN_PROGRESS") return "In Progress"
-  if (status === "WAITING_CLIENT") return "Waiting for Client"
+  if (status === "WAITING_CLIENT") return "WFE"
   if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "NOT_DONE") return "Not Done"
   if (status === "DONE") return "Done"

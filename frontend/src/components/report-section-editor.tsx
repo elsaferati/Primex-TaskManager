@@ -289,7 +289,7 @@ function rowTone(label: string, cells: string[], headers: string[]) {
   const productsIndex = headers.findIndex((header) => normalizeHeader(header) === "PRODUCTS")
   const productsValue = productsIndex >= 0 ? cells[productsIndex] || "" : ""
   if (/\(\s*-\d+\s*\)/.test(productsValue)) return "bg-yellow-100 text-red-600"
-  if (resolvedStatus.includes("WAITING CLIENT") || resolvedStatus.includes("WAITING FOR CLIENT")) {
+  if (resolvedStatus === "WFE" || resolvedStatus.includes("WAITING CLIENT") || resolvedStatus.includes("WAITING FOR CLIENT")) {
     return "bg-[#E2C15B] text-[#4F3A00]"
   }
   if (resolvedStatus.includes("WAITING")) return "bg-orange-100 text-orange-900"

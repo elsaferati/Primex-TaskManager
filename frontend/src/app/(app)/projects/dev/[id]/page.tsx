@@ -141,7 +141,7 @@ function isOverdue(task: Task) {
 
 function statusLabel(status?: string) {
   if (!status) return "-"
-  if (status === "WAITING_CLIENT") return "Waiting for Client"
+  if (status === "WAITING_CLIENT") return "WFE"
   return status
     .replace(/_/g, " ")
     .toLowerCase()

@@ -154,6 +154,34 @@ const ONE_H_PRINT_CHECKLISTS = [
   },
 ] as const
 
+const THURSDAY_ONE_H_STAFF_QUESTIONS = [
+  { question: "Emails per missing info, per me vazhdu javen tjeter", description: "" },
+  { question: "Shikohen det qe mbesin vetem per neser (te premten)", description: "" },
+] as const
+
+const THURSDAY_ONE_H_BOARD_QUESTIONS = [
+  { question: "Planifikimi javor short", description: "" },
+] as const
+
+const FRIDAY_ONE_H_STAFF_QUESTIONS = [
+  { question: "Barazimi i planifikimit javor - next week", description: "" },
+  { question: "Barazimi i realizimit javor - this week", description: "" },
+  { question: "Emails per missing info, per me vazhdu javen tjeter", description: "" },
+] as const
+
+const oneHPrintChecklistsForDate = (reportDay: Date) =>
+  ONE_H_PRINT_CHECKLISTS.map((checklist, index) => ({
+    ...checklist,
+    questions:
+      reportDay.getDay() === 4
+        ? index === 0
+          ? [...checklist.questions, ...THURSDAY_ONE_H_STAFF_QUESTIONS]
+          : [...checklist.questions, ...THURSDAY_ONE_H_BOARD_QUESTIONS]
+        : reportDay.getDay() === 5 && index === 0
+          ? [...checklist.questions, ...FRIDAY_ONE_H_STAFF_QUESTIONS]
+          : [...checklist.questions],
+  }))
+
 const getNextWorkingDay = (from: Date) => {
   const next = new Date(from.getFullYear(), from.getMonth(), from.getDate())
   next.setDate(next.getDate() + 1)
@@ -195,8 +223,8 @@ const getMeetingTimeOneHourLater = (value: string) => {
 const escapePrintHtml = (value: string) =>
   value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#039;")
 
-const oneHPrintChecklistsHtml = () =>
-  `<section class="one-h-print-checklists">${ONE_H_PRINT_CHECKLISTS.map(
+const oneHPrintChecklistsHtml = (reportDay: Date) =>
+  `<section class="one-h-print-checklists">${oneHPrintChecklistsForDate(reportDay).map(
     ({ title, questions }) => {
       const questionContent = questions
         .map(({ question, description }, index) =>
@@ -209,10 +237,10 @@ const oneHPrintChecklistsHtml = () =>
     }
   ).join("")}</section>`
 
-function OneHPrintChecklists() {
+function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
   return (
     <section className="one-h-print-checklists">
-      {ONE_H_PRINT_CHECKLISTS.map(({ title, questions }) => (
+      {oneHPrintChecklistsForDate(reportDay).map(({ title, questions }) => (
         <div key={title} className="one-h-print-checklist">
           <div className="one-h-print-checklist-title">{title}</div>
           <div className="one-h-print-checklist-items">
@@ -4691,7 +4719,8 @@ export default function CommonViewPage() {
     setPrintingTomorrow(true)
 
     try {
-      const targetDate = getNextWorkingDay(new Date())
+      const deliveryDate = new Date()
+      const targetDate = getNextWorkingDay(deliveryDate)
       const targetIso = toISODate(targetDate)
       const targetWeekStartIso = toISODate(getMonday(targetDate))
       const freezeParam = freezeOneHSlots ? "&freeze_one_h_slots=true" : ""
@@ -4838,7 +4867,7 @@ export default function CommonViewPage() {
   .print-slot-subtext { display: block; white-space: pre; overflow-wrap: normal !important; word-break: normal !important; font-size: 5.2px; font-weight: 400 !important; line-height: 1.05; }
 </style></head><body>
   <div class="print-header"><div></div><div class="print-title">1H SHTYPI — ${escapePrintHtml(reportDate)}</div><div class="print-date">${escapePrintHtml(formatDateTimeDMY(new Date()))}</div></div>
-  ${oneHPrintChecklistsHtml()}
+  ${oneHPrintChecklistsHtml(deliveryDate)}
   <table><colgroup><col class="print-number-column"><col class="print-label-column"><col span="6"></colgroup><thead><tr><th>NR</th><th>LLoji dhe sloti</th><th colspan="6">Tasks</th></tr></thead><tbody>${buildTableRows(sortedTaskRows)}</tbody></table>
   <table><colgroup><col class="print-number-column"><col class="print-label-column"><col span="6"></colgroup><thead><tr><th>NR</th><th>LLoji</th><th colspan="6">Meeting</th></tr></thead><tbody>${buildTableRows(meetingRows, true)}</tbody></table>
 </body></html>`
@@ -7286,7 +7315,7 @@ export default function CommonViewPage() {
       },
       {
         id: "waitingClient",
-        label: "WAITING FOR CLIENT",
+        label: "WFE",
         count: waitingClientItems.length,
         headerClass: "swimlane-header waiting-client",
         badgeClass: "swimlane-badge waiting-client",
@@ -14686,7 +14715,7 @@ export default function CommonViewPage() {
                 {formatDateTimeDMY(printedAt)}
               </div>
             </div>
-            <OneHPrintChecklists />
+            <OneHPrintChecklists reportDay={new Date(`${calendarDateIso}T12:00:00`)} />
             <table className="single-day-print-table">
               <colgroup>
                 <col className="single-day-print-number-column" />
