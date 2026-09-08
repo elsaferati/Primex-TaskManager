@@ -532,9 +532,24 @@ def _task_due_day(item: dict[str, Any]) -> date | None:
         return None
 
 
+def _task_start_day(item: dict[str, Any]) -> date | None:
+    raw = (
+        item.get("start_date")
+        or item.get("startDate")
+        or item.get("date")
+    )
+    if isinstance(raw, datetime):
+        return raw.date()
+    if isinstance(raw, date):
+        return raw
+    try:
+        return date.fromisoformat(str(raw or "")[:10])
+    except ValueError:
+        return None
+
+
 def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[str, str]:
     top_badges: list[str] = []
-    due_badge = ""
     badge_base = (
         "display:inline-block;float:right;margin:0 0 3px 4px;padding:3px 7px;border-radius:999px;"
         "font-family:Arial,sans-serif;font-size:10px;font-weight:800;line-height:1;white-space:nowrap;"
@@ -553,25 +568,35 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
         top_badges.append(
             f'<span data-task-badge="08:00" style="{eight_am_style}">08:00</span>'
         )
-    if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
-        due_day = _task_due_day(item)
-        if due_day:
-            due_today = report_date is not None and due_day == report_date
-            due_label = "SOT" if due_today else due_day.strftime("%d.%m.%Y")
-            style = (
-                "display:inline-block;padding:2px 5px;border:1px solid #93C5FD;border-radius:3px;"
-                "background-color:#EFF6FF;color:#1D4ED8;font-family:Arial,sans-serif;"
-                "font-size:11px;font-weight:900;line-height:1.1;white-space:nowrap;"
-                if due_today else
-                "display:inline-block;padding:1px 0;border:0;background-color:transparent;color:#FFFFFF;"
-                "font-family:Arial,sans-serif;font-size:10px;font-weight:900;line-height:1.1;white-space:nowrap;"
-            )
-            due_badge = (
-                f'<span data-task-badge="due-date" data-badge-position="bottom-right" '
-                f'data-due-today="{str(due_day == report_date).lower()}" '
-                f'style="{style}">{due_label}</span>'
-            )
-    return "".join(top_badges), due_badge
+    date_badge_base = (
+        "display:inline-block;box-sizing:border-box;height:19px;padding:2px 5px;"
+        "border:1px solid #93C5FD;border-radius:3px;vertical-align:bottom;"
+        "background-color:#EFF6FF;color:#1D4ED8;font-family:Arial,sans-serif;"
+        "font-size:10px;font-weight:900;line-height:13px;white-space:nowrap;"
+    )
+    start_day = _task_start_day(item)
+    due_day = _task_due_day(item)
+    start_badge = (
+            f'<span data-task-badge="start-date" style="{date_badge_base}">'
+            f'{start_day:%d.%m.%Y}</span>'
+        if start_day else ""
+    )
+    due_badge = (
+            f'<span data-task-badge="due-date" data-badge-position="bottom-right" '
+            f'data-due-today="{str(due_day == report_date).lower()}" '
+            f'style="{date_badge_base}border:3px solid #B91C1C;padding:0 3px;">{due_day:%d.%m.%Y}</span>'
+        if due_day else ""
+    )
+    date_badges = ""
+    if start_badge or due_badge:
+        date_badges = (
+            '<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" '
+            'style="width:100%;border-collapse:collapse;table-layout:fixed;"><tr>'
+            f'<td height="19" valign="bottom" align="left" style="height:19px;padding:0;text-align:left;vertical-align:bottom;white-space:nowrap;">{start_badge}</td>'
+            f'<td height="19" valign="bottom" align="right" style="height:19px;padding:0;text-align:right;vertical-align:bottom;white-space:nowrap;">{due_badge}</td>'
+            '</tr></table>'
+        )
+    return "".join(top_badges), date_badges
 
 
 def _personal_task_group(item: dict[str, Any]) -> str:
@@ -736,8 +761,49 @@ def _html_table(
         chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
         for chunk_index, chunk in enumerate(chunks):
             row_divider_style = INTRA_SLOT_DIVIDER_STYLE if chunk_index else SLOT_DIVIDER_STYLE
-            if not meeting and chunk_index == len(chunks) - 1:
-                row_divider_style = f"{row_divider_style};{SLOT_END_DIVIDER_STYLE}"
+            if not meeting:
+                title_cells: list[str] = []
+                date_cells: list[str] = []
+                for item_index in range(6):
+                    item = chunk[item_index] if item_index < len(chunk) else None
+                    if item is None:
+                        background = ""
+                        title_style = f"{CELL_STYLE};{row_divider_style};border-bottom:0;padding-bottom:2px"
+                        date_style = f"{CELL_STYLE};border-top:0;padding-top:0;vertical-align:bottom;height:25px"
+                        date_badges = ""
+                    else:
+                        cell_style, color = _task_cell_style(
+                            item, personal=personal, report_date=report_date
+                        )
+                        background = f' bgcolor="{color}"' if color else ""
+                        title_style = f"{cell_style};{row_divider_style};border-bottom:0;padding-bottom:2px"
+                        date_style = f"{cell_style};border-top:0;padding-top:0;vertical-align:bottom;height:25px"
+                        badges, date_badges = _task_badges_html(item, report_date)
+                        title = _task_title(item, personal=personal)
+                        title_html = _task_title_html(title, red_background=color == DEADLINE_COLOR)
+                        task_number = item_index + (chunk_index * 6) + 1
+                        title_cells.append(
+                            f'<td{background} style="{title_style}">{badges}{task_number}. {title_html}</td>'
+                        )
+                    if chunk_index == len(chunks) - 1:
+                        date_style = f"{date_style};{SLOT_END_DIVIDER_STYLE}"
+                    if item is None:
+                        title_cells.append(f'<td style="{title_style}"></td>')
+                    date_cells.append(
+                        f'<td{background} height="25" valign="bottom" '
+                        f'style="{date_style}">{date_badges}</td>'
+                    )
+
+                label_divider_style = f"{SLOT_DIVIDER_STYLE};{SLOT_END_DIVIDER_STYLE}"
+                row_header = (
+                    f'<th rowspan="{len(chunks) * 2}" style="{SLOT_LABEL_STYLE};{label_divider_style}">{number}</th>'
+                    f'<th rowspan="{len(chunks) * 2}" style="{PERSONAL_ROW_LABEL_STYLE if personal else SLOT_LABEL_STYLE};{label_divider_style}">{row_label_html(label, personal)}</th>'
+                    if chunk_index == 0 else ""
+                )
+                body.append(f'<tr data-task-card-row="content">{row_header}{"".join(title_cells)}</tr>')
+                body.append(f'<tr data-task-card-row="dates">{"".join(date_cells)}</tr>')
+                continue
+
             cells: list[str] = []
             for item_index, item in enumerate(chunk):
                 value = (
@@ -759,22 +825,13 @@ def _html_table(
                     )
                 cell_style = f"{cell_style};{row_divider_style}"
                 background = f' bgcolor="{color}"' if color else ""
-                badges, due_badge = ("", "") if meeting else _task_badges_html(item, report_date)
+                badges, _ = ("", "") if meeting else _task_badges_html(item, report_date)
                 title_html = (
                     html.escape(value)
                     if meeting
                     else _task_title_html(value, red_background=color == DEADLINE_COLOR)
                 )
                 task_content = f'{badges}{item_index + (chunk_index * 6) + 1}. {title_html}'
-                if due_badge:
-                    task_content = (
-                        '<table role="presentation" width="100%" height="100%" border="0" cellpadding="0" '
-                        'cellspacing="0" style="width:100%;height:100%;border-collapse:collapse;">'
-                        f'<tr><td valign="top" style="padding:0;vertical-align:top;">{task_content}</td></tr>'
-                        '<tr><td valign="bottom" align="right" '
-                        'style="padding:6px 0 0;text-align:right;vertical-align:bottom;">'
-                        f'{due_badge}</td></tr></table>'
-                    )
                 cells.append(
                     f'<td{background} style="{cell_style}">{task_content}</td>'
                 )
@@ -2328,6 +2385,10 @@ async def build_today_print_report(
 
 async def send_tomorrow_print_report(report: dict[str, Any], recipients: dict[str, list[str]]) -> dict[str, Any]:
     recipients = ensure_required_shtypi_recipient(recipients)
-    return await GmailService().send_verified(
+    sender = "130primex.eu@gmail.com"
+    password = os.getenv("EMAIL_PASSWORD") or settings.EMAIL_PASSWORD
+    if not password:
+        raise ValueError("Missing email configuration: EMAIL_PASSWORD")
+    return await GmailService(sender=sender, password=password).send_verified(
         report["subject"], recipients, report["plain_text"], report["html"], attachments=report.get("attachments")
     )

@@ -49,8 +49,6 @@ class MeetingScheduleRequestBase(BaseModel):
             raise ValueError("Meeting start and end must include a timezone")
         if self.ends_at <= self.starts_at:
             raise ValueError("Meeting end time must be after its start time")
-        if self.meeting_type == "external" and self.client_email is None:
-            raise ValueError("Client email is required for external meetings")
         return self
 
 

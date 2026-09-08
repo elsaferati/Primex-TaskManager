@@ -1,9 +1,12 @@
 from io import BytesIO
+import asyncio
 from datetime import date
+from unittest.mock import patch
 
 from openpyxl import load_workbook
 from openpyxl.cell.rich_text import CellRichText
 
+from app.config import settings
 from app.services.tomorrow_print_report import (
     _comment_user_initials,
     _comments_table_html,
@@ -18,6 +21,7 @@ from app.services.tomorrow_print_report import (
     build_today_print_report,
     build_tomorrow_print_report,
     ensure_required_shtypi_recipient,
+    send_tomorrow_print_report,
 )
 
 
@@ -119,6 +123,63 @@ def test_required_shtypi_recipients_are_always_in_to_without_duplicates() -> Non
     }
 
 
+def test_shtypi_send_uses_dedicated_130_mailbox(monkeypatch) -> None:
+    monkeypatch.setenv("EMAIL_USER", "315primex.eu@gmail.com")
+    monkeypatch.setenv("EMAIL_PASSWORD", "existing-130-password")
+    smtp_calls = {}
+
+    class FakeSmtp:
+        def __init__(self, host, port, timeout):
+            smtp_calls["connection"] = (host, port, timeout)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def ehlo(self):
+            return None
+
+        def starttls(self, **kwargs):
+            return None
+
+        def login(self, sender, password):
+            smtp_calls["login"] = (sender, password)
+
+        def send_message(self, message, *, from_addr, to_addrs):
+            smtp_calls["from_header"] = message["From"]
+            smtp_calls["from_addr"] = from_addr
+            smtp_calls["to_addrs"] = to_addrs
+
+    with patch("app.services.primeflow_report.smtplib.SMTP", FakeSmtp):
+        asyncio.run(send_tomorrow_print_report(
+            {"subject": "1H", "plain_text": "plain", "html": "<p>html</p>"},
+            {"to": ["ga@primexeu.com"], "cc": [], "bcc": []},
+        ))
+
+    assert smtp_calls["login"] == (
+        "130primex.eu@gmail.com", "existing-130-password"
+    )
+    assert smtp_calls["from_header"] == "130primex.eu@gmail.com"
+    assert smtp_calls["from_addr"] == "130primex.eu@gmail.com"
+
+
+def test_shtypi_send_requires_existing_email_password(monkeypatch) -> None:
+    monkeypatch.delenv("EMAIL_PASSWORD", raising=False)
+
+    with patch.object(settings, "EMAIL_PASSWORD", None):
+        try:
+            asyncio.run(send_tomorrow_print_report(
+                {"subject": "1H", "plain_text": "plain", "html": "<p>html</p>"},
+                {"to": ["ga@primexeu.com"], "cc": [], "bcc": []},
+            ))
+        except ValueError as exc:
+            assert str(exc) == "Missing email configuration: EMAIL_PASSWORD"
+        else:
+            raise AssertionError("SHTYPI delivery must require the existing SMTP password")
+
+
 def test_staff_comment_users_keep_fixed_order_then_pcm_weekly_plan_order() -> None:
     payload = {
         "departments": [
@@ -198,7 +259,9 @@ def test_html_table_keeps_grid_styles_inline_for_email_clients() -> None:
     assert ">TASK 1</th>" not in report_html
     assert ">TASK 6</th>" not in report_html
     assert 'bgcolor="#D8B4FE"' in report_html
-    assert report_html.count('background-color:#D8B4FE') == 1
+    assert report_html.count('background-color:#D8B4FE') == 2
+    assert 'data-task-card-row="content"' in report_html
+    assert 'data-task-card-row="dates"' in report_html
     assert '<style>' not in report_html
 
 
@@ -451,9 +514,14 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
             "title": "Deadline task",
             "status": "TODO",
             "is_deadline_important": True,
+            "start_date": "2026-08-13T08:00:00+02:00",
             "due_date": "2026-08-14T16:00:00+02:00",
         },
-        {"title": "Morning task", "status": "TODO", "due_date": "2026-08-14T08:00:00+02:00"},
+        {
+            "title": "Morning task", "status": "TODO",
+            "start_date": "2026-08-14T08:00:00+02:00",
+            "due_date": "2026-08-14T08:00:00+02:00",
+        },
     ]
     report_html = _html_table([("DEADLINE / 08:00", tasks, False)], report_date=date(2026, 8, 14))
 
@@ -461,11 +529,12 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     assert 'bgcolor="#FFC4ED"' in report_html
     assert "border:2px solid #DC2626" in report_html
     assert 'data-task-badge="08:00"' in report_html
-    assert report_html.count('data-task-badge="due-date"') == 1
+    assert report_html.count('data-task-badge="start-date"') == 2
+    assert report_html.count('data-task-badge="due-date"') == 2
     assert 'data-badge-position="bottom-right"' in report_html
     assert 'data-due-today="true"' in report_html
-    assert ">SOT</span>" in report_html
-    assert ">14.08.2026</span>" not in report_html
+    assert ">13.08.2026</span>" in report_html
+    assert report_html.count(">14.08.2026</span>") == 3
     assert "DUE TODAY" not in report_html
     assert "background-color:#EFF6FF" in report_html
     assert "border:1px solid #93C5FD" in report_html
@@ -474,8 +543,12 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     assert "border:1px solid #B91C1C" in report_html
     assert "color:#FFFFFF" in report_html
     assert "font-weight:900" in report_html
-    assert 'height="100%"' in report_html
-    assert 'valign="bottom" align="right"' in report_html
+    assert 'data-task-card-row="dates"' in report_html
+    assert 'height="25" valign="bottom"' in report_html
+    assert 'align="left"' in report_html
+    assert 'align="right"' in report_html
+    assert 'height="19" valign="bottom"' in report_html
+    assert "border:3px solid #B91C1C" in report_html
     assert "position:absolute" not in report_html
 
     _, content, _ = _excel_table_attachment([("DEADLINE / 08:00", tasks, False)], [], date(2026, 8, 14))
@@ -506,7 +579,7 @@ def test_ga_personal_purple_overrides_deadline_red_in_email_and_excel() -> None:
     assert 'bgcolor="#D8B4FE"' in report_html
     assert 'bgcolor="#DC2626"' in report_html
     assert report_html.count('data-task-badge="due-date"') == 2
-    assert report_html.count(">SOT</span>") == 2
+    assert report_html.count(">14.08.2026</span>") == 2
 
     _, content, _ = _excel_table_attachment(rows, [], date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
@@ -527,7 +600,7 @@ def test_done_task_stays_green_even_when_it_is_a_deadline() -> None:
     report_html = _html_table(rows, report_date=date(2026, 9, 3))
     assert 'bgcolor="#C4FDC4"' in report_html
     assert 'bgcolor="#DC2626"' not in report_html
-    assert "border:2px solid #DC2626" in report_html
+    assert "border:3px solid #B91C1C" in report_html
 
     _, content, _ = _excel_table_attachment(rows, [], date(2026, 9, 3))
     sheet = load_workbook(BytesIO(content), rich_text=True).active
@@ -569,7 +642,7 @@ def test_wfc_title_token_is_red_and_uses_white_highlight_on_red_deadline_cards()
     assert purple_card_wfc.font.color.rgb == "FFDC2626"
 
 
-def test_future_deadline_uses_plain_white_date_text_on_the_red_cell() -> None:
+def test_future_deadline_uses_the_due_date_chip_on_the_red_cell() -> None:
     report_html = _html_table(
         [
             (
@@ -585,10 +658,12 @@ def test_future_deadline_uses_plain_white_date_text_on_the_red_cell() -> None:
     assert ">15.08.2026</span>" in report_html
     assert "DUE" not in report_html
     assert 'bgcolor="#DC2626"' in report_html
-    assert "border:0;background-color:transparent;color:#FFFFFF" in report_html
+    assert "border:3px solid #B91C1C" in report_html
+    assert "background-color:#EFF6FF" in report_html
+    assert "color:#1D4ED8" in report_html
 
 
-def test_overdue_deadline_uses_white_date_text_on_the_red_cell() -> None:
+def test_overdue_deadline_uses_the_due_date_chip_on_the_red_cell() -> None:
     report_html = _html_table(
         [(
             "1H 10:00",
@@ -600,7 +675,9 @@ def test_overdue_deadline_uses_white_date_text_on_the_red_cell() -> None:
 
     assert 'bgcolor="#DC2626"' in report_html
     assert ">13.08.2026</span>" in report_html
-    assert "border:0;background-color:transparent;color:#FFFFFF" in report_html
+    assert "border:3px solid #B91C1C" in report_html
+    assert "background-color:#EFF6FF" in report_html
+    assert "color:#1D4ED8" in report_html
     assert "DUE" not in report_html
 
 

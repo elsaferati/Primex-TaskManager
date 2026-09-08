@@ -404,11 +404,6 @@ async def _provision_external_calendar_event(
         for user in participants
         if user.email
     }
-    if row.client_email:
-        attendee_map[row.client_email.casefold()] = {
-            "email": row.client_email,
-            "name": row.client_name or row.client_email,
-        }
     row.status = "CREATING_TEAMS"
     try:
         event = await create_calendar_event(
