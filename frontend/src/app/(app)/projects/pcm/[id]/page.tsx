@@ -1474,6 +1474,18 @@ export default function PcmProjectPage() {
     void load()
   }, [apiFetch, projectId])
 
+  const reloadProjectTasks = React.useCallback(
+    async (targetProjectId?: string) => {
+      const id = targetProjectId || project?.id
+      if (!id) return false
+      const res = await apiFetch(`/tasks?project_id=${id}&include_done=true`)
+      if (!res.ok) return false
+      setTasks((await res.json()) as Task[])
+      return true
+    },
+    [apiFetch, project?.id]
+  )
+
   React.useEffect(() => {
     if (project?.current_phase) setViewedPhase(project.current_phase)
   }, [project?.current_phase])
@@ -2216,7 +2228,8 @@ export default function PcmProjectPage() {
         return
       }
       const created = (await res.json()) as Task
-      setTasks((prev) => [created, ...prev])
+      const reloaded = await reloadProjectTasks(project.id)
+      if (!reloaded) setTasks((prev) => [created, ...prev])
       setCreateOpen(false)
       setNewTitle("")
       setNewDescription("")
@@ -4830,7 +4843,8 @@ export default function PcmProjectPage() {
                               return
                             }
                             const created = (await res.json()) as Task
-                            setTasks((prev) => [...prev, created])
+                            const reloaded = await reloadProjectTasks(project.id)
+                            if (!reloaded) setTasks((prev) => [...prev, created])
                             setVsVlTaskTitle("")
                             setVsVlTaskDetail("")
                             setVsVlTaskDate("")
@@ -6622,7 +6636,8 @@ export default function PcmProjectPage() {
                                 return
                               }
                               const created = (await res.json()) as Task
-                              setTasks((prev) => [...prev, created])
+                              const reloaded = await reloadProjectTasks(project.id)
+                              if (!reloaded) setTasks((prev) => [...prev, created])
                               setNewInlineTaskTitle("")
                               setNewInlineTaskAssignee("__unassigned__")
                               setNewInlineTaskStartDate("")
