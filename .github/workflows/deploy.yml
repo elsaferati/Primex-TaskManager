@@ -233,9 +233,15 @@ jobs:
           cd backend
  
           REM Celery worker and Beat own weekly audit generation and delivery.
-          REM PM2 accepts multiple ecosystem app names in one call, which preserves
-          REM the delete/start lifecycle while avoiding repeated CLI startup cost.
-          call pm2 delete ecosystem.config.cjs --only "primex-backend,primeflow-mcp,primeflow-report-scheduler,primex-tomorrow-shtypi-scheduler,celery_worker,celery_beat" || ver > NUL
+          REM Delete each managed process explicitly. PM2's --only option accepts a
+          REM single ecosystem app name; a comma-separated value leaves the old
+          REM scheduler supervised and PM2 immediately respawns it after it is killed.
+          call pm2 delete primex-backend || ver > NUL
+          call pm2 delete primeflow-mcp || ver > NUL
+          call pm2 delete primeflow-report-scheduler || ver > NUL
+          call pm2 delete primex-tomorrow-shtypi-scheduler || ver > NUL
+          call pm2 delete celery_worker || ver > NUL
+          call pm2 delete celery_beat || ver > NUL
 
           REM PM2 can only delete processes it still owns. Remove any orphaned
           REM legacy scheduler before the new one can compete for delivery locks.
@@ -268,7 +274,17 @@ jobs:
           powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Write-Host ('Killing stale listener PID ' + $_ + ' on port 8000'); Stop-Process -Id $_ -Force }"
           powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8010 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Write-Host ('Killing stale listener PID ' + $_ + ' on port 8010'); Stop-Process -Id $_ -Force }"
 
-          call pm2 start ecosystem.config.cjs --only "primex-backend,primeflow-mcp,primeflow-report-scheduler,primex-tomorrow-shtypi-scheduler,celery_worker,celery_beat" --update-env
+          call pm2 start ecosystem.config.cjs --only primex-backend --update-env
+          if errorlevel 1 exit /b 1
+          call pm2 start ecosystem.config.cjs --only primeflow-mcp --update-env
+          if errorlevel 1 exit /b 1
+          call pm2 start ecosystem.config.cjs --only primeflow-report-scheduler --update-env
+          if errorlevel 1 exit /b 1
+          call pm2 start ecosystem.config.cjs --only primex-tomorrow-shtypi-scheduler --update-env
+          if errorlevel 1 exit /b 1
+          call pm2 start ecosystem.config.cjs --only celery_worker --update-env
+          if errorlevel 1 exit /b 1
+          call pm2 start ecosystem.config.cjs --only celery_beat --update-env
           if errorlevel 1 exit /b 1
           call pm2 describe primex-backend | findstr /I "status"
           call pm2 describe primeflow-mcp | findstr /I "status"
