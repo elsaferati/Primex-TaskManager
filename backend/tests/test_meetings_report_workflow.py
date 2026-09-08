@@ -636,13 +636,15 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         html = _render_ascii_table_html(
             [
                 "| NR | KOHA | TITULLI |",
-                "| 1 | 10:00 | One-off meeting [[mt:non_daily_weekly]] |",
+                "| 1 | 10:00 | One-off meeting [[mc:meeting-red]] [[mt:non_daily_weekly]] |",
             ]
         )
 
-        self.assertIn('class="highlight"', html)
+        self.assertIn('class="meeting-red highlight"', html)
         self.assertIn('class="title"', html)
+        self.assertIn('bgcolor="#FFD5DC"', html)
         self.assertNotIn("[[mt:non_daily_weekly]]", html)
+        self.assertNotIn("[[mc:meeting-red]]", html)
 
     def test_common_view_one_time_meetings_receive_the_highlight_marker(self) -> None:
         lines = _common_meeting_lines(
@@ -669,9 +671,9 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         self.assertEqual(
             lines,
             [
-                "- 08:30: First meeting [[mt:non_daily_weekly]]",
-                "- 10:15: Earlier meeting [[mt:non_daily_weekly]]",
-                "- 13:15: Later meeting [[mt:non_daily_weekly]]",
+                "- 08:30: First meeting [[mc:meeting-blue]] [[mt:non_daily_weekly]]",
+                "- 10:15: Earlier meeting [[mc:meeting-blue]] [[mt:non_daily_weekly]]",
+                "- 13:15: Later meeting [[mc:meeting-blue]] [[mt:non_daily_weekly]]",
             ],
         )
 

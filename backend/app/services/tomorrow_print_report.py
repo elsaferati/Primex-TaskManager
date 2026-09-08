@@ -23,6 +23,7 @@ from docx.shared import Inches, Pt, RGBColor
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.services.meeting_palette import meeting_report_color
 from app.services.meetings_report import common_view_item_sort_key, next_working_day
 from app.services.primeflow_report import GmailService, PrimeFlowClient
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
@@ -682,11 +683,13 @@ def _html_table(
                     else _task_title(item, personal=personal)
                 )
                 if meeting:
+                    meeting_type = "internal" if "INT" in label.upper() else "external"
+                    color = meeting_report_color(item, meeting_type=meeting_type)
                     cell_style = (
                         f"{CELL_STYLE};border:2px solid {NON_ROUTINE_MEETING_BORDER_COLOR}"
                         if _is_non_routine_meeting(item) else CELL_STYLE
                     )
-                    color = ""
+                    cell_style = f"{cell_style};background-color:{color}"
                 else:
                     cell_style, color = _task_cell_style(
                         item, personal=personal, report_date=report_date
@@ -742,7 +745,7 @@ def _dated_meetings_html(
     divider_style = "border-left:4px solid #2563EB"
 
     def meeting_value_cells(
-        item: dict[str, Any] | None, index: int, divider: str
+        item: dict[str, Any] | None, index: int, divider: str, label: str
     ) -> str:
         if item is None:
             return (
@@ -751,15 +754,18 @@ def _dated_meetings_html(
             )
         meeting_time = str(item.get("time") or "-").strip() or "-"
         value = _report_text(_first_line(item.get("title")))
+        meeting_type = "internal" if "INT" in label.upper() else "external"
+        color = meeting_report_color(item, meeting_type=meeting_type)
+        background = f' bgcolor="{color}"'
         highlight = (
             f";border:2px solid {NON_ROUTINE_MEETING_BORDER_COLOR}"
             if _is_non_routine_meeting(item)
             else ""
         )
         return (
-            f'<td data-meeting-time="true" style="{CELL_STYLE};{divider}{highlight};white-space:nowrap">'
+            f'<td data-meeting-time="true"{background} style="{CELL_STYLE};{divider}{highlight};background-color:{color};white-space:nowrap">'
             f'{html.escape(meeting_time)}</td>'
-            f'<td data-meeting-cell="true" style="{CELL_STYLE};{divider}{highlight}">'
+            f'<td data-meeting-cell="true"{background} style="{CELL_STYLE};{divider}{highlight};background-color:{color}">'
             f"{index}. {html.escape(value)}</td>"
         )
 
@@ -795,11 +801,13 @@ def _dated_meetings_html(
                 left_items[index] if index < len(left_items) else None,
                 index + 1,
                 row_divider,
+                label,
             )
             right_cells = meeting_value_cells(
                 right_items[index] if index < len(right_items) else None,
                 index + 1,
                 row_divider,
+                label,
             )
             body_rows.append(
                 '<tr data-meeting-row="true">'
@@ -1192,6 +1200,12 @@ def _excel_table_attachment(
                             cell.border = eight_am_border
                     elif _is_non_routine_meeting(item):
                         cell.border = non_routine_meeting_border
+                    if meeting:
+                        meeting_type = "internal" if "INT" in label.upper() else "external"
+                        cell.fill = PatternFill(
+                            "solid",
+                            fgColor=meeting_report_color(item, meeting_type=meeting_type).removeprefix("#"),
+                        )
                 for column in range(1, 9):
                     cell = sheet.cell(row_number, column)
                     is_highlighted_meeting_cell = (
@@ -1262,10 +1276,17 @@ def _excel_table_attachment(
                 f"{index}. {_report_text(_first_line(item.get('title')))}" if item else "-",
             )
             highlighted = item is not None and _is_non_routine_meeting(item)
+            meeting_type = "internal" if "INT" in label.upper() else "external"
+            meeting_fill = (
+                PatternFill("solid", fgColor=meeting_report_color(item, meeting_type=meeting_type).removeprefix("#"))
+                if item else None
+            )
             for column in range(1, 9):
                 cell = sheet.cell(row_number, column)
                 cell.border = non_routine_meeting_border if highlighted and column >= 3 else border
                 cell.alignment = Alignment(vertical="top", wrap_text=True)
+                if meeting_fill is not None and column >= 3:
+                    cell.fill = meeting_fill
             sheet.cell(row_number, 1).font = Font(bold=True)
             row_number += 1
         return row_number
@@ -1502,6 +1523,10 @@ def _docx_table_attachment(
         for index, (label, item) in enumerate(_flatten_meeting_rows(dated_rows), 1):
             row = meeting_table.add_row()
             set_cell(row.cells[0], label, bold=True)
+            meeting_type = "internal" if "INT" in label.upper() else "external"
+            meeting_fill = meeting_report_color(item, meeting_type=meeting_type)
+            shade(row.cells[1], meeting_fill)
+            shade(row.cells[2], meeting_fill)
             set_cell(row.cells[1], str(item.get("time") or "-").strip() or "-")
             set_cell(
                 row.cells[2],
@@ -1817,6 +1842,8 @@ def _core_png_table_attachment(
                 draw.rectangle((label_right, y, time_right, row_bottom), fill="#FFFFFF", outline="#111827")
                 draw.rectangle((time_right, y, content_right, row_bottom), fill="#FFFFFF", outline="#111827")
                 if item is not None:
+                    meeting_type = "internal" if "INT" in label.upper() else "external"
+                    meeting_fill = meeting_report_color(item, meeting_type=meeting_type)
                     outline = (
                         NON_ROUTINE_MEETING_BORDER_COLOR
                         if _is_non_routine_meeting(item)
@@ -1825,13 +1852,13 @@ def _core_png_table_attachment(
                     outline_width = 3 if outline == NON_ROUTINE_MEETING_BORDER_COLOR else 1
                     draw.rectangle(
                         (label_right, y, time_right, row_bottom),
-                        fill="#FFFFFF",
+                        fill=meeting_fill,
                         outline=outline,
                         width=outline_width,
                     )
                     draw.rectangle(
                         (time_right, y, content_right, row_bottom),
-                        fill="#FFFFFF",
+                        fill=meeting_fill,
                         outline=outline,
                         width=outline_width,
                     )

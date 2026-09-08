@@ -416,6 +416,32 @@ function splitMeetingHighlightMarker(value: string) {
   }
 }
 
+function splitMeetingToneMarker(value: string) {
+  const match = value.match(/\s*\[\[\s*mc\s*:\s*(meeting-(?:violet|blue|teal|yellow|brown|orange|red))\s*\]\]/i)
+  return {
+    text: value
+      .replace(/\s*\[\[\s*mc\s*:\s*meeting-(?:violet|blue|teal|yellow|brown|orange|red)\s*\]\]/gi, "")
+      .replace(/\s+/g, " ")
+      .trim(),
+    tone: match?.[1]?.toLowerCase() || "",
+  }
+}
+
+function meetingRowTone(headers: string[], cells: string[]) {
+  const titleIndex = headers.findIndex((header) => normalizeHeader(header) === "TITLE")
+  const tone = titleIndex >= 0 ? splitMeetingToneMarker(cells[titleIndex] || "").tone : ""
+  const tones: Record<string, string> = {
+    "meeting-violet": "!bg-[#E5E7FB]",
+    "meeting-blue": "!bg-[#DCECFF]",
+    "meeting-teal": "!bg-[#CCEFF1]",
+    "meeting-yellow": "!bg-[#FFE38F]",
+    "meeting-brown": "!bg-[#C9A98A]",
+    "meeting-orange": "!bg-[#FFD7AD]",
+    "meeting-red": "!bg-[#FFD5DC]",
+  }
+  return tones[tone] || ""
+}
+
 function hasMeetingHighlight(headers: string[], cells: string[]) {
   const titleIndex = headers.findIndex((header) => normalizeHeader(header) === "TITLE")
   return titleIndex >= 0 && splitMeetingHighlightMarker(cells[titleIndex] || "").highlighted
@@ -427,7 +453,11 @@ function withoutStatusColumn(headers: string[], cells: string[]) {
   const nextHeaders = statusIndex >= 0 ? headers.filter((_, index) => index !== statusIndex) : headers
   const nextCells = cells.map((cell, index) => {
     if (statusIndex >= 0 && index === statusIndex) return null
-    if (titleIndex >= 0 && index === titleIndex) return splitMeetingHighlightMarker(splitPriorityToneMarker(splitStatusMarker(cell).text).text).text
+    if (titleIndex >= 0 && index === titleIndex) {
+      return splitMeetingToneMarker(
+        splitMeetingHighlightMarker(splitPriorityToneMarker(splitStatusMarker(cell).text).text).text,
+      ).text
+    }
     return cell
   }).filter((cell): cell is string => cell !== null)
   return { headers: nextHeaders, cells: nextCells }
@@ -728,7 +758,7 @@ export function ReportSectionPreview({
           <tbody>
             {visibleDataRows.map((row, rowIndex) => {
                 const visible = withoutStatusColumn(row.headers, row.cells)
-                const tone = rowTone(row.label, row.cells, row.headers)
+                const tone = meetingRowTone(row.headers, row.cells) || rowTone(row.label, row.cells, row.headers)
                 const eightAmTask = isEightAmTaskRow(row.headers, row.cells, row.label)
                 const highlightedMeeting = hasMeetingHighlight(row.headers, row.cells)
                 const amPmDivider = hasAmPmDivider(row.label, visibleDataRows, rowIndex)

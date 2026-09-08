@@ -27,6 +27,7 @@ from app.models.user import User
 from app.services.common_leave import parse_common_view_annual_leave
 from app.services.daily_report_logic import business_days_between, planned_range_for_daily_report
 from app.services.daily_rlz_compliance import REASON_LABELS
+from app.services.meeting_palette import MEETING_TONE_COLORS, meeting_report_tone
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.primeflow_report import GmailService, report_timezone
 from app.services.primeflow_report import PrimeFlowClient
@@ -107,6 +108,10 @@ TITLE_PREFIX = re.compile(r"^[A-Z]{1,4}(?:/[A-Z]{1,4})?\s*:\s*", re.I)
 TASK_LINE_STATUS = re.compile(r"^\[([A-Z_]+)\]\s*")
 MEETING_HIGHLIGHT_MARKER = "[[mt:non_daily_weekly]]"
 MEETING_HIGHLIGHT_PATTERN = re.compile(r"\s*\[\[\s*mt\s*:\s*non_daily_weekly\s*\]\]", re.I)
+MEETING_TONE_PATTERN = re.compile(
+    r"\s*\[\[\s*mc\s*:\s*(meeting-(?:violet|blue|teal|yellow|brown|orange|red))\s*\]\]",
+    re.I,
+)
 TASK_TONE_PATTERN = re.compile(r"\s*\[\[\s*pt\s*:\s*(deadline|eight_am)\s*\]\]", re.I)
 ALL_ASSIGNEES_DISPLAY_THRESHOLD = 10
 WEEKLY_PLANNER_DEPARTMENT_ORDER = {"DEV": 0, "GD": 1, "PCM": 2}
@@ -1679,6 +1684,7 @@ def _meeting_lines(meetings: list[Meeting]) -> list[str]:
 
 def _meeting_title_with_highlight(meeting: Meeting) -> str:
     title = _clean_task_title(meeting.title)
+    title = f"{title} [[mc:{meeting_report_tone(meeting)}]]"
     recurrence = str(getattr(meeting, "recurrence_type", None) or "").strip().lower()
     if recurrence not in {"daily", "weekly"}:
         return f"{title} {MEETING_HIGHLIGHT_MARKER}"
@@ -1690,14 +1696,22 @@ def _split_meeting_highlight_marker(value: str) -> tuple[str, bool]:
     return MEETING_HIGHLIGHT_PATTERN.sub("", value or "").strip(), highlighted
 
 
+def _split_meeting_tone_marker(value: str) -> tuple[str, str]:
+    match = MEETING_TONE_PATTERN.search(value or "")
+    tone = match.group(1).lower() if match else ""
+    return MEETING_TONE_PATTERN.sub("", value or "").strip(), tone
+
+
 def _split_task_tone_marker(value: str) -> tuple[str, str]:
     match = TASK_TONE_PATTERN.search(value or "")
     tone = match.group(1).lower().replace("_", "-") if match else ""
     return TASK_TONE_PATTERN.sub("", value or "").strip(), tone
 
 
-def _append_meeting_highlight_marker(lines: list[str], highlighted: bool, width: int) -> list[str]:
+def _append_meeting_markers(lines: list[str], highlighted: bool, tone: str, width: int) -> list[str]:
     padded = [f"{line:<{width}}" for line in lines] or [f"{'-':<{width}}"]
+    if tone:
+        padded[-1] = f"{padded[-1].rstrip()} [[mc:{tone}]]"
     if highlighted:
         padded[-1] = f"{padded[-1].rstrip()} {MEETING_HIGHLIGHT_MARKER}"
     return padded
@@ -1721,7 +1735,8 @@ def _meeting_status_checkbox_table(meetings: list[Meeting], status_by_meeting: d
     for index, meeting in enumerate(sorted(meetings, key=_meeting_clock_sort_key), start=1):
         status = status_by_meeting.get(meeting.id, "")
         title_value, highlighted = _split_meeting_highlight_marker(_meeting_title_with_highlight(meeting))
-        title_lines = _append_meeting_highlight_marker(_wrap_fixed_width(title_value, 64), highlighted, 64)
+        title_value, meeting_tone = _split_meeting_tone_marker(title_value)
+        title_lines = _append_meeting_markers(_wrap_fixed_width(title_value, 64), highlighted, meeting_tone, 64)
         status_icon = "\u2713" if status == "held" else "\u2715" if status == "canceled" else ""
         rows.append(
             f"| {index:<2} | {_local_time(meeting.starts_at):<5} | {status_icon:<8} | {title_lines[0]} |"
@@ -2003,13 +2018,16 @@ async def _bz_template_metadata(db: AsyncSession) -> dict[str, tuple[str, str]]:
     return metadata
 
 
-def _common_meeting_lines(items: list[dict[str, Any]], day: date) -> list[str]:
+def _common_meeting_lines(
+    items: list[dict[str, Any]], day: date, meeting_type: str = "external"
+) -> list[str]:
     rows: list[tuple[tuple[int, int, str], str]] = []
     seen = set()
     for item in items:
         if _item_date(item) != day:
             continue
         title = _clean_task_title(str(item.get("title") or item.get("task_title") or "Meeting"))
+        title = f"{title} [[mc:{meeting_report_tone(item, meeting_type=meeting_type)}]]"
         recurrence = str(item.get("recurrence_type") or item.get("recurrenceType") or "").strip().lower()
         if recurrence not in {"daily", "weekly"}:
             title = f"{title} {MEETING_HIGHLIGHT_MARKER}"
@@ -2063,7 +2081,8 @@ def _tomorrow_meeting_table(title: str, lines: list[str]) -> list[str]:
         time_value = match.group(1) if match else "-"
         title_value = match.group(2) if match else value
         title_value, highlighted = _split_meeting_highlight_marker(title_value)
-        title_lines = _append_meeting_highlight_marker(_wrap_fixed_width(title_value, 64), highlighted, 64)
+        title_value, meeting_tone = _split_meeting_tone_marker(title_value)
+        title_lines = _append_meeting_markers(_wrap_fixed_width(title_value, 64), highlighted, meeting_tone, 64)
         rows.append(f"| {index:<2} | {time_value:<5} | {title_lines[0]} |")
         for line in title_lines[1:]:
             rows.append(f"| {'':<2} | {'':<5} | {line} |")
@@ -2211,8 +2230,14 @@ def _tomorrow_common_section(
     blocked_task_metadata: dict[str, tuple[str, str]] | None = None,
     with_status: bool = False,
 ) -> list[str]:
-    external = _prefer_common(_common_meeting_lines(common_items.get("external") or [], tomorrow), fallback_external)
-    internal = _prefer_common(_common_meeting_lines(common_items.get("internal") or [], tomorrow), fallback_internal)
+    external = _prefer_common(
+        _common_meeting_lines(common_items.get("external") or [], tomorrow, "external"),
+        fallback_external,
+    )
+    internal = _prefer_common(
+        _common_meeting_lines(common_items.get("internal") or [], tomorrow, "internal"),
+        fallback_internal,
+    )
     bz = _prefer_owned_common(
         _common_task_lines(common_items.get("bz") or [], tomorrow, include_status=with_status),
         fallback_bz,
@@ -2540,6 +2565,8 @@ def _sort_priority_task_rows(header: list[str], rows: list[list[str]]) -> list[l
 
 
 def _table_tone_styles(tone: str) -> tuple[str, str]:
+    if tone in MEETING_TONE_COLORS:
+        return MEETING_TONE_COLORS[tone], "#111827"
     if tone == "todo":
         return "#fbcfe8", "#111827"
     if tone == "in-progress":
@@ -2663,11 +2690,14 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
             cleaned_title, marker_status = _split_status_marker(row[title_index])
             cleaned_title, priority_tone = _split_task_tone_marker(cleaned_title)
             cleaned_title, is_highlighted_meeting = _split_meeting_highlight_marker(cleaned_title)
+            cleaned_title, meeting_tone = _split_meeting_tone_marker(cleaned_title)
             row[title_index] = cleaned_title
             if marker_status:
                 row_tone = _table_tone_from_status(marker_status) or row_tone
             if priority_tone:
                 row_tone = priority_tone
+            if meeting_tone:
+                row_tone = meeting_tone
         else:
             is_highlighted_meeting = False
         if products_index is not None and len(row) > products_index and _has_negative_product_delta(row[products_index]):
@@ -3156,10 +3186,13 @@ def _section_report_table_model(lines: list[str], tone: str = "") -> tuple[list[
             title, marker_status = _split_status_marker(row[title_index])
             title, priority_tone = _split_task_tone_marker(title)
             title, highlighted = _split_meeting_highlight_marker(title)
+            title, meeting_tone = _split_meeting_tone_marker(title)
             row[title_index] = title
             row_tone = _table_tone_from_status(marker_status) or row_tone
             if priority_tone:
                 row_tone = priority_tone
+            if meeting_tone:
+                row_tone = meeting_tone
         if products_index is not None and _has_negative_product_delta(row[products_index]):
             row_tone = "product-negative"
         if tone in {"deadline", "eight-am"}:

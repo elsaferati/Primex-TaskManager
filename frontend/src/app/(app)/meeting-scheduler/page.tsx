@@ -66,6 +66,7 @@ type CalendarItem = {
   status: string;
   teams_url?: string | null;
   microsoft_event_id?: string | null;
+  calendar_categories?: string[];
 };
 type MicrosoftEvent = {
   id: string;
@@ -73,6 +74,7 @@ type MicrosoftEvent = {
   starts_at?: string | null;
   ends_at?: string | null;
   location?: string | null;
+  categories?: string[];
 };
 
 const HOURS = Array.from({ length: 19 }, (_, index) => {
@@ -149,6 +151,59 @@ const meetingSchedulerError = async (
     // Non-JSON errors are returned below without hiding the server response.
   }
   return raw || fallback;
+};
+
+const calendarMeetingTone = (item: CalendarItem) => {
+  const categories = (item.calendar_categories || []).map((category) =>
+    category.trim().toLowerCase(),
+  );
+  if (
+    categories.some(
+      (category) =>
+        category.includes("daily") ||
+        category.includes("weekly") ||
+        category.includes("standup") ||
+        category.includes("brown"),
+    )
+  )
+    return "border-[#8B623D] bg-[#C9A98A] text-slate-950";
+  if (
+    categories.some(
+      (category) => category.includes("red") || category.includes("online"),
+    )
+  )
+    return "border-[#E55361] bg-[#FFD5DC] text-slate-950";
+  if (
+    categories.some(
+      (category) => category === "tak int" || category.includes("yellow"),
+    )
+  )
+    return "border-[#E6AD00] bg-[#FFE38F] text-slate-950";
+  if (categories.some((category) => category.includes("orange")))
+    return "border-[#E87922] bg-[#FFD7AD] text-slate-950";
+  if (
+    categories.some(
+      (category) =>
+        category.includes("event") ||
+        category.includes("evvent") ||
+        category.includes("fizik"),
+    )
+  )
+    return "border-[#35ABB4] bg-[#CCEFF1] text-slate-950";
+  if (
+    categories.some(
+      (category) => category.includes("purple") || category.includes("violet"),
+    )
+  )
+    return "border-[#7167D9] bg-[#E5E7FB] text-slate-950";
+  if (categories.some((category) => category.includes("blue")))
+    return "border-[#5B9FE8] bg-[#DCECFF] text-slate-950";
+
+  if (item.source === "microsoft" || item.microsoft_event_id)
+    return "border-[#E55361] bg-[#FFD5DC] text-slate-950";
+  if (item.meeting_type === "internal")
+    return "border-[#E6AD00] bg-[#FFE38F] text-slate-950";
+  return "border-[#5B9FE8] bg-[#DCECFF] text-slate-950";
 };
 
 export default function MeetingSchedulerPage() {
@@ -414,6 +469,7 @@ export default function MeetingSchedulerPage() {
         starts_at: item.starts_at!,
         ends_at: item.ends_at || item.starts_at!,
         status: "BUSY",
+        calendar_categories: item.categories || [],
       }));
     return [...primeflow, ...microsoft];
   };
@@ -537,7 +593,7 @@ export default function MeetingSchedulerPage() {
                         {items.map((item) => (
                           <div
                             key={item.id}
-                            className={`mb-1 truncate rounded border px-1.5 py-1 text-[10px] font-medium ${item.source === "microsoft" ? "border-violet-200 bg-violet-50 text-violet-800" : item.meeting_type === "external" ? "border-blue-200 bg-blue-50 text-blue-800" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}
+                            className={`mb-1 truncate rounded border px-1.5 py-1 text-[10px] font-medium ${calendarMeetingTone(item)}`}
                             title={item.title}
                           >
                             {item.title}

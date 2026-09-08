@@ -348,22 +348,51 @@ type InternalItem = {
   recurrence_type?: string | null
 }
 
-const outlookCategoryTone = (categories?: string[]) => {
+const meetingLegendTone = ({
+  categories,
+  recurrenceType,
+  meetingType,
+  calendarImported,
+}: {
+  categories?: string[]
+  recurrenceType?: string | null
+  meetingType: "external" | "internal"
+  calendarImported?: boolean
+}) => {
   const values = (categories || []).map((category) => category.trim().toLowerCase())
-  if (values.some((category) => category.includes("red"))) return "outlook-red"
-  if (values.some((category) => category === "tak int" || category.includes("yellow"))) return "outlook-yellow"
-  if (values.some((category) => category.includes("daily") || category.includes("weekly"))) return "outlook-orange"
+  const normalizedRecurrence = (recurrenceType || "").trim().toLowerCase()
+
+  // Mirror the category palette used by the shared Outlook / Teams calendar.
   if (
     values.some(
       (category) =>
-        category.includes("blue") ||
-        category.includes("event") ||
-        category.includes("evvent") ||
-        category.includes("fizik")
+        category.includes("daily") ||
+        category.includes("weekly") ||
+        category.includes("standup") ||
+        category.includes("brown")
+    )
+  )
+    return "outlook-brown"
+  if (values.some((category) => category.includes("red") || category.includes("online"))) return "outlook-red"
+  if (values.some((category) => category === "tak int" || category.includes("yellow"))) return "outlook-yellow"
+  if (values.some((category) => category.includes("orange"))) return "outlook-orange"
+  if (values.some((category) => category.includes("event") || category.includes("evvent") || category.includes("fizik")))
+    return "outlook-teal"
+  if (values.some((category) => category.includes("purple") || category.includes("violet"))) return "outlook-violet"
+  if (
+    values.some(
+      (category) => category.includes("blue")
     )
   )
     return "outlook-blue"
-  return "outlook-violet"
+
+  // Uncategorized Outlook/Teams events are TAK EXT online meetings in Common
+  // View, so show them with the red external-online tone instead of purple.
+  if (calendarImported) return "outlook-red"
+  if (meetingType === "internal") return "outlook-yellow"
+  if (["weekly", "daily"].includes(normalizedRecurrence))
+    return "outlook-brown"
+  return "outlook-blue"
 }
 
 const isCalendarAnnualLeave = (title?: string, categories?: string[]) =>
@@ -7052,7 +7081,12 @@ export default function CommonViewPage() {
       dateLabel: formatDateHuman(x.date),
       accentClass: [
         "swimlane-accent external",
-        x.calendarImported ? outlookCategoryTone(x.calendarCategories) : "",
+        meetingLegendTone({
+          categories: x.calendarCategories,
+          recurrenceType: x.recurrenceType ?? x.recurrence_type,
+          meetingType: "external",
+          calendarImported: x.calendarImported,
+        }),
         isOneTimeMeeting(x.recurrenceType ?? x.recurrence_type) ? "one-time-meeting" : "",
       ]
         .filter(Boolean)
@@ -7070,6 +7104,10 @@ export default function CommonViewPage() {
       dateLabel: formatDateHuman(x.date),
       accentClass: [
         "swimlane-accent internal",
+        meetingLegendTone({
+          recurrenceType: x.recurrenceType ?? x.recurrence_type,
+          meetingType: "internal",
+        }),
         isOneTimeMeeting(x.recurrenceType ?? x.recurrence_type) ? "one-time-meeting" : "",
       ]
         .filter(Boolean)
@@ -9011,11 +9049,13 @@ export default function CommonViewPage() {
           background: #ffffff;
           box-shadow: 0 6px 14px rgba(15, 23, 42, 0.04);
         }
-        .outlook-violet { background-color: #f5f3ff !important; border-color: #c4b5fd !important; }
-        .outlook-blue { background-color: #eff6ff !important; border-color: #93c5fd !important; }
-        .outlook-yellow { background-color: #fefce8 !important; border-color: #fde047 !important; }
-        .outlook-orange { background-color: #fff7ed !important; border-color: #fdba74 !important; }
-        .outlook-red { background-color: #fff1f2 !important; border-color: #fda4af !important; }
+        .outlook-violet { background: #e5e7fb !important; border-color: #7167d9 !important; }
+        .outlook-blue { background: #dcecff !important; border-color: #5b9fe8 !important; }
+        .outlook-teal { background: #cceff1 !important; border-color: #35abb4 !important; }
+        .outlook-yellow { background: #ffe38f !important; border-color: #e6ad00 !important; }
+        .outlook-brown { background: #c9a98a !important; border-color: #8b623d !important; }
+        .outlook-orange { background: #ffd7ad !important; border-color: #e87922 !important; }
+        .outlook-red { background: #ffd5dc !important; border-color: #e55361 !important; }
         .external-meeting-title {
           font-size: 13px;
           font-weight: 700;
@@ -13018,7 +13058,12 @@ export default function CommonViewPage() {
                     return (
                       <div
                         key={meeting.id}
-                        className={`external-meeting-card ${meeting.calendar_imported || meeting.microsoft_event_id ? outlookCategoryTone(meeting.calendar_categories) : ""}`}
+                        className={`external-meeting-card ${meetingLegendTone({
+                          categories: meeting.calendar_categories,
+                          recurrenceType: meeting.recurrence_type,
+                          meetingType: "external",
+                          calendarImported: Boolean(meeting.calendar_imported || meeting.microsoft_event_id),
+                        })}`}
                       >
                         {isEditing ? (
                           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
@@ -14529,7 +14574,12 @@ export default function CommonViewPage() {
                             key={idx}
                             className={[
                               "week-table-entry",
-                              e.calendarImported ? outlookCategoryTone(e.calendarCategories) : "",
+                              meetingLegendTone({
+                                categories: e.calendarCategories,
+                                recurrenceType: e.recurrenceType ?? e.recurrence_type,
+                                meetingType: "external",
+                                calendarImported: e.calendarImported,
+                              }),
                               isOneTimeMeeting(e.recurrenceType ?? e.recurrence_type) ? "one-time-meeting" : "",
                             ]
                               .filter(Boolean)
@@ -14551,6 +14601,10 @@ export default function CommonViewPage() {
                             key={idx}
                             className={[
                               "week-table-entry",
+                              meetingLegendTone({
+                                recurrenceType: e.recurrenceType ?? e.recurrence_type,
+                                meetingType: "internal",
+                              }),
                               isOneTimeMeeting(e.recurrenceType ?? e.recurrence_type) ? "one-time-meeting" : "",
                             ]
                               .filter(Boolean)
