@@ -56,9 +56,10 @@ def _base_payload(**overrides):
     return values
 
 
-def test_external_request_requires_client_email() -> None:
-    with pytest.raises(ValidationError):
-        MeetingScheduleRequestCreate(**_base_payload(client_email=None))
+def test_external_validation_does_not_require_client_email() -> None:
+    request = MeetingScheduleRequestCreate(**_base_payload(client_email=None))
+
+    assert request.client_email is None
 
 
 def test_request_end_must_be_after_start() -> None:
@@ -117,6 +118,76 @@ def test_microsoft_busy_item_becomes_conflict() -> None:
     )
     assert len(conflicts) == 1
     assert conflicts[0].source == "microsoft"
+
+
+def test_duplicate_microsoft_busy_items_are_returned_once() -> None:
+    start = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
+    busy_item = {
+        "status": "busy",
+        "start": {"dateTime": "2026-09-04T09:15:00+00:00"},
+        "end": {"dateTime": "2026-09-04T09:45:00+00:00"},
+    }
+
+    conflicts = microsoft_schedule_conflicts(
+        [{"scheduleId": "info@primexeu.com", "scheduleItems": [busy_item, busy_item]}],
+        starts_at=start,
+        ends_at=start + timedelta(hours=1),
+    )
+
+    assert len(conflicts) == 1
+
+
+def test_microsoft_pv_item_is_visible_calendar_info_not_a_conflict() -> None:
+    start = datetime(2026, 9, 8, 8, 0, tzinfo=timezone.utc)
+    conflicts = microsoft_schedule_conflicts(
+        [{
+            "scheduleId": "info@primexeu.com",
+            "scheduleItems": [{
+                "status": "busy",
+                "subject": "DV PV 07.09-20.09.2026",
+                "start": {"dateTime": "2026-09-08T08:00:00+00:00"},
+                "end": {"dateTime": "2026-09-08T08:30:00+00:00"},
+            }],
+        }],
+        starts_at=start,
+        ends_at=start + timedelta(hours=1),
+    )
+
+    assert conflicts == []
+
+
+def test_primeflow_pv_meeting_does_not_block_external_meeting() -> None:
+    start = datetime.now(timezone.utc) + timedelta(days=10)
+    pv = Meeting(
+        title="DV PV 07.09-20.09.2026",
+        meeting_type="external",
+        starts_at=start,
+        ends_at=start + timedelta(hours=1),
+        department_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+        calendar_imported=True,
+        calendar_sync_status="excluded",
+    )
+    pv.id = uuid.UUID("00000000-0000-0000-0000-000000000011")
+    participant = SimpleNamespace(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000002"),
+        is_active=True,
+    )
+    db = _ValidationDb([
+        [participant],
+        [(pv, participant.id)],
+        [pv],
+        [],
+        [],
+    ])
+    payload = MeetingScheduleValidationIn(**_base_payload(
+        starts_at=start,
+        ends_at=start + timedelta(minutes=30),
+    ))
+
+    result = asyncio.run(validate_meeting_schedule(db, payload))
+
+    assert result.can_create is True
+    assert result.conflicts == []
 
 
 def test_external_meeting_blocks_overlapping_external_without_shared_participants() -> None:

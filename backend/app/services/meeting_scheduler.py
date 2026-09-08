@@ -16,6 +16,7 @@ from app.models.meeting_schedule_request import (
 )
 from app.models.project import Project
 from app.models.user import User
+from app.services.microsoft_calendar_sync import is_annual_leave_title_or_categories
 from app.schemas.meeting_scheduler import (
     MeetingScheduleConflict,
     MeetingScheduleRequestBase,
@@ -26,6 +27,20 @@ from app.schemas.meeting_scheduler import (
 ACTIVE_REQUEST_STATUSES = {"PENDING_APPROVAL", "APPROVED", "CREATING_TEAMS", "CREATION_FAILED"}
 FINAL_REQUEST_STATUSES = {"CREATED", "REJECTED", "CANCELED"}
 DEFAULT_EXISTING_MEETING_DURATION = timedelta(minutes=60)
+
+
+def _blocks_meeting_schedule(meeting: Meeting) -> bool:
+    """PV/leave entries stay visible on the calendar but never reserve a meeting slot."""
+    if str(getattr(meeting, "calendar_sync_status", None) or "").strip().lower() in {
+        "cancelled",
+        "excluded",
+        "out_of_window",
+    }:
+        return False
+    return not is_annual_leave_title_or_categories(
+        getattr(meeting, "title", None),
+        getattr(meeting, "calendar_categories", None),
+    )
 
 
 def _app_timezone() -> ZoneInfo:
@@ -143,6 +158,8 @@ async def validate_meeting_schedule(
     meeting_participants: dict[uuid.UUID, set[uuid.UUID]] = {}
     meetings: dict[uuid.UUID, Meeting] = {}
     for meeting, participant_id in meeting_rows:
+        if not _blocks_meeting_schedule(meeting):
+            continue
         meetings[meeting.id] = meeting
         meeting_participants.setdefault(meeting.id, set()).add(participant_id)
 
@@ -162,6 +179,8 @@ async def validate_meeting_schedule(
             )
         ).scalars().all()
         for external_meeting in external_meetings:
+            if not _blocks_meeting_schedule(external_meeting):
+                continue
             meetings.setdefault(external_meeting.id, external_meeting)
 
     for meeting_id, meeting in meetings.items():
@@ -268,11 +287,16 @@ def microsoft_schedule_conflicts(
     ends_at: datetime,
 ) -> list[MeetingScheduleConflict]:
     result: list[MeetingScheduleConflict] = []
+    seen: set[tuple[str, str, datetime, datetime]] = set()
     for schedule in schedule_rows:
         email = str(schedule.get("scheduleId") or "Microsoft calendar")
         for item in schedule.get("scheduleItems") or []:
             status = str(item.get("status") or "").lower()
             if status in {"free", "unknown"}:
+                continue
+            if is_annual_leave_title_or_categories(
+                item.get("subject"), item.get("categories")
+            ):
                 continue
             try:
                 item_start = datetime.fromisoformat(str(item["start"]["dateTime"]).replace("Z", "+00:00"))
@@ -284,6 +308,10 @@ def microsoft_schedule_conflicts(
             except (KeyError, TypeError, ValueError):
                 continue
             if _overlaps(starts_at, ends_at, item_start, item_end):
+                conflict_key = (email.casefold(), status, item_start, item_end)
+                if conflict_key in seen:
+                    continue
+                seen.add(conflict_key)
                 result.append(
                     MeetingScheduleConflict(
                         source="microsoft",

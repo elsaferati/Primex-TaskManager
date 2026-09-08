@@ -1319,7 +1319,8 @@ export default function CommonViewPage() {
     date: string,
     isDone?: boolean,
     completedAt?: string | null,
-    startDate?: string | null
+    startDate?: string | null,
+    dueDate?: string | null
   ) => {
     if (isDone && completedAt) {
       const completed = new Date(completedAt)
@@ -1327,14 +1328,17 @@ export default function CommonViewPage() {
         return formatTime(completed)
       }
     }
-    const dateLabel = formatDateHuman(date)
-    if (!isDone && startDate) {
-      const start = parseDateOnly(startDate)
-      if (start) {
-        return formatDateHuman(toISODate(start))
-      }
-    }
-    return dateLabel
+    const start = parseDateOnly(startDate || date)
+    const due = parseDateOnly(dueDate || "")
+    const startLabel = start ? formatDateHuman(toISODate(start)) : formatDateHuman(date)
+    if (!due) return startLabel
+
+    const dueLabel = formatDateHuman(toISODate(due))
+    return `${startLabel} - ${dueLabel}`
+  }
+  const formatFastTaskCardDate = (value?: string | null) => {
+    const parsed = parseDateOnly(value || "")
+    return parsed ? formatDateHuman(toISODate(parsed)) : null
   }
   const computeNextOccurrenceDate = (params: {
     recurrenceType: "weekly" | "monthly" | "yearly"
@@ -4735,6 +4739,10 @@ export default function CommonViewPage() {
                       : undefined
                 ),
                 isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
+                startDate:
+                  typeof item.startDate === "string" ? item.startDate : typeof item.start_date === "string" ? item.start_date : undefined,
+                dueDate:
+                  typeof item.dueDate === "string" ? item.dueDate : typeof item.due_date === "string" ? item.due_date : undefined,
                 createdAt:
                   typeof item.createdAt === "string" ? item.createdAt : typeof item.created_at === "string" ? item.created_at : undefined,
                 status: typeof item.status === "string" ? item.status : undefined,
@@ -4776,6 +4784,15 @@ export default function CommonViewPage() {
           .sort((a, b) => String(a.time || "").localeCompare(String(b.time || "")) || String(a.title || "").localeCompare(String(b.title || ""))),
       }))
 
+      const printTaskDatesHtml = (item: PrintTask) => {
+        const startDate = normalizeCommonDateOnly(item.startDate || item.date)
+        const dueDate = normalizeCommonDateOnly(item.dueDate)
+        if (!startDate && !dueDate) return ""
+        const chip = (value: string, due = false) =>
+          `<span class="print-task-date${due ? " due" : ""}">${escapePrintHtml(formatDateHuman(value))}</span>`
+        return `<div class="print-task-dates">${startDate ? chip(startDate) : ""}${dueDate ? chip(dueDate, true) : ""}</div>`
+      }
+
       const buildTableRows = (
         rows: Array<{ id: CommonType; label: string; items: Array<PrintTask | Record<string, unknown>> }>,
         isMeetingTable = false
@@ -4796,7 +4813,8 @@ export default function CommonViewPage() {
                   : isPersonalRowId(row.id)
                     ? commonPrintPersonalTaskTitle(item as PrintTask)
                     : commonPrintTaskTitle(item as PrintTask)
-                return `<td>${chunkIndex * 6 + cellIndex + 1}. ${isMeetingTable ? escapePrintHtml(title) : commonPrintTitleHtml(title)}</td>`
+                const content = `${chunkIndex * 6 + cellIndex + 1}. ${isMeetingTable ? escapePrintHtml(title) : commonPrintTitleHtml(title)}`
+                return `<td${isMeetingTable ? "" : ' class="print-task-cell"'}><div>${content}</div>${isMeetingTable ? "" : printTaskDatesHtml(item as PrintTask)}</td>`
               }).join("")
               const rowHeaders =
                 chunkIndex === 0
@@ -4836,6 +4854,10 @@ export default function CommonViewPage() {
   col.print-label-column { width: 78px; }
   tbody th:nth-child(2) { padding-left: 2px; padding-right: 2px; }
   .print-slot-subtext { display: block; white-space: pre; overflow-wrap: normal !important; word-break: normal !important; font-size: 5.2px; font-weight: 400 !important; line-height: 1.05; }
+  .print-task-cell { position:relative; padding-bottom:27px; }
+  .print-task-dates { position:absolute; left:5px; right:5px; bottom:4px; display:flex; align-items:flex-end; justify-content:space-between; gap:4px; white-space:nowrap; }
+  .print-task-date { display:inline-flex; box-sizing:border-box; height:18px; align-items:center; border:1px solid #93c5fd; border-radius:3px; background:#eff6ff; color:#1d4ed8; padding:1px 4px; font-weight:800; line-height:1; }
+  .print-task-date.due { border:3px solid #b91c1c; padding:0 2px; }
 </style></head><body>
   <div class="print-header"><div></div><div class="print-title">1H SHTYPI — ${escapePrintHtml(reportDate)}</div><div class="print-date">${escapePrintHtml(formatDateTimeDMY(new Date()))}</div></div>
   ${oneHPrintChecklistsHtml(deliveryDate)}
@@ -6943,8 +6965,8 @@ export default function CommonViewPage() {
     const blockedItems: SwimlaneCell[] = blockedSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
-      subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate)}${x.note ? ` - ${x.note}` : ""}`,
-      dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate),
+      subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate, x.dueDate)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate, x.dueDate),
       accentClass: "swimlane-accent blocked",
       status: x.status,
       isDone: x.isDone,
@@ -6968,8 +6990,8 @@ export default function CommonViewPage() {
     const oneHItems: SwimlaneCell[] = oneHSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
-      subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate)}${x.note ? ` - ${x.note}` : ""}`,
-      dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate),
+      subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate, x.dueDate)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate, x.dueDate),
       accentClass: "swimlane-accent oneh",
       status: x.status,
       isDone: x.isDone,
@@ -6995,8 +7017,8 @@ export default function CommonViewPage() {
       return groupSource.map((x) => ({
         title: x.title,
         assignees: x.assignees || (x.person ? [x.person] : []),
-        subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate)}${x.note ? ` - ${x.note}` : ""}`,
-        dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate),
+        subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate, x.dueDate)}${x.note ? ` - ${x.note}` : ""}`,
+        dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate, x.dueDate),
         accentClass: "swimlane-accent personal",
         status: x.status,
         isDone: x.isDone,
@@ -7072,8 +7094,8 @@ export default function CommonViewPage() {
     const r1Items: SwimlaneCell[] = r1Source.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.owner ? [x.owner] : []),
-      subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate)}${x.note ? ` - ${x.note}` : ""}`,
-      dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate),
+      subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate, x.dueDate)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate, x.dueDate),
       accentClass: "swimlane-accent r1",
       status: x.status,
       isDone: x.isDone,
@@ -7149,8 +7171,8 @@ export default function CommonViewPage() {
     const waitingClientItems: SwimlaneCell[] = waitingClientSource.map((entry, index) => ({
       title: entry.title,
       assignees: entryAssignees(entry),
-      subtitle: `${formatFastTaskDateLabel(entry.date, entry.isDone, entry.completedAt, entry.startDate)}${entry.note ? ` - ${entry.note}` : ""}`,
-      dateLabel: formatFastTaskDateLabel(entry.date, entry.isDone, entry.completedAt, entry.startDate),
+      subtitle: `${formatFastTaskDateLabel(entry.date, entry.isDone, entry.completedAt, entry.startDate, entry.dueDate)}${entry.note ? ` - ${entry.note}` : ""}`,
+      dateLabel: formatFastTaskDateLabel(entry.date, entry.isDone, entry.completedAt, entry.startDate, entry.dueDate),
       accentClass: "swimlane-accent waiting-client",
       status: entry.status,
       isDone: entry.isDone,
@@ -7738,17 +7760,30 @@ export default function CommonViewPage() {
                 return (
                   <td
                     key={`${row.id}-${chunkIndex}-${cellIndex}`}
-                    className={isPersonalTaskForGa ? "single-day-print-cell-personal-ga" : undefined}
+                    className={[
+                      item ? "single-day-print-task-cell" : "",
+                      isPersonalTaskForGa ? "single-day-print-cell-personal-ga" : "",
+                    ].filter(Boolean).join(" ") || undefined}
                   >
                     {item ? (
-                      <>
-                        {chunkIndex * 6 + cellIndex + 1}.{" "}
-                        {renderWfcText(
-                          isPersonalRowId(row.id)
-                            ? commonPrintPersonalTaskTitle(item)
-                            : commonPrintTaskTitle(item)
-                        )}
-                      </>
+                      <div className="single-day-print-task-content">
+                        <div>
+                          {chunkIndex * 6 + cellIndex + 1}.{" "}
+                          {renderWfcText(
+                            isPersonalRowId(row.id)
+                              ? commonPrintPersonalTaskTitle(item)
+                              : commonPrintTaskTitle(item)
+                          )}
+                        </div>
+                        <div className="single-day-print-task-dates">
+                          {formatFastTaskCardDate(item.startDate || item.entryDate) ? (
+                            <span>{formatFastTaskCardDate(item.startDate || item.entryDate)}</span>
+                          ) : null}
+                          {formatFastTaskCardDate(item.dueDate) ? (
+                            <span className="due">{formatFastTaskCardDate(item.dueDate)}</span>
+                          ) : null}
+                        </div>
+                      </div>
                     ) : ""}
                   </td>
                 )
@@ -8195,6 +8230,43 @@ export default function CommonViewPage() {
             background-color: #d8b4fe !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+          }
+          .single-day-print-task-content {
+            min-height: 42px;
+          }
+          .single-day-print-table td.single-day-print-task-cell {
+            position: relative;
+            padding-bottom: 27px;
+          }
+          .single-day-print-task-dates {
+            position: absolute;
+            left: 5px;
+            right: 5px;
+            bottom: 4px;
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 4px;
+            white-space: nowrap;
+          }
+          .single-day-print-task-dates span {
+            display: inline-flex;
+            box-sizing: border-box;
+            height: 18px;
+            align-items: center;
+            border: 1px solid #93c5fd !important;
+            border-radius: 3px;
+            background: #eff6ff !important;
+            color: #1d4ed8 !important;
+            padding: 1px 4px;
+            font-weight: 800;
+            line-height: 1;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          .single-day-print-task-dates span.due {
+            border: 3px solid #b91c1c !important;
+            padding: 0 2px;
           }
           /* A one-day Common View printout is the compact fast-task report. */
           .single-day-print .swimlane-row:not(
@@ -9738,6 +9810,37 @@ export default function CommonViewPage() {
           padding: 2px 6px;
           box-shadow: 0 1px 2px rgba(37, 99, 235, 0.18);
         }
+        .swimlane-task-dates {
+          display: flex;
+          flex-wrap: nowrap;
+          align-items: flex-end;
+          justify-content: space-between;
+          gap: 5px;
+          align-self: flex-start;
+          width: 100%;
+          white-space: nowrap;
+        }
+        .swimlane-task-date {
+          display: inline-flex;
+          box-sizing: border-box;
+          height: 22px;
+          align-items: center;
+          gap: 4px;
+          width: fit-content;
+          border: 1px solid #93c5fd;
+          border-radius: 4px;
+          background: #eff6ff;
+          color: #1d4ed8;
+          font-size: 12px;
+          font-weight: 800;
+          line-height: 1;
+          padding: 2px 6px;
+          box-shadow: 0 1px 2px rgba(37, 99, 235, 0.12);
+        }
+        .swimlane-task-date.due {
+          border: 3px solid #b91c1c;
+          padding: 0 4px;
+        }
         .swimlane-subtitle {
           font-size: 12px;
           color: var(--swim-muted);
@@ -10534,6 +10637,12 @@ export default function CommonViewPage() {
         .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-note {
           background: rgba(127, 29, 29, 0.35);
           border-color: rgba(255, 255, 255, 0.32);
+        }
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-task-date {
+          background: rgba(255, 255, 255, 0.12);
+          border-color: rgba(255, 255, 255, 0.45);
+          color: #ffffff;
+          box-shadow: none;
         }
         .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-avatar,
         .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .fast-task-order-badge,
@@ -15021,6 +15130,13 @@ export default function CommonViewPage() {
                                     const showDate =
                                       Boolean(cell.dateLabel) &&
                                       !["late", "absent", "leave"].includes(row.id)
+                                    const showSeparateTaskDates = isFastTaskRowId(row.id)
+                                    const taskStartDate = showSeparateTaskDates
+                                      ? formatFastTaskCardDate(cell.startDate || cell.entryDate)
+                                      : null
+                                    const taskDueDate = showSeparateTaskDates
+                                      ? formatFastTaskCardDate(cell.dueDate)
+                                      : null
                                     if (!showSubtitle && !showDate && !isNoteOpen) return null
                                     return (
                                       <div className="swimlane-meta">
@@ -15029,7 +15145,20 @@ export default function CommonViewPage() {
                                             {renderMarkedNoteContent(cell.subtitle, cell.subtitle)}
                                           </div>
                                         ) : null}
-                                        {showDate ? (
+                                        {showDate && showSeparateTaskDates ? (
+                                          <div className="swimlane-task-dates">
+                                            {taskStartDate ? (
+                                              <span className="swimlane-task-date start" title="Start date">
+                                                {taskStartDate}
+                                              </span>
+                                            ) : null}
+                                            {taskDueDate ? (
+                                              <span className="swimlane-task-date due" title="Due date">
+                                                {taskDueDate}
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                        ) : showDate ? (
                                           <div className={["swimlane-date", cell.dateIsToday ? "today" : ""].filter(Boolean).join(" ")}>
                                             {cell.dateLabel}
                                           </div>

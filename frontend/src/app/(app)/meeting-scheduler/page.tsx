@@ -3,12 +3,8 @@
 import * as React from "react";
 import {
   CalendarDays,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Clock3,
-  ExternalLink,
-  ShieldCheck,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -60,23 +56,6 @@ type Validation = {
     ends_at: string;
   }>;
 };
-type ScheduleRequest = {
-  id: string;
-  title: string;
-  meeting_type: "internal" | "external";
-  starts_at: string;
-  ends_at: string;
-  status: string;
-  approval_count: number;
-  approvals: Array<{ user_id: string; user_name: string; approved_at: string }>;
-  client_email?: string | null;
-  teams_url?: string | null;
-  last_error?: string | null;
-  rejection_reason?: string | null;
-  rejected_by_user_id?: string | null;
-  rejected_at?: string | null;
-  created_by_user_id: string;
-};
 type CalendarItem = {
   id: string;
   source: string;
@@ -123,13 +102,53 @@ const localDateTime = (date: string, time: string) =>
   new Date(`${date}T${time}:00`);
 const userLabel = (user: UserLookup) =>
   user.full_name || user.username || user.email;
-const statusTone = (status: string) => {
-  if (status === "CREATED")
-    return "border-emerald-200 bg-emerald-50 text-emerald-800";
-  if (status.includes("FAILED")) return "border-red-200 bg-red-50 text-red-800";
-  if (status === "REJECTED")
-    return "border-slate-200 bg-slate-100 text-slate-600";
-  return "border-amber-200 bg-amber-50 text-amber-800";
+const validationFailure = (message: string): Validation => ({
+  can_create: false,
+  errors: [message],
+  warnings: [],
+  conflicts: [],
+});
+
+const uniqueConflicts = (conflicts: Validation["conflicts"]) =>
+  Array.from(
+    new Map(
+      conflicts.map((conflict) => [
+        `${conflict.source}|${conflict.title}|${conflict.starts_at}|${conflict.ends_at}`,
+        conflict,
+      ]),
+    ).values(),
+  );
+
+const meetingSchedulerError = async (
+  response: Response,
+  fallback: string,
+) => {
+  const raw = await response.text();
+  if (!raw) return fallback;
+  try {
+    const body = JSON.parse(raw) as {
+      detail?:
+        | string
+        | Array<{ msg?: string; loc?: Array<string | number> }>
+        | { errors?: string[]; warnings?: string[] };
+    };
+    if (typeof body.detail === "string") return body.detail;
+    if (Array.isArray(body.detail)) {
+      const messages = body.detail
+        .map((item) => {
+          const message = String(item.msg || "").replace(/^Value error,\s*/i, "");
+          return message;
+        })
+        .filter(Boolean);
+      if (messages.length) return messages.join(" ");
+    }
+    if (body.detail && !Array.isArray(body.detail) && body.detail.errors?.length) {
+      return body.detail.errors.join(" ");
+    }
+  } catch {
+    // Non-JSON errors are returned below without hiding the server response.
+  }
+  return raw || fallback;
 };
 
 export default function MeetingSchedulerPage() {
@@ -139,7 +158,6 @@ export default function MeetingSchedulerPage() {
   const [users, setUsers] = React.useState<UserLookup[]>([]);
   const [standards, setStandards] = React.useState<Standard[]>([]);
   const [calendarItems, setCalendarItems] = React.useState<CalendarItem[]>([]);
-  const [requests, setRequests] = React.useState<ScheduleRequest[]>([]);
   const [microsoftEvents, setMicrosoftEvents] = React.useState<
     MicrosoftEvent[]
   >([]);
@@ -149,7 +167,7 @@ export default function MeetingSchedulerPage() {
   const [msAccountEmail, setMsAccountEmail] =
     React.useState("info@primexeu.com");
   const [loading, setLoading] = React.useState(true);
-  const [saving, setSaving] = React.useState(false);
+  const [validating, setValidating] = React.useState(false);
   const [validation, setValidation] = React.useState<Validation | null>(null);
 
   const [departmentId, setDepartmentId] = React.useState(
@@ -159,26 +177,18 @@ export default function MeetingSchedulerPage() {
     "external",
   );
   const [standardId, setStandardId] = React.useState("");
-  const [title, setTitle] = React.useState("");
   const [selectedDate, setSelectedDate] = React.useState(isoDate(new Date()));
   const [selectedTime, setSelectedTime] = React.useState("09:00");
   const [duration, setDuration] = React.useState(60);
   const [participantIds, setParticipantIds] = React.useState<string[]>(
     user?.id ? [user.id] : [],
   );
-  const [clientName, setClientName] = React.useState("");
-  const [clientEmail, setClientEmail] = React.useState("");
-  const [notes, setNotes] = React.useState("");
   const [standardName, setStandardName] = React.useState("");
   const [standardType, setStandardType] = React.useState<
     "internal" | "external"
   >("external");
   const [standardDuration, setStandardDuration] = React.useState(60);
   const [standardBuffer, setStandardBuffer] = React.useState(15);
-  const [rejectingRequestId, setRejectingRequestId] = React.useState<
-    string | null
-  >(null);
-  const [rejectionReason, setRejectionReason] = React.useState("");
 
   const days = React.useMemo(
     () => Array.from({ length: 5 }, (_, index) => addDays(weekStart, index)),
@@ -186,13 +196,9 @@ export default function MeetingSchedulerPage() {
   );
   const rangeStart = days[0].toISOString();
   const rangeEnd = addDays(days[4], 1).toISOString();
-  const filteredUsers = React.useMemo(
-    () =>
-      users.filter(
-        (candidate) =>
-          !departmentId || candidate.department_id === departmentId,
-      ),
-    [departmentId, users],
+  const departmentNames = React.useMemo(
+    () => new Map(departments.map((department) => [department.id, department.name])),
+    [departments],
   );
 
   React.useEffect(() => {
@@ -230,12 +236,8 @@ export default function MeetingSchedulerPage() {
   const loadSchedule = React.useCallback(async () => {
     const query = new URLSearchParams({ start: rangeStart, end: rangeEnd });
     if (departmentId) query.set("department_id", departmentId);
-    const [calendarRes, requestsRes] = await Promise.all([
-      apiFetch(`/meeting-scheduler/calendar?${query}`),
-      apiFetch(`/meeting-scheduler/requests?${query}`),
-    ]);
+    const calendarRes = await apiFetch(`/meeting-scheduler/calendar?${query}`);
     if (calendarRes.ok) setCalendarItems(await calendarRes.json());
-    if (requestsRes.ok) setRequests(await requestsRes.json());
     if (msConnected) {
       const eventsRes = await apiFetch(
         `/microsoft/events?start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}`,
@@ -274,123 +276,69 @@ export default function MeetingSchedulerPage() {
     const start = localDateTime(selectedDate, selectedTime);
     const end = new Date(start.getTime() + duration * 60_000);
     return {
-      title: title.trim(),
+      title: meetingType === "external" ? "Kontroll TAK EXT" : "Kontroll TAK INT",
       meeting_type: meetingType,
       starts_at: start.toISOString(),
       ends_at: end.toISOString(),
       platform: meetingType === "external" ? "Teams" : null,
-      client_name: clientName.trim() || null,
-      client_email:
-        meetingType === "external" ? clientEmail.trim() || null : null,
-      notes: notes.trim() || null,
+      notes: null,
       department_id: departmentId,
       project_id: null,
       standard_id: standardId || null,
       participant_ids: participantIds,
     };
   }, [
-    clientEmail,
-    clientName,
     departmentId,
     duration,
     meetingType,
-    notes,
     participantIds,
     selectedDate,
     selectedTime,
     standardId,
-    title,
   ]);
 
   const validate = async () => {
-    if (
-      !payload.title ||
-      !payload.department_id ||
-      !payload.participant_ids.length
-    ) {
-      toast.error("Plotëso titullin, departamentin dhe pjesëmarrësit.");
+    const missingFields = [
+      !payload.department_id ? "departamentin" : "",
+      !payload.participant_ids.length ? "të paktën një pjesëmarrës" : "",
+    ].filter(Boolean);
+    if (missingFields.length) {
+      const message = `Plotëso ${missingFields.join(", ")} para validimit.`;
+      setValidation(validationFailure(message));
+      toast.error("Takimi nuk mund të validohet.", { description: message });
       return null;
     }
-    const response = await apiFetch("/meeting-scheduler/validate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) {
-      toast.error("Validimi dështoi.");
-      return null;
-    }
-    const result = (await response.json()) as Validation;
-    setValidation(result);
-    return result;
-  };
-
-  const submit = async () => {
-    setSaving(true);
+    setValidating(true);
     try {
-      const result = await validate();
-      if (!result?.can_create) return;
-      const response = await apiFetch("/meeting-scheduler/requests", {
+      const response = await apiFetch("/meeting-scheduler/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (!response.ok) {
-        toast.error("Kërkesa nuk u krijua.", {
-          description: await response.text(),
-        });
-        return;
+        const message = await meetingSchedulerError(
+          response,
+          "Validimi dështoi për shkak të një gabimi të panjohur.",
+        );
+        setValidation(validationFailure(message));
+        toast.error("Takimi nuk mund të validohet.", { description: message });
+        return null;
       }
-      toast.success("Kërkesa u dërgua për dy aprovime.");
-      setValidation(null);
-      await loadSchedule();
+      const result = (await response.json()) as Validation;
+      setValidation(result);
+      if (!result.can_create) {
+        toast.error("Ka konflikt në këtë orar.", {
+          description:
+            result.errors.join(" ") ||
+            "Kontrollo konfliktet e shfaqura te rezultati i validimit.",
+        });
+      } else {
+        toast.success("Orari është i lirë për këtë takim.");
+      }
+      return result;
     } finally {
-      setSaving(false);
+      setValidating(false);
     }
-  };
-
-  const requestAction = async (
-    requestId: string,
-    action: "approve" | "retry",
-  ) => {
-    const response = await apiFetch(
-      `/meeting-scheduler/requests/${requestId}/${action}`,
-      { method: "POST" },
-    );
-    if (!response.ok) {
-      toast.error("Veprimi dështoi.", { description: await response.text() });
-      return;
-    }
-    const updated = (await response.json()) as ScheduleRequest;
-    toast.success(
-      action === "approve"
-        ? `Aprovimi u ruajt (${updated.approval_count}/2).`
-        : "Veprimi u krye.",
-    );
-    await loadSchedule();
-  };
-
-  const rejectRequest = async (requestId: string) => {
-    if (rejectionReason.trim().length < 2) {
-      toast.error("Shkruaj arsyen e refuzimit.");
-      return;
-    }
-    const response = await apiFetch(
-      `/meeting-scheduler/requests/${requestId}/reject`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: rejectionReason.trim() }),
-      },
-    );
-    if (!response.ok) {
-      toast.error("Refuzimi dështoi.", { description: await response.text() });
-      return;
-    }
-    toast.success("Kërkesa u refuzua.");
-    setRejectingRequestId(null);
-    setRejectionReason("");
-    await loadSchedule();
   };
 
   const createStandard = async () => {
@@ -470,7 +418,8 @@ export default function MeetingSchedulerPage() {
     return [...primeflow, ...microsoft];
   };
 
-  const canApprove = user?.role === "ADMIN" || user?.role === "MANAGER";
+  const canManageStandards =
+    user?.role === "ADMIN" || user?.role === "MANAGER";
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -480,8 +429,8 @@ export default function MeetingSchedulerPage() {
             Meeting Scheduler
           </h1>
           <p className="text-sm text-slate-500">
-            TAK EXT krijohen në kalendarin qendror {msAccountEmail}; TAK INT
-            ruhen në PrimeFlow.
+            Kontrollo nëse një orar është i lirë për TAK INT ose TAK EXT. Kjo
+            faqe nuk krijon takim dhe nuk i dërgon ftesë klientit.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -510,18 +459,6 @@ export default function MeetingSchedulerPage() {
                 : `${msAccountEmail} not connected`}
             </span>
           )}
-          <Select value={departmentId} onValueChange={setDepartmentId}>
-            <SelectTrigger className="w-52">
-              <SelectValue placeholder="Department" />
-            </SelectTrigger>
-            <SelectContent>
-              {departments.map((department) => (
-                <SelectItem key={department.id} value={department.id}>
-                  {department.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
       </div>
 
@@ -534,7 +471,7 @@ export default function MeetingSchedulerPage() {
                 Orari javor
               </CardTitle>
               <CardDescription>
-                Kliko një slot për ta propozuar.
+                Kliko një slot për ta kontrolluar.
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
@@ -616,16 +553,15 @@ export default function MeetingSchedulerPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 xl:grid-cols-[1.15fr_.85fr]">
-        <Card id="meeting-request-form">
+      <Card id="meeting-request-form">
           <CardHeader>
-            <CardTitle>Propozo takim</CardTitle>
+            <CardTitle>Kontrollo orarin e takimit</CardTitle>
             <CardDescription>
               {selectedDate} në {selectedTime}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-3">
               <div>
                 <Label>Lloji</Label>
                 <Select
@@ -654,11 +590,33 @@ export default function MeetingSchedulerPage() {
                 </Select>
               </div>
               <div>
+                <Label>Departamenti</Label>
+                <Select
+                  value={departmentId}
+                  onValueChange={(value) => {
+                    setDepartmentId(value);
+                    setValidation(null);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Zgjidh departamentin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {departments.map((department) => (
+                      <SelectItem key={department.id} value={department.id}>
+                        {department.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
                 <Label>Standardi</Label>
                 <Select
                   value={standardId}
                   onValueChange={(value) => {
                     setStandardId(value);
+                    setValidation(null);
                     const selected = standards.find(
                       (item) => item.id === value,
                     );
@@ -681,24 +639,16 @@ export default function MeetingSchedulerPage() {
                 </Select>
               </div>
             </div>
-            <div>
-              <Label>Titulli</Label>
-              <Input
-                value={title}
-                onChange={(event) => {
-                  setTitle(event.target.value);
-                  setValidation(null);
-                }}
-                placeholder="Titulli i takimit"
-              />
-            </div>
             <div className="grid gap-4 md:grid-cols-3">
               <div>
                 <Label>Data</Label>
                 <Input
                   type="date"
                   value={selectedDate}
-                  onChange={(event) => setSelectedDate(event.target.value)}
+                  onChange={(event) => {
+                    setSelectedDate(event.target.value);
+                    setValidation(null);
+                  }}
                 />
               </div>
               <div>
@@ -707,7 +657,10 @@ export default function MeetingSchedulerPage() {
                   type="time"
                   step={900}
                   value={selectedTime}
-                  onChange={(event) => setSelectedTime(event.target.value)}
+                  onChange={(event) => {
+                    setSelectedTime(event.target.value);
+                    setValidation(null);
+                  }}
                 />
               </div>
               <div>
@@ -718,38 +671,20 @@ export default function MeetingSchedulerPage() {
                   max={480}
                   step={5}
                   value={duration}
-                  onChange={(event) =>
-                    setDuration(Number(event.target.value) || 60)
-                  }
+                  onChange={(event) => {
+                    setDuration(Number(event.target.value) || 60);
+                    setValidation(null);
+                  }}
                 />
               </div>
             </div>
-            {meetingType === "external" && (
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <Label>Klienti</Label>
-                  <Input
-                    value={clientName}
-                    onChange={(event) => setClientName(event.target.value)}
-                  />
-                </div>
-                <div>
-                  <Label>Emaili i klientit</Label>
-                  <Input
-                    type="email"
-                    value={clientEmail}
-                    onChange={(event) => setClientEmail(event.target.value)}
-                  />
-                </div>
-              </div>
-            )}
             <div>
               <Label className="flex items-center gap-2">
                 <Users className="h-4 w-4" />
                 Pjesëmarrësit
               </Label>
               <div className="mt-2 grid max-h-44 gap-2 overflow-y-auto rounded-md border p-3 sm:grid-cols-2">
-                {filteredUsers.map((candidate) => (
+                {users.map((candidate) => (
                   <label
                     key={candidate.id}
                     className="flex items-center gap-2 text-sm"
@@ -757,26 +692,26 @@ export default function MeetingSchedulerPage() {
                     <input
                       type="checkbox"
                       checked={participantIds.includes(candidate.id)}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        setValidation(null);
                         setParticipantIds((current) =>
                           event.target.checked
                             ? [...new Set([...current, candidate.id])]
                             : current.filter((id) => id !== candidate.id),
-                        )
-                      }
+                        );
+                      }}
                     />
-                    {userLabel(candidate)}
+                    <span>
+                      {userLabel(candidate)}
+                      {candidate.department_id && departmentNames.get(candidate.department_id) ? (
+                        <span className="ml-1 text-xs text-slate-500">
+                          ({departmentNames.get(candidate.department_id)})
+                        </span>
+                      ) : null}
+                    </span>
                   </label>
                 ))}
               </div>
-            </div>
-            <div>
-              <Label>Shënime / agjenda</Label>
-              <textarea
-                className="mt-1 min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-              />
             </div>
             {validation && (
               <div
@@ -784,8 +719,8 @@ export default function MeetingSchedulerPage() {
               >
                 <div className="mb-1 font-semibold">
                   {validation.can_create
-                    ? "Sloti është valid"
-                    : "Takimi nuk mund të krijohet"}
+                    ? "Orari është i lirë"
+                    : "Ka konflikt në këtë orar"}
                 </div>
                 {validation.errors.map((message) => (
                   <div key={message} className="text-red-700">
@@ -797,9 +732,9 @@ export default function MeetingSchedulerPage() {
                     • {message}
                   </div>
                 ))}
-                {validation.conflicts.map((conflict) => (
+                {uniqueConflicts(validation.conflicts).map((conflict, index) => (
                   <div
-                    key={`${conflict.source}-${conflict.starts_at}`}
+                    key={`${conflict.source}-${conflict.starts_at}-${conflict.ends_at}-${index}`}
                     className="mt-1 text-xs"
                   >
                     {conflict.source}: {conflict.title}
@@ -807,160 +742,18 @@ export default function MeetingSchedulerPage() {
                 ))}
               </div>
             )}
-            <div className="flex justify-end gap-2">
+            <div className="flex justify-end">
               <Button
-                variant="outline"
                 onClick={() => void validate()}
-                disabled={saving}
+                disabled={validating}
               >
-                Validimi
-              </Button>
-              <Button onClick={() => void submit()} disabled={saving}>
-                {saving ? "Duke ruajtur…" : "Dërgo për aprovim"}
+                {validating ? "Duke kontrolluar…" : "Kontrollo orarin"}
               </Button>
             </div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5" />
-              Kërkesat dhe aprovimet
-            </CardTitle>
-            <CardDescription>
-              Duhen dy aprovues të ndryshëm nga krijuesi i kërkesës.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {requests.length === 0 ? (
-              <div className="py-8 text-center text-sm text-slate-500">
-                Nuk ka kërkesa në këtë javë.
-              </div>
-            ) : (
-              requests.map((item) => (
-                <div key={item.id} className="rounded-lg border p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="font-semibold text-slate-900">
-                        {item.title}
-                      </div>
-                      <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
-                        <Clock3 className="h-3.5 w-3.5" />
-                        {new Date(item.starts_at).toLocaleString("sq-AL")}
-                      </div>
-                    </div>
-                    <span
-                      className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${statusTone(item.status)}`}
-                    >
-                      {item.status}
-                    </span>
-                  </div>
-                  <div className="mt-2 text-xs text-slate-600">
-                    Aprovime: <strong>{item.approval_count}/2</strong>
-                    {item.approvals.length
-                      ? ` — ${item.approvals.map((approval) => approval.user_name).join(", ")}`
-                      : ""}
-                  </div>
-                  {item.last_error && (
-                    <div className="mt-2 rounded bg-red-50 p-2 text-xs text-red-700">
-                      {item.last_error}
-                    </div>
-                  )}
-                  {item.rejection_reason && (
-                    <div className="mt-2 rounded bg-slate-100 p-2 text-xs text-slate-700">
-                      <strong>Arsyeja e refuzimit:</strong>{" "}
-                      {item.rejection_reason}
-                    </div>
-                  )}
-                  {item.teams_url && (
-                    <a
-                      href={item.teams_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-blue-700"
-                    >
-                      Hap Teams <ExternalLink className="h-3 w-3" />
-                    </a>
-                  )}
-                  {canApprove &&
-                    item.created_by_user_id !== user?.id &&
-                    !["CREATED", "REJECTED", "CANCELED"].includes(
-                      item.status,
-                    ) && (
-                      <div className="mt-3">
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            onClick={() =>
-                              void requestAction(item.id, "approve")
-                            }
-                          >
-                            <CheckCircle2 className="mr-1 h-4 w-4" />
-                            Aprovo
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setRejectingRequestId(item.id);
-                              setRejectionReason("");
-                            }}
-                          >
-                            Refuzo
-                          </Button>
-                        </div>
-                        {rejectingRequestId === item.id && (
-                          <div className="mt-2 space-y-2">
-                            <textarea
-                              className="min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
-                              value={rejectionReason}
-                              onChange={(event) =>
-                                setRejectionReason(event.target.value)
-                              }
-                              placeholder="Arsyeja e refuzimit"
-                            />
-                            <div className="flex justify-end gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  setRejectingRequestId(null);
-                                  setRejectionReason("");
-                                }}
-                              >
-                                Anulo
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => void rejectRequest(item.id)}
-                              >
-                                Konfirmo refuzimin
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  {canApprove && item.status.includes("FAILED") && (
-                    <Button
-                      className="mt-3"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void requestAction(item.id, "retry")}
-                    >
-                      Retry
-                    </Button>
-                  )}
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {canApprove && (
+      {canManageStandards && (
         <Card>
           <CardHeader>
             <CardTitle>Standardet e takimeve</CardTitle>

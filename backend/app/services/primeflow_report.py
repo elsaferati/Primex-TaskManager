@@ -1158,9 +1158,9 @@ class PrimeFlowClient:
 
 
 class GmailService:
-    def __init__(self) -> None:
-        sender = os.getenv("EMAIL_USER") or settings.EMAIL_USER
-        password = os.getenv("EMAIL_PASSWORD") or settings.EMAIL_PASSWORD
+    def __init__(self, *, sender: str | None = None, password: str | None = None) -> None:
+        sender = sender or os.getenv("EMAIL_USER") or settings.EMAIL_USER
+        password = password or os.getenv("EMAIL_PASSWORD") or settings.EMAIL_PASSWORD
         if not sender or not password:
             missing = [
                 name for name, value in (("EMAIL_USER", sender), ("EMAIL_PASSWORD", password))
