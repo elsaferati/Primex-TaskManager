@@ -74,7 +74,7 @@ async def fetch_calendar_events(access_token: str, start: datetime, end: datetim
         "startDateTime": format_datetime(start),
         "endDateTime": format_datetime(end),
         "$select": (
-            "id,iCalUId,changeKey,subject,start,end,location,categories,isAllDay,isCancelled,isOnlineMeeting,organizer,attendees,"
+            "id,iCalUId,changeKey,createdDateTime,subject,start,end,location,categories,isAllDay,isCancelled,isOnlineMeeting,organizer,attendees,"
             "bodyPreview,onlineMeeting,onlineMeetingUrl,webLink,type,seriesMasterId"
         ),
         "$orderby": "start/dateTime",

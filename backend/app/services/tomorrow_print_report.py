@@ -51,6 +51,7 @@ TASK_ROWS = (
 )
 MEETING_ROWS = (("external", "TAK EXT"), ("internal", "TAK INT"))
 VALID_1H_SLOTS = {"10:00", "11:00", "11:50", "14:20", "16:00"}
+EXCLUDED_1H_MISSING_INITIALS = {"GA", "KA", "HV", "HS"}
 ONE_H_BOARD_CHECKLIST = (
     ("Slotin paraprak/aktual", ""),
     ("A ke filluar me slotin aktual?", ""),
@@ -244,6 +245,123 @@ def _initials(value: str) -> str:
         return cleaned.upper()
     parts = re.findall(r"[^\W\d_]+", cleaned, flags=re.UNICODE)
     return "".join(part[0] for part in parts).upper()
+
+
+def _one_h_slot_from_label(label: str) -> str | None:
+    match = re.fullmatch(r"\s*1H\s+(\d{1,2}:\d{2})\s*", label, flags=re.I)
+    if not match:
+        return None
+    slot = match.group(1)
+    return slot if slot in VALID_1H_SLOTS else None
+
+
+def _missing_one_h_initials(payload: dict[str, Any], target_date: date) -> dict[str, list[str]]:
+    """Return active, present non-admin users missing each scheduled 1H slot."""
+    target_iso = target_date.isoformat()
+    users = [row for row in payload.get("users") or [] if isinstance(row, dict)]
+    items = payload.get("items") or {}
+    department_codes = {
+        str(row.get("id")): str(row.get("code") or row.get("name") or "").strip().upper()
+        for row in payload.get("departments") or []
+        if isinstance(row, dict) and row.get("id") is not None
+    }
+    department_aliases = {
+        "DEVELOPMENT": "DEV",
+        "GRAPHIC DESIGN": "GD",
+        "GDS": "GD",
+        "PRODUCT CONTENT": "PCM",
+        "PROJECT CONTENT MANAGER": "PCM",
+    }
+    department_ranks = {"DEV": 0, "GD": 1, "PCM": 2}
+
+    def identity_values(row: dict[str, Any]) -> list[str]:
+        email_name = str(row.get("email") or "").split("@", 1)[0]
+        return [
+            str(row.get("full_name") or "").strip(),
+            re.sub(r"[._-]+", " ", str(row.get("username") or "")).strip(),
+            re.sub(r"[._-]+", " ", email_name).strip(),
+        ]
+
+    eligible: list[tuple[int, str, int, int, str, str, str]] = []
+    user_id_by_name: dict[str, str] = {}
+    for row in users:
+        user_id = str(row.get("id") or "").strip()
+        if not user_id or row.get("is_active") is False:
+            continue
+        if str(row.get("role") or "").strip().upper() == "ADMIN":
+            continue
+        identities = [value for value in identity_values(row) if value]
+        if any(_initials(value) in EXCLUDED_1H_MISSING_INITIALS for value in identities):
+            continue
+        label = str(row.get("full_name") or row.get("username") or row.get("email") or "").strip()
+        user_initials = _initials(label)
+        if not user_initials:
+            continue
+        department_code = department_codes.get(str(row.get("department_id") or ""), "-")
+        department_code = department_aliases.get(department_code, department_code or "-")
+        order = row.get("weekly_planner_sort_order")
+        eligible.append((
+            department_ranks.get(department_code, len(department_ranks)),
+            department_code.casefold(),
+            1 if order is None else 0,
+            int(order or 0),
+            label.casefold(),
+            user_id,
+            user_initials,
+        ))
+        for value in identity_values(row):
+            if value:
+                user_id_by_name[value.casefold()] = user_id
+
+    def covers_target(entry: dict[str, Any]) -> bool:
+        start = str(entry.get("startDate") or entry.get("start_date") or "")[:10]
+        end = str(entry.get("endDate") or entry.get("end_date") or start)[:10]
+        return bool(start and start <= target_iso <= (end or start))
+
+    leave_items = [row for row in items.get("leave") or [] if isinstance(row, dict) and covers_target(row)]
+    if any(row.get("isAllUsers") or row.get("is_all_users") for row in leave_items):
+        return {slot: [] for slot in VALID_1H_SLOTS}
+    unavailable_ids = {
+        str(row.get("userId") or row.get("user_id"))
+        for row in leave_items
+        if row.get("userId") or row.get("user_id")
+    }
+    for row in items.get("absent") or []:
+        if not isinstance(row, dict) or str(row.get("date") or "")[:10] != target_iso:
+            continue
+        if str(row.get("from") or "23:59") <= "08:00" and str(row.get("to") or "00:00") >= "16:30":
+            user_id = row.get("userId") or row.get("user_id")
+            if user_id:
+                unavailable_ids.add(str(user_id))
+
+    users_by_slot = {slot: set() for slot in VALID_1H_SLOTS}
+    for item in items.get("oneH") or []:
+        if not isinstance(item, dict) or _item_date(item) != target_date:
+            continue
+        if _task_status(item) == "WAITING_CLIENT":
+            continue
+        slot = _slot(item)
+        if slot not in users_by_slot:
+            continue
+        user_id = item.get("userId") or item.get("user_id")
+        if user_id:
+            users_by_slot[slot].add(str(user_id))
+        names = item.get("assignees") or [item.get("person") or item.get("owner")]
+        for name in names:
+            resolved_id = user_id_by_name.get(str(name or "").strip().casefold())
+            if resolved_id:
+                users_by_slot[slot].add(resolved_id)
+
+    result: dict[str, list[str]] = {}
+    for slot in VALID_1H_SLOTS:
+        seen: set[str] = set()
+        result[slot] = []
+        for *_, user_id, user_initials in sorted(eligible):
+            if user_id in unavailable_ids or user_id in users_by_slot[slot] or user_initials in seen:
+                continue
+            seen.add(user_initials)
+            result[slot].append(user_initials)
+    return result
 
 
 def _comment_user_initials(payload: dict[str, Any]) -> list[str]:
@@ -587,7 +705,8 @@ def _one_h_checklists_html(report_day: date | None = None) -> str:
 
 
 def _html_table(
-    rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: bool = False, report_date: date | None = None
+    rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: bool = False,
+    report_date: date | None = None, missing_one_h_by_slot: dict[str, list[str]] | None = None,
 ) -> str:
     header = "MEETING" if meeting else "TASK"
     label_header = "LLOJI" if meeting else "LLOJI DHE SLOTI"
@@ -600,7 +719,17 @@ def _html_table(
                 f'{escaped_lines[0]}<br><span style="{PERSONAL_TIME_STYLE}">'
                 f'{" ".join(escaped_lines[1:])}</span>'
             )
-        return "<br>".join(escaped_lines)
+        label_html = "<br>".join(escaped_lines)
+        slot = _one_h_slot_from_label(label)
+        missing = (missing_one_h_by_slot or {}).get(slot or "", [])
+        if missing:
+            missing_html = " &bull; ".join(html.escape(value) for value in missing)
+            label_html += (
+                '<br><span data-missing-one-h-users="true" '
+                'style="display:inline-block;margin-top:7px;color:#DC2626;font-size:11px;'
+                f'font-weight:800;line-height:1.35;">{missing_html}</span>'
+            )
+        return label_html
 
     for number, (label, values, *rest) in enumerate(rows, 1):
         personal = bool(rest and rest[0])
@@ -904,6 +1033,7 @@ def _excel_table_attachment(
     meeting_sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]] | None = None,
     closing_sections: list[ClosingSection] | None = None,
     checklist_date: date | None = None,
+    missing_one_h_by_slot: dict[str, list[str]] | None = None,
 ) -> tuple[str, bytes, str]:
     """Create the same printable grid as an XLSX attachment for email recipients."""
     workbook = Workbook()
@@ -1102,6 +1232,15 @@ def _excel_table_attachment(
                             "\n",
                             TextBlock(InlineFont(b=True, sz=14), personal_time),
                         ])
+                    else:
+                        slot = _one_h_slot_from_label(label)
+                        missing = (missing_one_h_by_slot or {}).get(slot or "", [])
+                        if missing:
+                            label_value = CellRichText([
+                                TextBlock(InlineFont(b=True, sz=10), label),
+                                "\n",
+                                TextBlock(InlineFont(b=True, sz=10, color="DC2626"), " • ".join(missing)),
+                            ])
                     label_cell = sheet.cell(row_number, 2, label_value)
                     label_cell.font = Font(bold=True, size=10)
                     if personal:
@@ -1297,6 +1436,7 @@ def _docx_table_attachment(
     closing_sections: list[ClosingSection] | None = None,
     meeting_sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]] | None = None,
     comment_initials: list[str] | None = None,
+    missing_one_h_by_slot: dict[str, list[str]] | None = None,
 ) -> tuple[str, bytes, str]:
     """Create a landscape Word report from the same rows and colours as HTML."""
     document = Document()
@@ -1440,6 +1580,15 @@ def _docx_table_attachment(
             row = task_table.add_row()
             set_cell(row.cells[0], str(number) if chunk_index == 0 else "", center=True)
             set_cell(row.cells[1], label if chunk_index == 0 else "", bold=True)
+            if chunk_index == 0:
+                slot = _one_h_slot_from_label(label)
+                missing = (missing_one_h_by_slot or {}).get(slot or "", [])
+                if missing:
+                    missing_run = row.cells[1].paragraphs[0].add_run(f"\n{' • '.join(missing)}")
+                    missing_run.font.name = "Arial"
+                    missing_run.font.size = Pt(7.5)
+                    missing_run.bold = True
+                    missing_run.font.color.rgb = RGBColor(220, 38, 38)
             for item_index in range(6):
                 if item_index >= len(chunk):
                     set_cell(row.cells[item_index + 2], "")
@@ -1498,6 +1647,7 @@ def _core_png_table_attachment(
     comment_initials: list[str] | None = None,
     meeting_sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]] | None = None,
     report_day_label: str = "TODAY",
+    missing_one_h_by_slot: dict[str, list[str]] | None = None,
 ) -> tuple[str, bytes, str]:
     """Render the Today SHTYPI task grid with the same task-state colours."""
     margin = 28
@@ -1531,7 +1681,12 @@ def _core_png_table_attachment(
     for label, values, personal in task_rows:
         chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
         for chunk_index, chunk in enumerate(chunks):
-            line_counts = [len(wrap(label, bold, column_widths[1] - 12))]
+            label_line_count = len(wrap(label, bold, column_widths[1] - 12))
+            slot = _one_h_slot_from_label(label)
+            missing = (missing_one_h_by_slot or {}).get(slot or "", [])
+            if missing:
+                label_line_count += len(wrap(" • ".join(missing), small_bold, column_widths[1] - 12))
+            line_counts = [label_line_count]
             for item in chunk:
                 # AM/PM and 08:00 share the top badge row. A deadline date
                 # uses its own row at the bottom of the task card.
@@ -1642,8 +1797,21 @@ def _core_png_table_attachment(
                 draw.text((x + 6, y + 6), personal_title, fill="#111827", font=bold)
                 draw.text((x + 6, y + 27), personal_time, fill="#111827", font=personal_time_font)
             else:
-                for line_index, line in enumerate(wrap(value, bold, column_widths[column] - 12)):
+                label_lines = wrap(value, bold, column_widths[column] - 12)
+                for line_index, line in enumerate(label_lines):
                     draw.text((x + 6, y + 6 + line_index * 20), line, fill="#111827", font=bold)
+                if column == 1 and chunk_index == 0:
+                    slot = _one_h_slot_from_label(label)
+                    missing = (missing_one_h_by_slot or {}).get(slot or "", [])
+                    for missing_index, missing_line in enumerate(
+                        wrap(" • ".join(missing), small_bold, column_widths[column] - 12)
+                    ):
+                        draw.text(
+                            (x + 6, y + 8 + (len(label_lines) + missing_index) * 20),
+                            missing_line,
+                            fill=DEADLINE_COLOR,
+                            font=small_bold,
+                        )
             x = right
         for item_index in range(6):
             right = x + column_widths[2 + item_index]
@@ -1842,6 +2010,7 @@ def _png_table_attachment(
     comment_initials: list[str] | None = None,
     meeting_sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]] | None = None,
     closing_sections: list[ClosingSection] | None = None,
+    missing_one_h_by_slot: dict[str, list[str]] | None = None,
 ) -> tuple[str, bytes, str]:
     """Render one PNG containing the closing tables and the canonical task grid."""
     filename, core_bytes, mime_type = _core_png_table_attachment(
@@ -1850,6 +2019,7 @@ def _png_table_attachment(
         comment_initials,
         meeting_sections,
         "NESER" if closing_sections else "TODAY",
+        missing_one_h_by_slot,
     )
     if not closing_sections:
         return filename, core_bytes, mime_type
@@ -1987,6 +2157,7 @@ async def _build_print_report(
         payload = await client.common_view(target_date)
     items = payload.get("items") or {}
     comment_initials = _comment_user_initials(payload)
+    missing_one_h_by_slot = _missing_one_h_initials(payload, target_date)
     task_rows = _task_rows(items, target_date)
     meeting_dates = [target_date, next_working_day(target_date)] if include_meetings else []
     next_meeting_payload = payload
@@ -2034,7 +2205,7 @@ async def _build_print_report(
     board_questions, staff_questions = _one_h_checklists_for_day(checklist_date)
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
 <div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">{report_title}</div>
-{_one_h_checklists_html(checklist_date)}{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
+{_one_h_checklists_html(checklist_date)}{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date, missing_one_h_by_slot=missing_one_h_by_slot)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
     content_html = (
         '<div data-today-print-report="true" style="margin:18px 0 14px">'
         + re.sub(r"^.*?<body[^>]*>|</body>.*$", "", html_body, flags=re.S)
@@ -2059,8 +2230,11 @@ async def _build_print_report(
     plain_rows.extend(_closing_sections_plain_text(closing_sections))
     plain_rows.extend(["", "TASKS"])
     for label, values, personal in task_rows:
+        slot = _one_h_slot_from_label(label)
+        missing = missing_one_h_by_slot.get(slot or "", [])
+        missing_label = f" [PA 1H: {', '.join(missing)}]" if missing else ""
         plain_rows.append(
-            f"{label}: "
+            f"{label}{missing_label}: "
             + "; ".join(
                 f"[{_task_period_label(item)}] {_task_title(item, personal=personal)}"
                 for item in values
@@ -2096,12 +2270,18 @@ async def _build_print_report(
                 comment_initials=comment_initials, meeting_sections=meeting_sections,
                 closing_sections=closing_sections,
                 checklist_date=checklist_date,
+                missing_one_h_by_slot=missing_one_h_by_slot,
             )
         ]
         if include_png:
             attachments.append(
                 _png_table_attachment(
-                    task_rows, target_date, comment_initials, meeting_sections, closing_sections
+                    task_rows,
+                    target_date,
+                    comment_initials,
+                    meeting_sections,
+                    closing_sections,
+                    missing_one_h_by_slot,
                 )
             )
         if include_docx:
@@ -2112,6 +2292,7 @@ async def _build_print_report(
                     closing_sections=closing_sections,
                     meeting_sections=meeting_sections,
                     comment_initials=comment_initials,
+                    missing_one_h_by_slot=missing_one_h_by_slot,
                 )
             )
         report["attachments"] = attachments

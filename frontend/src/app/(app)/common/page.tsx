@@ -744,6 +744,7 @@ type SwimlaneRow = {
   badgeClass: string
   badges?: { value: number; className: string; label?: string }[]
   headerBreakdown?: { value: number; label: string; className?: string }[]
+  missingOneHUsers?: { id: string; label: string; initials: string }[]
   items: SwimlaneCell[]
 }
 
@@ -7222,6 +7223,88 @@ export default function CommonViewPage() {
       oneHItems.filter((item) =>
         slot === null ? !normalizeOneHReportSlot(item.oneHReportSlot) : normalizeOneHReportSlot(item.oneHReportSlot) === slot
       )
+    const selectedOneHDate = selectedDates.size === 1 ? Array.from(selectedDates)[0] : null
+    const oneHUserIdByName = new Map<string, string>()
+    for (const userEntry of users) {
+      if (userEntry.full_name) oneHUserIdByName.set(userEntry.full_name.trim().toLowerCase(), userEntry.id)
+      if (userEntry.username) oneHUserIdByName.set(userEntry.username.trim().toLowerCase(), userEntry.id)
+      if (userEntry.email) oneHUserIdByName.set(userEntry.email.trim().toLowerCase(), userEntry.id)
+    }
+    const allOneHUsersOnLeave = selectedOneHDate
+      ? commonData.leave.some(
+          (leaveEntry) =>
+            leaveEntry.isAllUsers &&
+            selectedOneHDate >= leaveEntry.startDate &&
+            selectedOneHDate <= leaveEntry.endDate
+        )
+      : false
+    const oneHUsersOnLeave = new Set(
+      selectedOneHDate
+        ? commonData.leave
+            .filter(
+              (leaveEntry) =>
+                leaveEntry.userId &&
+                selectedOneHDate >= leaveEntry.startDate &&
+                selectedOneHDate <= leaveEntry.endDate
+            )
+            .map((leaveEntry) => leaveEntry.userId as string)
+        : []
+    )
+    const oneHEligibleUsers = selectedOneHDate
+      ? users
+          .filter((userEntry) => userEntry.is_active)
+          .filter((userEntry) => userEntry.role !== "ADMIN")
+          .filter((userEntry) => {
+            const identityValues = [
+              userEntry.full_name,
+              userEntry.username?.replace(/[._-]+/g, " "),
+              userEntry.email?.split("@")[0]?.replace(/[._-]+/g, " "),
+            ].filter((value): value is string => Boolean(value?.trim()))
+            return !identityValues.some((value) => ["GA", "KA", "HV", "HS"].includes(initials(value)))
+          })
+          .filter((userEntry) => selectedCommonUserId === "__all__" || userEntry.id === selectedCommonUserId)
+          .filter(() => !allOneHUsersOnLeave)
+          .filter((userEntry) => !oneHUsersOnLeave.has(userEntry.id))
+          .filter((userEntry) => !filtered.hiddenUsersByDate.get(selectedOneHDate)?.has(userEntry.id))
+          .sort((a, b) => {
+            const aDepartment = getDepartmentMeta(a.department_id || undefined)
+            const bDepartment = getDepartmentMeta(b.department_id || undefined)
+            if (aDepartment.rank !== bDepartment.rank) return aDepartment.rank - bDepartment.rank
+            if (aDepartment.rank === 3) {
+              const departmentNameComparison = aDepartment.name.localeCompare(bDepartment.name)
+              if (departmentNameComparison) return departmentNameComparison
+            }
+            const aOrder = a.weekly_planner_sort_order
+            const bOrder = b.weekly_planner_sort_order
+            if (aOrder != null || bOrder != null) {
+              if (aOrder == null) return 1
+              if (bOrder == null) return -1
+              if (aOrder !== bOrder) return aOrder - bOrder
+            }
+            const aLabel = a.full_name || a.username || a.email || ""
+            const bLabel = b.full_name || b.username || b.email || ""
+            return aLabel.localeCompare(bLabel)
+          })
+      : []
+    const buildMissingOneHUsers = (slot: OneHReportSlot | null) => {
+      if (!selectedOneHDate || !slot) return []
+      const usersWithSlot = new Set<string>()
+      for (const item of commonData.oneH) {
+        if (item.date !== selectedOneHDate || isWaitingClientTask(item)) continue
+        if (normalizeOneHReportSlot(item.oneHReportSlot) !== slot) continue
+        if (item.userId) usersWithSlot.add(item.userId)
+        for (const assignee of entryAssignees(item)) {
+          const assigneeId = oneHUserIdByName.get(assignee.trim().toLowerCase())
+          if (assigneeId) usersWithSlot.add(assigneeId)
+        }
+      }
+      return oneHEligibleUsers
+        .filter((userEntry) => !usersWithSlot.has(userEntry.id))
+        .map((userEntry) => {
+          const label = userEntry.full_name || userEntry.username || userEntry.email || "Unknown"
+          return { id: userEntry.id, label, initials: initials(label) }
+        })
+    }
     const oneHRows = isMultiDate
       ? [
           {
@@ -7246,6 +7329,7 @@ export default function CommonViewPage() {
             headerClass: "swimlane-header oneh",
             badgeClass: "swimlane-badge oneh",
             headerBreakdown: buildFastHeaderBreakdown(items),
+            missingOneHUsers: buildMissingOneHUsers(slotRow.slot),
             items,
           }
         })
@@ -7388,7 +7472,7 @@ export default function CommonViewPage() {
         items: feedbackItems,
       },
     ]
-  }, [filtered, filteredDiamondItems, isMultiDate, sortByDate, sortByDateTime, sortByTime, selectedDates, typeFilters, weekISOs])
+  }, [commonData.oneH, filtered, filteredDiamondItems, getDepartmentMeta, isMultiDate, selectedCommonUserId, sortByDate, sortByDateTime, sortByTime, selectedDates, typeFilters, users, weekISOs])
 
   const swimlaneColumnCount = React.useMemo(() => {
     if (!swimlaneRows.length) return 3
@@ -9259,6 +9343,46 @@ export default function CommonViewPage() {
           gap: 1px;
           width: 100%;
           flex: 1 1 auto;
+        }
+        .swimlane-header-main {
+          display: flex;
+          min-height: 0;
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .swimlane-header-main .swimlane-header-row {
+          flex: 0 0 auto;
+        }
+        .oneh-missing-users {
+          display: flex;
+          flex: 1 1 auto;
+          flex-direction: row;
+          flex-wrap: wrap;
+          align-content: flex-start;
+          align-items: flex-start;
+          justify-content: flex-start;
+          gap: 4px 8px;
+          width: 100%;
+          padding: 9px 2px 4px;
+          color: #dc2626;
+          font-size: 12px;
+          font-weight: 800;
+          line-height: 1.15;
+          letter-spacing: 0.3px;
+        }
+        .oneh-missing-users .oneh-missing-user {
+          display: inline-block;
+          color: #dc2626;
+          text-align: center;
+          white-space: nowrap;
+        }
+        .oneh-missing-users .oneh-missing-user:not(:last-child)::after {
+          content: "•";
+          display: inline-block;
+          margin-left: 8px;
+          color: #ef4444;
+          font-size: 9px;
+          vertical-align: middle;
         }
         .swimlane-index {
           width: 24px;
@@ -14839,12 +14963,26 @@ export default function CommonViewPage() {
                         if (headerSubtext) {
                           return (
                             <>
-                              <div className="swimlane-header-row">
-                                <span className="swimlane-label-wrap">
-                                  <span className="swimlane-label">{row.label}</span>
-                                  {infoButton}
-                                </span>
-                                {badges}
+                              <div className="swimlane-header-main">
+                                <div className="swimlane-header-row">
+                                  <span className="swimlane-label-wrap">
+                                    <span className="swimlane-label">{row.label}</span>
+                                    {infoButton}
+                                  </span>
+                                  {badges}
+                                </div>
+                                {row.missingOneHUsers?.length ? (
+                                  <div
+                                    className="oneh-missing-users"
+                                    aria-label={`Pa slot ${headerSubtext}: ${row.missingOneHUsers.map((entry) => entry.label).join(", ")}`}
+                                  >
+                                    {row.missingOneHUsers.map((entry) => (
+                                      <span key={entry.id} className="oneh-missing-user" title={entry.label}>
+                                        {entry.initials}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : null}
                               </div>
                               <span className="swimlane-label-sub">{headerSubtext}</span>
                             </>

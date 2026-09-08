@@ -141,6 +141,7 @@ async def list_meetings(
             updated_at=m.updated_at,
             participant_ids=participants_by_meeting.get(m.id, []),
             paired_external_meeting_id=m.paired_external_meeting_id,
+            pre_external_meeting_id=m.pre_external_meeting_id,
         )
         for m in meetings
     ]
@@ -401,6 +402,7 @@ async def create_meeting(
             updated_at=paired_internal_meeting.updated_at,
             participant_ids=participant_ids_list,
             paired_external_meeting_id=paired_internal_meeting.paired_external_meeting_id,
+            pre_external_meeting_id=paired_internal_meeting.pre_external_meeting_id,
         )
 
     return MeetingCreateOut(
@@ -428,6 +430,7 @@ async def create_meeting(
         updated_at=meeting.updated_at,
         participant_ids=participant_ids_list,
         paired_external_meeting_id=meeting.paired_external_meeting_id,
+        pre_external_meeting_id=meeting.pre_external_meeting_id,
         paired_internal_meeting=paired_internal_out,
     )
 
@@ -581,6 +584,7 @@ async def update_meeting(
         updated_at=meeting.updated_at,
         participant_ids=participant_ids_list,
         paired_external_meeting_id=meeting.paired_external_meeting_id,
+        pre_external_meeting_id=meeting.pre_external_meeting_id,
     )
 
 
@@ -638,6 +642,7 @@ async def create_agent_test_task_for_meeting(
         updated_at=meeting.updated_at,
         participant_ids=participant_ids_list,
         paired_external_meeting_id=meeting.paired_external_meeting_id,
+        pre_external_meeting_id=meeting.pre_external_meeting_id,
     )
 
 
@@ -694,6 +699,7 @@ async def create_pim_image_test_task_for_meeting(
         updated_at=meeting.updated_at,
         participant_ids=participant_ids_list,
         paired_external_meeting_id=meeting.paired_external_meeting_id,
+        pre_external_meeting_id=meeting.pre_external_meeting_id,
     )
 
 

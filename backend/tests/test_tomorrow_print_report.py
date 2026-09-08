@@ -11,6 +11,7 @@ from app.services.tomorrow_print_report import (
     _excel_table_attachment,
     _html_table,
     _meeting_rows,
+    _missing_one_h_initials,
     _one_h_checklists_html,
     _png_table_attachment,
     _task_rows,
@@ -18,6 +19,73 @@ from app.services.tomorrow_print_report import (
     build_tomorrow_print_report,
     ensure_required_shtypi_recipient,
 )
+
+
+def test_missing_one_h_users_exclude_leave_admin_and_management_initials() -> None:
+    payload = {
+        "users": [
+            {"id": "ef", "full_name": "Era Fana", "role": "STAFF", "is_active": True,
+             "weekly_planner_sort_order": 0},
+            {"id": "ra", "full_name": "Rina Aliu", "role": "STAFF", "is_active": True,
+             "weekly_planner_sort_order": 1},
+            {"id": "at", "full_name": "Arta Tafa", "role": "STAFF", "is_active": True,
+             "weekly_planner_sort_order": 2},
+            {"id": "hs", "full_name": "Haxhere Sopa", "role": "STAFF", "is_active": True},
+            {"id": "ga", "username": "gane.arifaj", "role": "MANAGER", "is_active": True},
+            {"id": "admin", "full_name": "Besa Kola", "role": "ADMIN", "is_active": True},
+        ],
+        "items": {
+            "oneH": [{
+                "title": "EF: Task", "date": "2026-09-08", "oneHReportSlot": "10:00",
+                "userId": "ef", "assignees": ["Era Fana"],
+            }],
+            "leave": [{
+                "startDate": "2026-09-08", "endDate": "2026-09-08", "userId": "at",
+            }],
+            "absent": [],
+        },
+    }
+
+    missing = _missing_one_h_initials(payload, date(2026, 9, 8))
+
+    assert missing["10:00"] == ["RA"]
+    assert missing["11:00"] == ["EF", "RA"]
+
+
+def test_missing_one_h_users_render_in_red_below_report_slot() -> None:
+    report_html = _html_table(
+        [("1H 10:00", [], False)],
+        missing_one_h_by_slot={"10:00": ["EF", "RA", "AT"]},
+    )
+
+    assert 'data-missing-one-h-users="true"' in report_html
+    assert "color:#DC2626" in report_html
+    assert "EF &bull; RA &bull; AT" in report_html
+
+
+def test_missing_one_h_users_follow_the_same_department_and_person_order_as_tasks() -> None:
+    payload = {
+        "departments": [
+            {"id": "pcm", "code": "PCM", "name": "Project Content Manager"},
+            {"id": "gd", "code": "GD", "name": "Graphic Design"},
+            {"id": "dev", "code": "DEV", "name": "Development"},
+        ],
+        "users": [
+            {"id": "pcm-1", "full_name": "Bora Kola", "department_id": "pcm", "role": "STAFF",
+             "is_active": True, "weekly_planner_sort_order": 0},
+            {"id": "dev-2", "full_name": "Rina Aliu", "department_id": "dev", "role": "STAFF",
+             "is_active": True, "weekly_planner_sort_order": 2},
+            {"id": "gd-1", "full_name": "Fiona Gashi", "department_id": "gd", "role": "STAFF",
+             "is_active": True, "weekly_planner_sort_order": 0},
+            {"id": "dev-1", "full_name": "Era Fana", "department_id": "dev", "role": "STAFF",
+             "is_active": True, "weekly_planner_sort_order": 1},
+        ],
+        "items": {"oneH": [], "leave": [], "absent": []},
+    }
+
+    missing = _missing_one_h_initials(payload, date(2026, 9, 8))
+
+    assert missing["10:00"] == ["EF", "RA", "FG", "BK"]
 
 
 def test_required_shtypi_recipients_are_always_in_to_without_duplicates() -> None:
