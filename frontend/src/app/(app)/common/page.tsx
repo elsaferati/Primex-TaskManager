@@ -709,6 +709,7 @@ const commonTaskSortRank = (status?: string | null, isDone?: boolean) => {
 
 type SwimlaneCell = {
   title: string
+  meetingTimeLabel?: string
   subtitle?: string
   dateLabel?: string
   note?: string
@@ -7077,7 +7078,8 @@ export default function CommonViewPage() {
       ? sortByDateTime(filtered.external, (x) => x.date, (x) => x.time, (x) => x.title)
       : sortByTime(filtered.external, (x) => x.time, (x) => x.title)
     const externalItems: SwimlaneCell[] = externalSource.map((x) => ({
-      title: `${x.title} ${formatTimeLabel(x.time)}`.trim(),
+      title: x.title,
+      meetingTimeLabel: formatTimeLabel(x.time) || undefined,
       subtitle: x.department || "Department TBD",
       dateLabel: formatDateHuman(x.date),
       accentClass: [
@@ -7100,7 +7102,8 @@ export default function CommonViewPage() {
       ? sortByDateTime(filtered.internal, (x) => x.date, (x) => x.time, (x) => x.title)
       : sortByTime(filtered.internal, (x) => x.time, (x) => x.title)
     const internalItems: SwimlaneCell[] = internalSource.map((x) => ({
-      title: `${x.title} ${formatTimeLabel(x.time)}`.trim(),
+      title: x.title,
+      meetingTimeLabel: formatTimeLabel(x.time) || undefined,
       subtitle: x.department || "Department TBD",
       dateLabel: formatDateHuman(x.date),
       accentClass: [
@@ -9839,6 +9842,15 @@ export default function CommonViewPage() {
           flex: 0 0 100%;
           width: 100%;
         }
+        .swimlane-title-main.meeting-layout {
+          flex-direction: column;
+          align-items: flex-start;
+          flex-wrap: nowrap;
+        }
+        .swimlane-title-main.meeting-layout .swimlane-title {
+          flex: 0 0 auto;
+          width: 100%;
+        }
         .swimlane-title-main.priority .swimlane-assignees,
         .swimlane-title-main.priority .swimlane-title {
           width: 100%;
@@ -10367,6 +10379,36 @@ export default function CommonViewPage() {
           font-size: 11px;
           font-weight: 700;
           padding: 1px 4px;
+        }
+        .meeting-time-chip {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 0;
+          height: 22px;
+          padding: 0 8px;
+          border: 1px solid #93c5fd;
+          border-radius: 999px;
+          background: #eff6ff;
+          color: #1d4ed8;
+          font-size: 10px;
+          font-weight: 800;
+          line-height: 1;
+          white-space: nowrap;
+          flex: 0 0 auto;
+        }
+        .week-table-meeting-main {
+          display: flex;
+          flex: 1;
+          min-width: 0;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 3px;
+        }
+        .week-table-meeting-title {
+          min-width: 0;
+          white-space: pre-wrap;
+          line-height: 1.35;
         }
         .time-indicator {
           display: inline-flex;
@@ -14709,7 +14751,15 @@ export default function CommonViewPage() {
                               .filter(Boolean)
                               .join(" ")}
                           >
-                            <span>{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span>
+                            <div className="week-table-meeting-main">
+                              {formatTimeLabel(e.time) ? (
+                                <span className="meeting-time-chip">{formatTimeLabel(e.time)}</span>
+                              ) : null}
+                              <span className="week-table-meeting-title">
+                                <span className="week-table-line-number">{idx + 1}.</span>{" "}
+                                {commonPrintTitleLine(e.title)}
+                              </span>
+                            </div>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -14734,7 +14784,15 @@ export default function CommonViewPage() {
                               .filter(Boolean)
                               .join(" ")}
                           >
-                            <span>{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span>
+                            <div className="week-table-meeting-main">
+                              {formatTimeLabel(e.time) ? (
+                                <span className="meeting-time-chip">{formatTimeLabel(e.time)}</span>
+                              ) : null}
+                              <span className="week-table-meeting-title">
+                                <span className="week-table-line-number">{idx + 1}.</span>{" "}
+                                {commonPrintTitleLine(e.title)}
+                              </span>
+                            </div>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -15201,6 +15259,7 @@ export default function CommonViewPage() {
                                       "swimlane-title-main",
                                       row.id === "priority" ? "priority" : "",
                                       isFastTaskRowId(row.id) ? "fast-task-layout" : "",
+                                      row.id === "external" || row.id === "internal" ? "meeting-layout" : "",
                                     ].filter(Boolean).join(" ")}
                                   >
                                     {!cell.placeholder && cell.assignees?.length ? (
@@ -15230,6 +15289,9 @@ export default function CommonViewPage() {
                                           </span>
                                         ) : null}
                                         {(row.id === "external" || row.id === "internal") ? renderSwimlaneMeetingStatusControl(cell) : null}
+                                        {(row.id === "external" || row.id === "internal") && cell.meetingTimeLabel ? (
+                                          <span className="meeting-time-chip">{cell.meetingTimeLabel}</span>
+                                        ) : null}
                                         {isFastTaskRowId(row.id) && row.id !== "waitingClient"
                                           ? renderFastTaskReorderControls(row.items, cell)
                                           : null}
@@ -15262,6 +15324,9 @@ export default function CommonViewPage() {
                                           </span>
                                         ) : null}
                                         {(row.id === "external" || row.id === "internal") ? renderSwimlaneMeetingStatusControl(cell) : null}
+                                        {(row.id === "external" || row.id === "internal") && cell.meetingTimeLabel ? (
+                                          <span className="meeting-time-chip">{cell.meetingTimeLabel}</span>
+                                        ) : null}
                                         {isFastTaskRowId(row.id) && row.id !== "waitingClient"
                                           ? renderFastTaskReorderControls(row.items, cell)
                                           : null}
@@ -15274,6 +15339,9 @@ export default function CommonViewPage() {
                                     ) : (row.id === "external" || row.id === "internal") ? (
                                       <div className="swimlane-assignees">
                                         {renderSwimlaneMeetingStatusControl(cell)}
+                                        {cell.meetingTimeLabel ? (
+                                          <span className="meeting-time-chip">{cell.meetingTimeLabel}</span>
+                                        ) : null}
                                       </div>
                                     ) : null}
                                     {row.id === "diamond" ? (
@@ -15283,7 +15351,9 @@ export default function CommonViewPage() {
                                     ) : null}
                                     <div className="swimlane-title">
                                       <span className="swimlane-print-title">
-                                        {commonPrintTitleLine(cell.title)}
+                                        {commonPrintTitleLine(
+                                          `${cell.title}${cell.meetingTimeLabel ? ` ${cell.meetingTimeLabel}` : ""}`,
+                                        )}
                                       </span>
                                       <span
                                         className={[
