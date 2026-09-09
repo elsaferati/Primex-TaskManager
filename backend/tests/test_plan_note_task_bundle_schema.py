@@ -32,6 +32,22 @@ class PlanNoteTaskBundleSchemaTests(unittest.TestCase):
 
         self.assertEqual(payload.assignee_states[0].confirmation_assignee_id, confirmer_id)
 
+    def test_assignee_state_accepts_official_one_h_slot(self) -> None:
+        payload = PlanNoteTaskBundleUpdate.model_validate(
+            {
+                "assignee_states": [
+                    {
+                        "assignee_id": str(uuid.uuid4()),
+                        "status": "TODO",
+                        "is_1h_report": True,
+                        "one_h_report_slot": "16:00",
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(payload.assignee_states[0].one_h_report_slot, "16:00")
+
 
 if __name__ == "__main__":
     unittest.main()

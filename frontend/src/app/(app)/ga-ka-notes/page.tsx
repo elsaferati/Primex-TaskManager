@@ -54,6 +54,13 @@ const TASK_TYPE_OPTIONS_WITH_PROJECT = ["NORMAL", "HIGH", "1H", "R1", "PERSONAL"
 type TaskTypeOption = typeof TASK_TYPE_OPTIONS_NO_PROJECT[number] | TaskPriority
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
+const ONE_H_REPORT_SLOT_OPTIONS = ["10:00", "11:00", "11:50", "14:20", "16:00"] as const
+type OneHReportSlot = typeof ONE_H_REPORT_SLOT_OPTIONS[number]
+const ONE_H_REPORT_SLOT_NONE_VALUE = "__none__"
+const ONE_H_REPORT_SLOTS_BY_PERIOD: Record<TaskFinishPeriod, readonly OneHReportSlot[]> = {
+  AM: ["10:00", "11:00", "11:50"],
+  PM: ["14:20", "16:00"],
+}
 const TASK_PRIORITY_STYLES: Record<string, string> = {
   HIGH: "bg-rose-50 text-rose-700",
   NORMAL: "bg-blue-50 text-blue-700",
@@ -99,6 +106,7 @@ type GaAssigneeTaskState = {
   startDate: string
   dueDate: string
   finishPeriod: TaskFinishPeriod | null
+  oneHReportSlot: OneHReportSlot | null
   isDeadlineImportant: boolean
 }
 type NoteTaskInfo = {
@@ -173,6 +181,14 @@ function taskDateKey(value?: string | null) {
   return toISODate(date)
 }
 
+function oneHReportSlotsForPeriod(period?: TaskFinishPeriod | null) {
+  return period ? ONE_H_REPORT_SLOTS_BY_PERIOD[period] : ONE_H_REPORT_SLOT_OPTIONS
+}
+
+function finishPeriodForOneHReportSlot(slot: OneHReportSlot): TaskFinishPeriod {
+  return ONE_H_REPORT_SLOTS_BY_PERIOD.AM.includes(slot) ? "AM" : "PM"
+}
+
 function createEmptyGaAssigneeTaskState(): GaAssigneeTaskState {
   return {
     taskId: null,
@@ -182,6 +198,7 @@ function createEmptyGaAssigneeTaskState(): GaAssigneeTaskState {
     startDate: "",
     dueDate: "",
     finishPeriod: null,
+    oneHReportSlot: null,
     isDeadlineImportant: false,
   }
 }
@@ -204,6 +221,7 @@ function sameGaAssigneeTaskState(
     left.startDate === right.startDate &&
     left.dueDate === right.dueDate &&
     left.finishPeriod === right.finishPeriod &&
+    left.oneHReportSlot === right.oneHReportSlot &&
     left.isDeadlineImportant === right.isDeadlineImportant
   )
 }
@@ -224,6 +242,7 @@ function serializeGaAssigneeTaskState(
     start_date: state.startDate ? new Date(state.startDate).toISOString() : null,
     due_date: state.dueDate ? new Date(state.dueDate).toISOString() : null,
     finish_period: state.finishPeriod,
+    one_h_report_slot: state.oneHReportSlot,
     is_deadline_important: state.isDeadlineImportant,
   }
 }
@@ -1140,6 +1159,9 @@ export default function GaKaNotesPage() {
   const [taskFinishPeriod, setTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
   )
+  const [taskOneHReportSlot, setTaskOneHReportSlot] = React.useState<OneHReportSlot | typeof ONE_H_REPORT_SLOT_NONE_VALUE>(
+    ONE_H_REPORT_SLOT_NONE_VALUE
+  )
   const [taskDueDate, setTaskDueDate] = React.useState("")
   const [taskStartDate, setTaskStartDate] = React.useState("")
   const [taskDeadlineImportant, setTaskDeadlineImportant] = React.useState(false)
@@ -1529,6 +1551,9 @@ export default function GaKaNotesPage() {
               startDate: taskDateKey(t.start_date) || "",
               dueDate: taskDateKey(t.due_date) || "",
               finishPeriod: t.finish_period === "AM" || t.finish_period === "PM" ? t.finish_period : null,
+              oneHReportSlot: ONE_H_REPORT_SLOT_OPTIONS.includes(t.one_h_report_slot as OneHReportSlot)
+                ? t.one_h_report_slot as OneHReportSlot
+                : null,
               isDeadlineImportant: Boolean(t.is_deadline_important),
             },
           }
@@ -2324,6 +2349,7 @@ export default function GaKaNotesPage() {
     setTaskDescription("") // start empty so creator can add detailed description
     setTaskPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
     setTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+    setTaskOneHReportSlot(ONE_H_REPORT_SLOT_NONE_VALUE)
     setTaskDueDate("")
     setTaskStartDate("")
     setTaskDeadlineImportant(false)
@@ -2470,6 +2496,10 @@ export default function GaKaNotesPage() {
           project_id: taskProjectId !== "NONE" ? taskProjectId : null,
           is_bllok: isBllok,
           is_1h_report: is1hReport,
+          one_h_report_slot:
+            is1hReport && taskOneHReportSlot !== ONE_H_REPORT_SLOT_NONE_VALUE
+              ? taskOneHReportSlot
+              : null,
           is_r1: isR1,
           is_personal: isPersonal,
           skill_category: taskSkillCategory,
@@ -3961,8 +3991,8 @@ export default function GaKaNotesPage() {
                             const parts = formatDateParts(note.created_at)
                             return (
                               <div className="leading-tight">
-                                <div>{parts.date}</div>
                                 {parts.time ? <div>{parts.time}</div> : null}
+                                <div>{parts.date}</div>
                               </div>
                             )
                           })()}
@@ -3973,8 +4003,8 @@ export default function GaKaNotesPage() {
                               const parts = formatDateParts(lastEditedValue)
                               return (
                                 <div className="leading-tight">
-                                  <div>{parts.date}</div>
                                   {parts.time ? <div>{parts.time}</div> : null}
+                                  <div>{parts.date}</div>
                                 </div>
                               )
                             })()
@@ -4374,12 +4404,13 @@ export default function GaKaNotesPage() {
       </Dialog>
 
       <Dialog open={Boolean(taskDialogNoteId)} onOpenChange={(open) => (!open ? setTaskDialogNoteId(null) : null)}>
-        <DialogContent className="sm:max-w-3xl w-[95vw]">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] w-[95vw] flex-col overflow-hidden sm:max-w-3xl">
+          <DialogHeader className="shrink-0">
             <DialogTitle>Create Task from Note</DialogTitle>
           </DialogHeader>
           {taskDialogNote ? (
-            <div className="space-y-3">
+            <>
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-2">
               <div className="space-y-2">
                 <Label>Title</Label>
                 <Textarea
@@ -4396,7 +4427,7 @@ export default function GaKaNotesPage() {
                   editorClassName="min-h-[72px] text-sm px-2 py-1"
                 />
               </div>
-              <div className="grid gap-2 md:grid-cols-2">
+              <div className={`grid gap-2 ${taskPriority === "1H" ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
                 <div className="space-y-2">
                   <Label>Priority</Label>
                   <Select 
@@ -4405,10 +4436,14 @@ export default function GaKaNotesPage() {
                       // Reset to NORMAL if switching between project/non-project modes and current value is invalid
                       const nextValue = v as TaskTypeOption
                       const isValid = availablePriorityOptions.includes(nextValue)
-                      setTaskPriority(isValid ? nextValue : "NORMAL")
+                      const nextPriority = isValid ? nextValue : "NORMAL"
+                      setTaskPriority(nextPriority)
+                      if (nextPriority !== "1H") {
+                        setTaskOneHReportSlot(ONE_H_REPORT_SLOT_NONE_VALUE)
+                      }
                     }}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -4420,15 +4455,43 @@ export default function GaKaNotesPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                {taskPriority === "1H" ? (
+                  <div className="space-y-2">
+                    <Label>1H slot (optional)</Label>
+                    <Select
+                      value={taskOneHReportSlot}
+                      onValueChange={(value) => {
+                        const nextSlot = value as OneHReportSlot | typeof ONE_H_REPORT_SLOT_NONE_VALUE
+                        setTaskOneHReportSlot(nextSlot)
+                        if (nextSlot !== ONE_H_REPORT_SLOT_NONE_VALUE) {
+                          setTaskFinishPeriod(finishPeriodForOneHReportSlot(nextSlot))
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select slot" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ONE_H_REPORT_SLOT_NONE_VALUE}>Unassigned</SelectItem>
+                        {oneHReportSlotsForPeriod(
+                          taskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : taskFinishPeriod
+                        ).map((value) => (
+                          <SelectItem key={value} value={value}>{value}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
                 <div className="space-y-2">
                   <Label>Finish by (optional)</Label>
                   <Select
                     value={taskFinishPeriod}
-                    onValueChange={(value) =>
-                      setTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
-                    }
+                    onValueChange={(value) => {
+                      const nextPeriod = value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
+                      setTaskFinishPeriod(nextPeriod)
+                    }}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger className="w-full">
                       <SelectValue placeholder="None (all day)" />
                     </SelectTrigger>
                     <SelectContent>
@@ -4648,7 +4711,8 @@ export default function GaKaNotesPage() {
                   {taskSkillAiLoading ? "Duke analizuar me AI…" : "Analizo me AI përsëri"}
                 </Button>
               </div>
-              <div className="flex justify-end gap-2">
+            </div>
+              <div className="flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-background pt-3">
                 <Button variant="outline" onClick={() => setTaskDialogNoteId(null)}>
                   Cancel
                 </Button>
@@ -4656,7 +4720,7 @@ export default function GaKaNotesPage() {
                   {creatingTask ? "Creating..." : "Create task"}
                 </Button>
               </div>
-            </div>
+            </>
           ) : null}
         </DialogContent>
       </Dialog>
@@ -4882,14 +4946,18 @@ export default function GaKaNotesPage() {
                           <div className="text-sm font-semibold text-slate-800">
                             {person?.full_name || person?.username || assigneeId}
                           </div>
-                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                          <div className={`grid gap-2 sm:grid-cols-2 ${state.type === "1H" ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}>
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Type</Label>
                               <Select
                                 value={state.type}
-                                onValueChange={(value) =>
-                                  updateEditTaskAssigneeState(assigneeId, { type: value as GaAssigneeTaskType })
-                                }
+                                onValueChange={(value) => {
+                                  const nextType = value as GaAssigneeTaskType
+                                  updateEditTaskAssigneeState(assigneeId, {
+                                    type: nextType,
+                                    ...(nextType === "1H" ? {} : { oneHReportSlot: null }),
+                                  })
+                                }}
                                 disabled={savingEdit}
                               >
                                 <SelectTrigger><SelectValue /></SelectTrigger>
@@ -4903,6 +4971,32 @@ export default function GaKaNotesPage() {
                                 </SelectContent>
                               </Select>
                             </div>
+                            {state.type === "1H" ? (
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">1H slot</Label>
+                                <Select
+                                  value={state.oneHReportSlot ?? ONE_H_REPORT_SLOT_NONE_VALUE}
+                                  onValueChange={(value) => {
+                                    const nextSlot = value === ONE_H_REPORT_SLOT_NONE_VALUE
+                                      ? null
+                                      : value as OneHReportSlot
+                                    updateEditTaskAssigneeState(assigneeId, {
+                                      oneHReportSlot: nextSlot,
+                                      ...(nextSlot ? { finishPeriod: finishPeriodForOneHReportSlot(nextSlot) } : {}),
+                                    })
+                                  }}
+                                  disabled={savingEdit}
+                                >
+                                  <SelectTrigger><SelectValue placeholder="Select slot" /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value={ONE_H_REPORT_SLOT_NONE_VALUE}>Unassigned</SelectItem>
+                                    {oneHReportSlotsForPeriod(state.finishPeriod).map((value) => (
+                                      <SelectItem key={value} value={value}>{value}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            ) : null}
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Status</Label>
                               <Select
@@ -4968,11 +5062,14 @@ export default function GaKaNotesPage() {
                               <Label className="text-xs text-muted-foreground">Finish by</Label>
                               <Select
                                 value={state.finishPeriod ?? FINISH_PERIOD_NONE_VALUE}
-                                onValueChange={(value) =>
+                                onValueChange={(value) => {
+                                  const nextPeriod = value === FINISH_PERIOD_NONE_VALUE
+                                    ? null
+                                    : value as TaskFinishPeriod
                                   updateEditTaskAssigneeState(assigneeId, {
-                                    finishPeriod: value === FINISH_PERIOD_NONE_VALUE ? null : value as TaskFinishPeriod,
+                                    finishPeriod: nextPeriod,
                                   })
-                                }
+                                }}
                                 disabled={savingEdit}
                               >
                                 <SelectTrigger><SelectValue /></SelectTrigger>

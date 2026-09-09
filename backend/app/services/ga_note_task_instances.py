@@ -33,6 +33,8 @@ class GaNoteAssigneeExecutionState:
     start_date: datetime | None = None
     due_date: datetime | None = None
     finish_period: TaskFinishPeriod | None = None
+    one_h_report_slot: str | None = None
+    one_h_report_slot_is_set: bool = False
     is_deadline_important: bool = False
     priority: TaskPriority = TaskPriority.NORMAL
     is_bllok: bool = False
@@ -443,6 +445,9 @@ def apply_ga_note_assignee_execution_states(
         current_finish_period = task.finish_period.value if hasattr(task.finish_period, "value") else task.finish_period
         if current_finish_period != next_finish_period:
             task.finish_period = next_finish_period
+            changed = True
+        if state.one_h_report_slot_is_set and task.one_h_report_slot != state.one_h_report_slot:
+            task.one_h_report_slot = state.one_h_report_slot
             changed = True
         if task.is_deadline_important != state.is_deadline_important:
             task.is_deadline_important = state.is_deadline_important
