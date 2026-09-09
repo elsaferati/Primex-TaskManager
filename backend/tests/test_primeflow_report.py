@@ -121,6 +121,7 @@ class PrimeFlowReportTests(unittest.TestCase):
         )
 
         self.assertEqual(document.board_reminders[-1].text, "Planifikimi javor short")
+        self.assertTrue(document.board_reminders[-1].is_extra)
         self.assertEqual(
             [question.text for question in document.reminders[-2:]],
             [
@@ -128,6 +129,31 @@ class PrimeFlowReportTests(unittest.TestCase):
                 "Shikohen det qe mbesin vetem per neser (te premten)",
             ],
         )
+        self.assertTrue(all(question.is_extra for question in document.reminders[-2:]))
+
+        rendered_html = render_html(document)
+        self.assertEqual(rendered_html.count('data-extra-reminder-card="true"'), 2)
+        self.assertIn("border:1px solid #dc2626", rendered_html)
+        self.assertIn("color:#b91c1c", rendered_html)
+        self.assertLess(
+            rendered_html.index("Emails per missing info, per me vazhdu javen tjeter"),
+            rendered_html.index("Hap doc dhe det"),
+        )
+        self.assertLess(
+            rendered_html.index("Planifikimi javor short"),
+            rendered_html.index("Slotin paraprak/aktual"),
+        )
+
+        word_xml = zipfile.ZipFile(io.BytesIO(render_docx(document))).read(
+            "word/document.xml"
+        ).decode("utf-8")
+        self.assertIn('w:color w:val="B91C1C"', word_xml)
+        self.assertIn('w:color="dc2626"', word_xml)
+        self.assertLess(
+            word_xml.index("Emails per missing info, per me vazhdu javen tjeter"),
+            word_xml.index("Hap doc dhe det"),
+        )
+        self.assertGreater(len(render_png(document)), 1000)
 
     def test_friday_reports_add_week_balancing_staff_questions(self) -> None:
         friday = date(2026, 9, 4)
@@ -147,9 +173,16 @@ class PrimeFlowReportTests(unittest.TestCase):
                 "Emails per missing info, per me vazhdu javen tjeter",
             ],
         )
+        self.assertTrue(all(question.is_extra for question in document.reminders[-3:]))
         self.assertNotIn(
             "Planifikimi javor short",
             [question.text for question in document.board_reminders],
+        )
+        rendered_html = render_html(document)
+        self.assertEqual(rendered_html.count('data-extra-reminder-card="true"'), 1)
+        self.assertLess(
+            rendered_html.index("Barazimi i planifikimit javor - next week"),
+            rendered_html.index("Hap doc dhe det"),
         )
 
     def test_other_weekdays_do_not_add_thursday_or_friday_questions(self) -> None:
@@ -171,6 +204,7 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertNotIn("Barazimi i realizimit javor - this week", all_questions)
         self.assertNotIn("Emails per missing info, per me vazhdu javen tjeter", all_questions)
         self.assertNotIn("Shikohen det qe mbesin vetem per neser (te premten)", all_questions)
+        self.assertNotIn('data-extra-reminder-card="true"', render_html(document))
 
     def test_undiscussed_notes_query_matches_open_px_notes_without_tasks(self) -> None:
         query = str(_undiscussed_px_notes_statement())
@@ -417,7 +451,8 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn('data-board-reminder-columns="true"', html)
         self.assertIn(BOARD_REMINDER_SECTION_TITLE, html)
         self.assertIn('data-reminder-columns="true"', html)
-        self.assertEqual(html.count('data-compact-reminder-row="true"'), 2)
+        self.assertEqual(html.count('data-compact-reminder-row="true"'), 3)
+        self.assertEqual(html.count('data-extra-reminder-card="true"'), 1)
         self.assertIn('width="50%" valign="top"', html)
         self.assertIn('<strong>1.</strong> Hap doc dhe det', html)
         self.assertIn('<strong>2.</strong> Share screen side by side DET/REZULTATIN', html)

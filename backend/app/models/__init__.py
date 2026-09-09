@@ -44,6 +44,7 @@ from app.models.morning_report_settings import MorningReportSettings
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.microsoft_token import MicrosoftToken
 from app.models.notification import Notification
+from app.models.open_task_planning_baseline import OpenTaskPlanningBaseline
 from app.models.project import Project
 from app.models.primeflow_report_delivery_run import PrimeFlowReportDeliveryRun
 from app.models.primeflow_report_recipient import PrimeFlowReportRecipient
@@ -148,6 +149,7 @@ __all__ = [
     "MeetingOccurrenceStatus",
     "MicrosoftToken",
     "Notification",
+    "OpenTaskPlanningBaseline",
     "Project",
     "PrimeFlowReportDeliveryRun",
     "PrimeFlowReportRecipient",

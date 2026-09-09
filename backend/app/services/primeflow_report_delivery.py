@@ -145,16 +145,20 @@ async def load_1h_reminder_questions(
     )
     if report_day is not None and report_day.weekday() == 3:
         reminders.extend([
-            ReportReminderQuestion(text="Emails per missing info, per me vazhdu javen tjeter"),
             ReportReminderQuestion(
-                text="Shikohen det qe mbesin vetem per neser (te premten)"
+                text="Emails per missing info, per me vazhdu javen tjeter", is_extra=True
+            ),
+            ReportReminderQuestion(
+                text="Shikohen det qe mbesin vetem per neser (te premten)", is_extra=True
             ),
         ])
     elif report_day is not None and report_day.weekday() == 4:
         reminders.extend([
-            ReportReminderQuestion(text="Barazimi i planifikimit javor - next week"),
-            ReportReminderQuestion(text="Barazimi i realizimit javor - this week"),
-            ReportReminderQuestion(text="Emails per missing info, per me vazhdu javen tjeter"),
+            ReportReminderQuestion(text="Barazimi i planifikimit javor - next week", is_extra=True),
+            ReportReminderQuestion(text="Barazimi i realizimit javor - this week", is_extra=True),
+            ReportReminderQuestion(
+                text="Emails per missing info, per me vazhdu javen tjeter", is_extra=True
+            ),
         ])
     return reminders
 
