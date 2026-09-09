@@ -7,6 +7,7 @@ import os
 import uuid
 from pathlib import Path
 from datetime import date, datetime, time, timedelta
+from typing import Callable
 
 from sqlalchemy import select, text
 from dotenv import load_dotenv
@@ -161,6 +162,22 @@ async def load_1h_reminder_questions(
             ),
         ])
     return reminders
+
+
+def _optional_attachment(
+    filename: str,
+    content_type: str,
+    renderer: Callable[[], bytes],
+    warnings: list[str],
+) -> tuple[str, bytes, str] | None:
+    """Render an attachment without allowing it to cancel the email body."""
+    try:
+        return filename, renderer(), content_type
+    except Exception as exc:
+        warning = f"{filename}: {type(exc).__name__}: {exc}"
+        warnings.append(warning)
+        logger.exception("primeflow_report_optional_attachment_failed filename=%s", filename)
+        return None
 
 
 def _undiscussed_px_notes_statement():
@@ -361,6 +378,8 @@ async def deliver_report(
             if run.status == "RUNNING" and run.started_at and run.started_at > now - timedelta(minutes=30):
                 return run
             run.status, run.started_at, run.attempt_count = "RUNNING", now, run.attempt_count + 1
+            run.error_code = None
+            run.error_message = None
 
         gmail = GmailService() if send else None
         try:
@@ -374,11 +393,24 @@ async def deliver_report(
                     return run
             source_data = await _load_common_view(day)
             document = await generate_fresh(day, slot, recipient_map, data=source_data)
-            today_print_report = await build_today_print_report(
-                day,
-                include_attachment=True,
-                payload=source_data,
-            )
+            attachment_warnings: list[str] = []
+            try:
+                today_print_report = await build_today_print_report(
+                    day,
+                    include_attachment=True,
+                    payload=source_data,
+                )
+            except Exception as exc:
+                attachment_warnings.append(
+                    f"today-print attachments: {type(exc).__name__}: {exc}"
+                )
+                logger.exception("primeflow_report_today_print_attachments_failed")
+                # The native HTML report remains deliverable without optional files.
+                today_print_report = await build_today_print_report(
+                    day,
+                    include_attachment=False,
+                    payload=source_data,
+                )
             ga_body = render_plain_text(document)
             ga_base_html = render_html(document)
             regular_document = _regular_recipient_document(document)
@@ -404,14 +436,20 @@ async def deliver_report(
                 setattr(run, "dry_run_body", ga_body)
                 return run
             filename_stem = f"PrimeFlow-1H-{day:%Y-%m-%d}-{slot.replace(':', '')}"
-            regular_attachments = [
-                (
+            regular_attachments = [attachment for attachment in [
+                _optional_attachment(
                     f"{filename_stem}.docx",
-                    render_docx(regular_document),
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    lambda: render_docx(regular_document),
+                    attachment_warnings,
                 ),
-                (f"{filename_stem}.png", render_png(regular_document), "image/png"),
-            ]
+                _optional_attachment(
+                    f"{filename_stem}.png",
+                    "image/png",
+                    lambda: render_png(regular_document),
+                    attachment_warnings,
+                ),
+            ] if attachment is not None]
             regular_recipients, ga_recipients = split_ga_recipient_map(recipient_map)
             ga_attachments = None
             ga_html_body = ga_base_html
@@ -419,24 +457,39 @@ async def deliver_report(
                 # Finish all data/image generation before the first SMTP send,
                 # so a rendering error cannot leave only the regular group sent.
                 today_print_png = next(
-                    attachment
-                    for attachment in today_print_report["attachments"]
-                    if attachment[2] == "image/png"
-                )
-                ga_only_attachments = await build_ga_only_1h_attachments(
-                    db,
-                    day,
-                    today_print_png=today_print_png,
-                )
-                ga_attachments = [
                     (
-                        f"{filename_stem}.docx",
-                        render_docx(document),
-                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        attachment
+                        for attachment in today_print_report.get("attachments", [])
+                        if attachment[2] == "image/png"
                     ),
-                    (f"{filename_stem}.png", render_png(document), "image/png"),
-                    *ga_only_attachments,
-                ]
+                    None,
+                )
+                try:
+                    ga_only_attachments = await build_ga_only_1h_attachments(
+                        db,
+                        day,
+                        today_print_png=today_print_png,
+                    )
+                except Exception as exc:
+                    attachment_warnings.append(
+                        f"GA-only PNG attachments: {type(exc).__name__}: {exc}"
+                    )
+                    logger.exception("primeflow_report_ga_only_attachments_failed")
+                    ga_only_attachments = [today_print_png] if today_print_png is not None else []
+                ga_attachments = [attachment for attachment in [
+                    _optional_attachment(
+                        f"{filename_stem}.docx",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        lambda: render_docx(document),
+                        attachment_warnings,
+                    ),
+                    _optional_attachment(
+                        f"{filename_stem}.png",
+                        "image/png",
+                        lambda: render_png(document),
+                        attachment_warnings,
+                    ),
+                ] if attachment is not None] + ga_only_attachments
                 ga_html_body = render_html(
                     document,
                     pre_sections_html=await render_ga_tables_html(
@@ -471,6 +524,9 @@ async def deliver_report(
             message = messages[-1]
             run.status = "SENT"
             run.gmail_message_id, run.gmail_thread_id = message.get("id"), message.get("threadId")
+            if attachment_warnings:
+                run.error_code = "ATTACHMENT_WARNING"
+                run.error_message = " | ".join(attachment_warnings)[:2000]
         except ValueError as exc:
             run.status, run.error_code, run.error_message = "FAILED_DATA", type(exc).__name__, str(exc)[:2000]
         except GmailVerificationError as exc:

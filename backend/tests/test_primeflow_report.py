@@ -29,6 +29,7 @@ from app.services.task_strike_events import (
 )
 from app.services.primeflow_report_delivery import (
     _undiscussed_px_notes_statement,
+    _optional_attachment,
     load_1h_reminder_questions,
     strike_interval_end,
     strike_interval_start,
@@ -36,6 +37,46 @@ from app.services.primeflow_report_delivery import (
 
 
 class PrimeFlowReportTests(unittest.TestCase):
+    def test_optional_png_failure_does_not_abort_report_delivery(self) -> None:
+        warnings: list[str] = []
+
+        def broken_png() -> bytes:
+            raise ValueError("y1 must be greater than or equal to y0")
+
+        with self.assertLogs("app.services.primeflow_report_delivery", level="ERROR") as logs:
+            attachment = _optional_attachment(
+                "PrimeFlow-1H-test.png",
+                "image/png",
+                broken_png,
+                warnings,
+            )
+
+        self.assertIsNone(attachment)
+        self.assertEqual(
+            warnings,
+            [
+                "PrimeFlow-1H-test.png: ValueError: "
+                "y1 must be greater than or equal to y0"
+            ],
+        )
+        self.assertIn("primeflow_report_optional_attachment_failed", logs.output[0])
+
+    def test_optional_attachment_is_included_when_rendering_succeeds(self) -> None:
+        warnings: list[str] = []
+
+        attachment = _optional_attachment(
+            "PrimeFlow-1H-test.png",
+            "image/png",
+            lambda: b"png-data",
+            warnings,
+        )
+
+        self.assertEqual(
+            attachment,
+            ("PrimeFlow-1H-test.png", b"png-data", "image/png"),
+        )
+        self.assertEqual(warnings, [])
+
     def test_color_legend_only_explains_strike_colors_in_every_format(self) -> None:
         document = build_report_document(
             {
