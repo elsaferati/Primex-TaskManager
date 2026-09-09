@@ -251,6 +251,8 @@ export default function OpenTasksPage() {
   const [skillCategory, setSkillCategory] = React.useState<SkillCategory | null>(null)
   const [saving, setSaving] = React.useState(false)
   const [exportingExcel, setExportingExcel] = React.useState(false)
+  const [importingBaseline, setImportingBaseline] = React.useState(false)
+  const baselineFileInputRef = React.useRef<HTMLInputElement>(null)
 
   const thisWeekStart = React.useMemo(() => mondayISO(), [])
   const thisWeekEnd = React.useMemo(() => shiftIsoDateByDays(thisWeekStart, 4), [thisWeekStart])
@@ -513,6 +515,36 @@ export default function OpenTasksPage() {
     }
   }
 
+  const importOpenTasksBaseline = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ""
+    if (!file || importingBaseline) return
+    setImportingBaseline(true)
+    try {
+      const body = new FormData()
+      body.append("file", file)
+      const res = await apiFetch("/exports/open-tasks/baseline", { method: "POST", body })
+      if (!res.ok) {
+        const raw = await res.text().catch(() => "")
+        let detail = raw
+        try {
+          detail = (JSON.parse(raw) as { detail?: string }).detail || raw
+        } catch {
+          // Keep the plain response when it is not JSON.
+        }
+        toast.error(detail || "Failed to import the pre-plan Excel.")
+        return
+      }
+      const result = (await res.json()) as { imported: number; planning_week_start: string }
+      toast.success(`Saved ${result.imported} pre-plan task values for the week of ${result.planning_week_start}.`)
+    } catch (error) {
+      console.error("Failed to import open task baseline", error)
+      toast.error("Failed to import the pre-plan Excel.")
+    } finally {
+      setImportingBaseline(false)
+    }
+  }
+
   const saveTask = async () => {
     if (!selectedTask) return
     const isNoteOriginTask = Boolean(selectedTask.ga_note_origin_id || selectedTask.plan_note_origin_id)
@@ -603,8 +635,22 @@ export default function OpenTasksPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <input
+            ref={baselineFileInputRef}
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            className="hidden"
+            onChange={(event) => void importOpenTasksBaseline(event)}
+          />
           <Button variant="outline" disabled={loading || exportingExcel} onClick={() => void exportOpenTasksExcel()}>
             {exportingExcel ? "Exporting..." : "Export Excel"}
+          </Button>
+          <Button
+            variant="outline"
+            disabled={loading || importingBaseline}
+            onClick={() => baselineFileInputRef.current?.click()}
+          >
+            {importingBaseline ? "Importing..." : "Import Pre-Plan Excel"}
           </Button>
           <Button asChild variant="outline">
             <Link href="/weekly-planner">Open Weekly Planner</Link>

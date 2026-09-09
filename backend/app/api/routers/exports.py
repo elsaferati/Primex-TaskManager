@@ -8,10 +8,10 @@ import textwrap
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -34,6 +34,7 @@ from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
 from app.models.common_entry import CommonEntry
 from app.models.meeting import Meeting
+from app.models.open_task_planning_baseline import OpenTaskPlanningBaseline
 from app.models.project import Project
 from app.models.department import Department
 from app.models.ga_time_slot_template import GaTimeSlotTemplate
@@ -2429,6 +2430,77 @@ def _open_task_due_bucket(task: Task, this_week_start: date, this_week_end: date
     return "FUTURE"
 
 
+OPEN_TASK_WHEN_VALUES = {"SOT", "THIS WEEK", "NEXT WEEK", "FUTURE"}
+OPEN_TASK_BASELINE_STATUS_VALUES = {"PERSONAL", "1H", "BLLOK", "R1"}
+OPEN_TASK_EXPORT_HEADERS = [
+    "NR",
+    "GROUP",
+    "SOURCE",
+    "PX JAV",
+    "DEP",
+    "ASSIGNEE",
+    "AM/PM",
+    "START DATE",
+    "DUE DATE",
+    "STATUS",
+    "PRIORITY",
+    "LLOJI 1H/P/BLL/R1",
+    "BZ ME",
+    "TITLE",
+    "PROJECT",
+    "WHEN",
+    "WHEN PLANNED",
+    "STATUS",
+    "STATUS PLANNED",
+    "KOMENT",
+]
+
+
+def _open_task_planning_when(value: datetime | date | None, current_week_start: date) -> str:
+    """Map a due date to PrimeFlow's Friday planning vocabulary.
+
+    For a current week of 07.09-11.09, THIS WEEK means the upcoming
+    14.09-18.09 planning week and NEXT WEEK means 21.09-25.09.
+    """
+    due = _task_date_key(value)
+    if due is None:
+        return ""
+
+    planning_day = current_week_start + timedelta(days=4)
+    this_planning_week_start = current_week_start + timedelta(days=7)
+    this_planning_week_end = this_planning_week_start + timedelta(days=4)
+    next_planning_week_start = current_week_start + timedelta(days=14)
+    next_planning_week_end = next_planning_week_start + timedelta(days=4)
+
+    if due == planning_day:
+        return "SOT"
+    if this_planning_week_start <= due <= this_planning_week_end:
+        return "THIS WEEK"
+    if next_planning_week_start <= due <= next_planning_week_end:
+        return "NEXT WEEK"
+    if due > next_planning_week_end:
+        return "FUTURE"
+    return ""
+
+
+def _open_task_planned_status(task: Task) -> str:
+    if task.is_1h_report:
+        return "1H"
+    if task.is_personal:
+        return "PERSONAL"
+    if task.is_bllok:
+        return "BLLOK"
+    if task.is_r1:
+        return "R1"
+    return ""
+
+
+def _open_task_difference(manual_value: str | None, planned_value: str | None) -> str:
+    manual = (manual_value or "").strip().upper()
+    planned = (planned_value or "").strip().upper()
+    return planned if manual != planned else ""
+
+
 def _open_task_wrapped_line_count(value: object, column_width: float) -> int:
     """Estimate Excel's wrapped lines so exported task text is not clipped."""
     if value is None:
@@ -2454,6 +2526,129 @@ def _open_task_wrapped_line_count(value: object, column_width: float) -> int:
         )
         for line in logical_lines
     )
+
+
+def _normalize_open_task_baseline_value(value: object, allowed: set[str], label: str) -> str | None:
+    if value is None or not str(value).strip():
+        return None
+    normalized = " ".join(str(value).strip().upper().split())
+    if normalized not in allowed:
+        choices = ", ".join(sorted(allowed))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid {label} value '{value}'. Allowed values: {choices}.",
+        )
+    return normalized
+
+
+@router.post("/open-tasks/baseline")
+async def import_open_tasks_baseline(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    ensure_reports_access(user)
+    filename = (file.filename or "").lower()
+    if not filename.endswith(".xlsx"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Upload the exported .xlsx file.")
+
+    content = await file.read(10 * 1024 * 1024 + 1)
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Excel file is too large.")
+    try:
+        workbook = load_workbook(io.BytesIO(content), data_only=False, read_only=False)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The Excel file could not be read.") from exc
+
+    if "OPEN TASKS" not in workbook.sheetnames or "_PRIMEFLOW" not in workbook.sheetnames:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This is not a PrimeFlow Open Tasks export.",
+        )
+
+    ws = workbook["OPEN TASKS"]
+    metadata = workbook["_PRIMEFLOW"]
+    if metadata["A1"].value != "OPEN_TASKS_BASELINE_V1":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported Open Tasks export version.")
+    try:
+        planning_week_start = date.fromisoformat(str(metadata["B1"].value))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing planning week metadata.") from exc
+
+    row_task_pairs: list[tuple[int, uuid.UUID]] = []
+    for row_idx in range(3, metadata.max_row + 1):
+        excel_row = metadata.cell(row=row_idx, column=1).value
+        task_id_value = metadata.cell(row=row_idx, column=2).value
+        if excel_row is None or task_id_value is None:
+            continue
+        try:
+            row_task_pairs.append((int(excel_row), uuid.UUID(str(task_id_value))))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid task metadata in workbook.") from exc
+
+    if not row_task_pairs:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The workbook contains no task rows.")
+
+    task_ids = {task_id for _, task_id in row_task_pairs}
+    accessible_tasks = (
+        await db.execute(select(Task).where(Task.id.in_(task_ids)))
+    ).scalars().all()
+    accessible_task_map = {task.id: task for task in accessible_tasks}
+    role_value = getattr(user.role, "value", str(user.role)).upper()
+    if role_value == UserRole.STAFF.value:
+        inaccessible = [
+            task_id
+            for task_id in task_ids
+            if task_id not in accessible_task_map
+            or not user.department_id
+            or accessible_task_map[task_id].department_id != user.department_id
+        ]
+        if inaccessible:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workbook contains inaccessible tasks.")
+
+    existing_rows = (
+        await db.execute(
+            select(OpenTaskPlanningBaseline).where(
+                OpenTaskPlanningBaseline.planning_week_start == planning_week_start,
+                OpenTaskPlanningBaseline.task_id.in_(task_ids),
+            )
+        )
+    ).scalars().all()
+    existing_map = {row.task_id: row for row in existing_rows}
+
+    imported = 0
+    for excel_row, task_id in row_task_pairs:
+        if task_id not in accessible_task_map:
+            continue
+        when_value = _normalize_open_task_baseline_value(
+            ws.cell(row=excel_row, column=16).value,
+            OPEN_TASK_WHEN_VALUES,
+            "WHEN",
+        )
+        status_value = _normalize_open_task_baseline_value(
+            ws.cell(row=excel_row, column=18).value,
+            OPEN_TASK_BASELINE_STATUS_VALUES,
+            "STATUS",
+        )
+        baseline = existing_map.get(task_id)
+        if baseline is None:
+            baseline = OpenTaskPlanningBaseline(
+                planning_week_start=planning_week_start,
+                task_id=task_id,
+            )
+            db.add(baseline)
+        baseline.when_value = when_value
+        baseline.status_value = status_value
+        comment_value = ws.cell(row=excel_row, column=20).value
+        baseline.comment_value = str(comment_value).strip() if comment_value is not None else None
+        baseline.uploaded_by = user.id
+        imported += 1
+
+    await db.commit()
+    return {
+        "planning_week_start": planning_week_start.isoformat(),
+        "imported": imported,
+    }
 
 
 @router.get("/open-tasks.xlsx")
@@ -2563,6 +2758,18 @@ async def export_open_tasks_xlsx(
             assignee.id: assignee
             for assignee in (await db.execute(select(User).where(User.id.in_(assignee_user_ids)))).scalars().all()
         }
+
+    baseline_map: dict[uuid.UUID, OpenTaskPlanningBaseline] = {}
+    if task_ids:
+        baseline_rows = (
+            await db.execute(
+                select(OpenTaskPlanningBaseline).where(
+                    OpenTaskPlanningBaseline.planning_week_start == next_week_start,
+                    OpenTaskPlanningBaseline.task_id.in_(task_ids),
+                )
+            )
+        ).scalars().all()
+        baseline_map = {row.task_id: row for row in baseline_rows}
 
     def assignee_ids_for(task: Task) -> list[uuid.UUID]:
         ids: list[uuid.UUID] = []
@@ -2675,26 +2882,7 @@ async def export_open_tasks_xlsx(
         )
     )
 
-    headers = [
-        "NR",
-        "GROUP",
-        "SOURCE",
-        "PX JAV",
-        "DEP",
-        "ASSIGNEE",
-        "AM/PM",
-        "START DATE",
-        "DUE DATE",
-        "STATUS",
-        "PRIORITY",
-        "LLOJI 1H/P/BLL/R1",
-        "BZ ME",
-        "TITLE",
-        "PROJECT",
-        "WHEN",
-        "STATUS",
-        "KOMENT",
-    ]
+    headers = OPEN_TASK_EXPORT_HEADERS
 
     wb = Workbook()
     ws = wb.active
@@ -2732,6 +2920,9 @@ async def export_open_tasks_xlsx(
         source_values_present.add(source_label)
         if task.system_template_origin_id:
             system_data_rows.append(data_row)
+        baseline = baseline_map.get(task.id)
+        planned_when = _open_task_planning_when(task.due_date, monday) if baseline else ""
+        planned_status = _open_task_planned_status(task) if baseline else ""
         values = [
             idx,
             group,
@@ -2748,9 +2939,11 @@ async def export_open_tasks_xlsx(
             bz_me_label(task),
             _strip_html(task.title) or "",
             project.title if project else "",
-            "",
-            "",
-            "",
+            baseline.when_value if baseline else "",
+            _open_task_difference(baseline.when_value, planned_when) if baseline else "",
+            baseline.status_value if baseline else "",
+            _open_task_difference(baseline.status_value, planned_status) if baseline else "",
+            baseline.comment_value if baseline else "",
         ]
         for col_idx, value in enumerate(values, start=1):
             cell = ws.cell(row=data_row, column=col_idx, value=value)
@@ -2778,7 +2971,9 @@ async def export_open_tasks_xlsx(
         15: 34,
         16: 16,
         17: 16,
-        18: 34,
+        18: 16,
+        19: 16,
+        20: 34,
     }
     for col_idx in range(1, last_col + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 16)
@@ -2789,7 +2984,17 @@ async def export_open_tasks_xlsx(
         ws.add_data_validation(when_validation)
         ws.add_data_validation(status_validation)
         when_validation.add(f"{get_column_letter(16)}5:{get_column_letter(16)}{data_row - 1}")
-        status_validation.add(f"{get_column_letter(17)}5:{get_column_letter(17)}{data_row - 1}")
+        status_validation.add(f"{get_column_letter(18)}5:{get_column_letter(18)}{data_row - 1}")
+
+    metadata = wb.create_sheet("_PRIMEFLOW")
+    metadata.sheet_state = "veryHidden"
+    metadata["A1"] = "OPEN_TASKS_BASELINE_V1"
+    metadata["B1"] = next_week_start.isoformat()
+    metadata["A2"] = "EXCEL ROW"
+    metadata["B2"] = "TASK ID"
+    for excel_row, (_, task) in enumerate(export_rows, start=5):
+        metadata.cell(row=excel_row - 2, column=1, value=excel_row)
+        metadata.cell(row=excel_row - 2, column=2, value=str(task.id))
 
     ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
     # Pre-filter the SOURCE column so SYSTEM tasks are deselected (hidden) by
