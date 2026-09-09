@@ -31,6 +31,7 @@ class MeetingOut(BaseModel):
     updated_at: datetime
     participant_ids: list[uuid.UUID] = []
     paired_external_meeting_id: uuid.UUID | None = None
+    pre_external_meeting_id: uuid.UUID | None = None
 
 
 class MeetingCreateOut(MeetingOut):

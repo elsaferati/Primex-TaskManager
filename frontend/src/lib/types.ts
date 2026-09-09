@@ -750,6 +750,7 @@ export interface Meeting {
   participant_ids?: string[]
   paired_internal_meeting?: Meeting | null
   paired_external_meeting_id?: string | null
+  pre_external_meeting_id?: string | null
 }
 
 export interface MeetingOccurrenceStatus {

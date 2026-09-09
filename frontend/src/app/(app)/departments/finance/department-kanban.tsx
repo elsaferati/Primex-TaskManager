@@ -41,6 +41,7 @@ type RowView = {
   systemFrequencyLabel: string
   systemFrequencyDisplayLabel: string
   occurrenceDateIso: string
+  createdDateIso: string
   startDateIso: string
   dueDateIso: string
   priority: string
@@ -389,6 +390,7 @@ export default function DepartmentKanban() {
           systemFrequencyLabel: systemFrequencyShortLabel(systemFrequency),
           systemFrequencyDisplayLabel: systemFrequencyDisplayLabel(systemFrequency),
           occurrenceDateIso: isoOrEmpty(task.origin_run_at || task.start_date || task.due_date),
+          createdDateIso: isoOrEmpty(task.created_at),
           startDateIso: isoOrEmpty(task.start_date),
           dueDateIso: isoOrEmpty(task.due_date),
           priority: task.priority || "NORMAL",
@@ -758,6 +760,7 @@ export default function DepartmentKanban() {
                       Slot
                     </TableHead>
                     <TableHead className="w-12 min-w-12 px-1 text-center" title="Assignee">Asg</TableHead>
+                    <TableHead className="text-xs font-normal text-slate-400">Created</TableHead>
                     <TableHead>Start Date</TableHead>
                     <TableHead>Due Date</TableHead>
                     <TableHead>Priority</TableHead>
@@ -831,6 +834,9 @@ export default function DepartmentKanban() {
                         <TableCell className="w-12 min-w-12 px-1 text-center" title={row.assigneeLabel}>
                           <span className="text-xs font-semibold text-slate-700">{row.assigneeInitials}</span>
                         </TableCell>
+                        <TableCell className="text-xs font-normal text-slate-400">
+                          {formatDateDMY(row.createdDateIso)}
+                        </TableCell>
                         <TableCell>{formatDateDMY(row.startDateIso)}</TableCell>
                         <TableCell>{formatDateDMY(row.dueDateIso)}</TableCell>
                         <TableCell>
@@ -882,7 +888,7 @@ export default function DepartmentKanban() {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={11} className="py-8 text-center text-sm text-slate-500">
+                      <TableCell colSpan={13} className="py-8 text-center text-sm text-slate-500">
                         No Finance tasks match the selected filters.
                       </TableCell>
                     </TableRow>

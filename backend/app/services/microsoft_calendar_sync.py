@@ -4,7 +4,7 @@ import asyncio
 import re
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -28,6 +28,22 @@ from app.models.user import User
 
 
 _sync_lock = asyncio.Lock()
+CALENDAR_PREPARATION_DELAY = timedelta(hours=2)
+CALENDAR_PREPARATION_INTERVAL = timedelta(minutes=15)
+SAME_DAY_PREPARATION_FIRST_TIME = time(8, 15)
+ADVANCE_PREPARATION_FIRST_TIME = time(8, 20)
+WORKDAY_END_TIME = time(16, 30)
+BREAK_START_TIME = time(12, 0)
+BREAK_END_TIME = time(13, 15)
+ONE_H_SLOT_TIMES = (
+    time(9, 0),
+    time(10, 0),
+    time(11, 0),
+    time(11, 50),
+    time(14, 20),
+    time(15, 50),
+)
+ONE_H_PROTECTED_TIMES = frozenset((slot.hour, slot.minute) for slot in ONE_H_SLOT_TIMES)
 
 
 @dataclass(frozen=True)
@@ -188,6 +204,229 @@ def choose_department_id(
     return default.id if default is not None else (departments[0].id if departments else None)
 
 
+def sync_calendar_internal_pair_fields(
+    internal_meeting: Meeting,
+    external_meeting: Meeting,
+    *,
+    starts_at: datetime,
+    synced_at: datetime,
+) -> None:
+    """Keep the PrimeFlow-only TAK INT aligned with its Microsoft TAK EXT."""
+    internal_meeting.title = external_meeting.title
+    internal_meeting.platform = external_meeting.platform
+    internal_meeting.starts_at = starts_at
+    internal_meeting.ends_at = None
+    internal_meeting.meeting_url = external_meeting.meeting_url
+    internal_meeting.meeting_type = "internal"
+    internal_meeting.recurrence_type = external_meeting.recurrence_type
+    internal_meeting.recurrence_days_of_week = external_meeting.recurrence_days_of_week
+    internal_meeting.recurrence_days_of_month = external_meeting.recurrence_days_of_month
+    internal_meeting.department_id = external_meeting.department_id
+    internal_meeting.project_id = external_meeting.project_id
+    internal_meeting.calendar_imported = False
+    internal_meeting.calendar_sync_status = external_meeting.calendar_sync_status
+    internal_meeting.calendar_last_synced_at = synced_at
+
+
+def _next_working_day(day: datetime) -> datetime:
+    candidate = day + timedelta(days=1)
+    while candidate.weekday() >= 5:
+        candidate += timedelta(days=1)
+    return candidate
+
+
+def calendar_follow_up_start(
+    external_starts_at: datetime,
+    external_ends_at: datetime | None,
+) -> datetime:
+    """Return the next official 1H slot after a Microsoft TAK EXT finishes."""
+    try:
+        app_timezone = ZoneInfo(settings.APP_TIMEZONE)
+    except Exception:
+        app_timezone = timezone.utc
+
+    reference = external_ends_at or external_starts_at
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    reference_local = reference.astimezone(app_timezone)
+    for slot in ONE_H_SLOT_TIMES:
+        candidate = reference_local.replace(
+            hour=slot.hour,
+            minute=slot.minute,
+            second=0,
+            microsecond=0,
+        )
+        if candidate >= reference_local:
+            return candidate.astimezone(timezone.utc)
+
+    next_day = _next_working_day(reference_local)
+    return next_day.replace(
+        hour=ONE_H_SLOT_TIMES[0].hour,
+        minute=ONE_H_SLOT_TIMES[0].minute,
+        second=0,
+        microsecond=0,
+    ).astimezone(timezone.utc)
+
+
+def calendar_preparation_start(
+    external_starts_at: datetime,
+    event_created_at: datetime,
+    *,
+    reserved_starts: set[datetime] | None = None,
+) -> datetime:
+    """Schedule the TAK INT before a Microsoft TAK EXT in the app timezone."""
+    try:
+        app_timezone = ZoneInfo(settings.APP_TIMEZONE)
+    except Exception:
+        app_timezone = timezone.utc
+
+    if external_starts_at.tzinfo is None:
+        external_starts_at = external_starts_at.replace(tzinfo=timezone.utc)
+    if event_created_at.tzinfo is None:
+        event_created_at = event_created_at.replace(tzinfo=timezone.utc)
+    external_local = external_starts_at.astimezone(app_timezone)
+    created_local = event_created_at.astimezone(app_timezone)
+    if created_local.date() == external_local.date():
+        earliest = external_local.replace(
+            hour=SAME_DAY_PREPARATION_FIRST_TIME.hour,
+            minute=SAME_DAY_PREPARATION_FIRST_TIME.minute,
+            second=0,
+            microsecond=0,
+        )
+        candidate = max(external_local - CALENDAR_PREPARATION_DELAY, earliest)
+    else:
+        candidate = external_local.replace(
+            hour=ADVANCE_PREPARATION_FIRST_TIME.hour,
+            minute=ADVANCE_PREPARATION_FIRST_TIME.minute,
+            second=0,
+            microsecond=0,
+        )
+
+    reserved = reserved_starts or set()
+    while True:
+        candidate_time = candidate.time().replace(tzinfo=None)
+        if BREAK_START_TIME <= candidate_time < BREAK_END_TIME:
+            candidate = candidate.replace(
+                hour=BREAK_END_TIME.hour,
+                minute=BREAK_END_TIME.minute,
+                second=0,
+                microsecond=0,
+            )
+            continue
+        if candidate_time > WORKDAY_END_TIME:
+            candidate = _next_working_day(candidate).replace(
+                hour=SAME_DAY_PREPARATION_FIRST_TIME.hour,
+                minute=SAME_DAY_PREPARATION_FIRST_TIME.minute,
+                second=0,
+                microsecond=0,
+            )
+            continue
+        candidate_utc = candidate.astimezone(timezone.utc)
+        touches_one_h_slot = (candidate.hour, candidate.minute) in ONE_H_PROTECTED_TIMES
+        overlaps_preparation = any(
+            abs(candidate_utc - reserved_start) < CALENDAR_PREPARATION_INTERVAL
+            for reserved_start in reserved
+        )
+        if not touches_one_h_slot and not overlaps_preparation:
+            return candidate_utc
+        candidate += CALENDAR_PREPARATION_INTERVAL
+
+
+async def ensure_calendar_internal_pair(
+    db: AsyncSession,
+    *,
+    external_meeting: Meeting,
+    participant_ids: set[Any],
+    paired_by_external_id: dict[Any, Meeting],
+    participant_ids_by_meeting: dict[Any, set[Any]],
+    synced_at: datetime,
+) -> Meeting:
+    """Create or update the single TAK INT paired with a Microsoft event."""
+    internal_meeting = paired_by_external_id.get(external_meeting.id)
+    if internal_meeting is None:
+        internal_meeting = Meeting(
+            title=external_meeting.title,
+            meeting_type="internal",
+            department_id=external_meeting.department_id,
+            paired_external_meeting_id=external_meeting.id,
+            created_by=external_meeting.created_by,
+        )
+        db.add(internal_meeting)
+        await db.flush()
+        paired_by_external_id[external_meeting.id] = internal_meeting
+        participant_ids_by_meeting[internal_meeting.id] = set()
+
+    sync_calendar_internal_pair_fields(
+        internal_meeting,
+        external_meeting,
+        starts_at=calendar_follow_up_start(
+            external_meeting.starts_at,
+            external_meeting.ends_at,
+        ),
+        synced_at=synced_at,
+    )
+    existing_participant_ids = participant_ids_by_meeting.setdefault(internal_meeting.id, set())
+    for user_id in participant_ids:
+        if user_id in existing_participant_ids:
+            continue
+        db.add(MeetingParticipant(meeting_id=internal_meeting.id, user_id=user_id))
+        existing_participant_ids.add(user_id)
+    return internal_meeting
+
+
+async def ensure_calendar_preparation_pair(
+    db: AsyncSession,
+    *,
+    external_meeting: Meeting,
+    starts_at: datetime,
+    participant_ids: set[Any],
+    paired_by_external_id: dict[Any, Meeting],
+    participant_ids_by_meeting: dict[Any, set[Any]],
+    synced_at: datetime,
+) -> Meeting:
+    """Create or update the TAK INT held before a Microsoft TAK EXT."""
+    internal_meeting = paired_by_external_id.get(external_meeting.id)
+    if internal_meeting is None:
+        internal_meeting = Meeting(
+            title=external_meeting.title,
+            meeting_type="internal",
+            department_id=external_meeting.department_id,
+            pre_external_meeting_id=external_meeting.id,
+            created_by=external_meeting.created_by,
+        )
+        db.add(internal_meeting)
+        await db.flush()
+        paired_by_external_id[external_meeting.id] = internal_meeting
+        participant_ids_by_meeting[internal_meeting.id] = set()
+
+    sync_calendar_internal_pair_fields(
+        internal_meeting,
+        external_meeting,
+        starts_at=starts_at,
+        synced_at=synced_at,
+    )
+    existing_participant_ids = participant_ids_by_meeting.setdefault(internal_meeting.id, set())
+    for user_id in participant_ids:
+        if user_id in existing_participant_ids:
+            continue
+        db.add(MeetingParticipant(meeting_id=internal_meeting.id, user_id=user_id))
+        existing_participant_ids.add(user_id)
+    return internal_meeting
+
+
+def sync_calendar_internal_pair_status(
+    external_meeting: Meeting,
+    paired_by_external_id: dict[Any, Meeting],
+    *,
+    synced_at: datetime,
+) -> None:
+    internal_meeting = paired_by_external_id.get(external_meeting.id)
+    if internal_meeting is None:
+        return
+    internal_meeting.calendar_sync_status = external_meeting.calendar_sync_status
+    internal_meeting.calendar_last_synced_at = synced_at
+
+
 async def sync_external_calendar_events(
     db: AsyncSession,
     *,
@@ -198,6 +437,10 @@ async def sync_external_calendar_events(
 ) -> MicrosoftCalendarSyncResult:
     async with _sync_lock:
         events = await fetch_calendar_events(access_token, start, end)
+        events.sort(
+            key=lambda event: parse_graph_datetime(event.get("start"))
+            or datetime.max.replace(tzinfo=timezone.utc)
+        )
         users = list((await db.execute(select(User).where(User.is_active.is_(True)))).scalars().all())
         departments = list((await db.execute(select(Department).order_by(Department.name))).scalars().all())
         users_by_email = {user.email.strip().casefold(): user for user in users if user.email}
@@ -212,13 +455,46 @@ async def sync_external_calendar_events(
         existing_by_event_id = {
             str(row.microsoft_event_id): row for row in existing_rows if row.microsoft_event_id
         }
-        existing_participant_ids_by_meeting: dict[Any, set[Any]] = {}
         if existing_rows:
+            existing_pairs = list(
+                (
+                    await db.execute(
+                        select(Meeting).where(
+                            Meeting.paired_external_meeting_id.in_([row.id for row in existing_rows])
+                        )
+                    )
+                ).scalars().all()
+            )
+            existing_preparation_pairs = list(
+                (
+                    await db.execute(
+                        select(Meeting).where(
+                            Meeting.pre_external_meeting_id.in_([row.id for row in existing_rows])
+                        )
+                    )
+                ).scalars().all()
+            )
+        else:
+            existing_pairs = []
+            existing_preparation_pairs = []
+        paired_by_external_id = {
+            row.paired_external_meeting_id: row
+            for row in existing_pairs
+            if row.paired_external_meeting_id is not None
+        }
+        preparation_by_external_id = {
+            row.pre_external_meeting_id: row
+            for row in existing_preparation_pairs
+            if row.pre_external_meeting_id is not None
+        }
+        existing_participant_ids_by_meeting: dict[Any, set[Any]] = {}
+        participant_meetings = [*existing_rows, *existing_pairs, *existing_preparation_pairs]
+        if participant_meetings:
             participant_rows = list(
                 (
                     await db.execute(
                         select(MeetingParticipant).where(
-                            MeetingParticipant.meeting_id.in_([row.id for row in existing_rows])
+                            MeetingParticipant.meeting_id.in_([row.id for row in participant_meetings])
                         )
                     )
                 ).scalars().all()
@@ -229,6 +505,7 @@ async def sync_external_calendar_events(
                 ).add(participant_row.user_id)
         seen_event_ids: set[str] = set()
         unchanged_meeting_ids: list[Any] = []
+        reserved_preparation_starts: set[datetime] = set()
         now = datetime.now(timezone.utc)
         created = updated = cancelled = skipped = 0
 
@@ -247,14 +524,36 @@ async def sync_external_calendar_events(
                     row.calendar_categories = categories
                     row.calendar_change_key = event.get("changeKey")
                     row.calendar_last_synced_at = now
+                    sync_calendar_internal_pair_status(
+                        row,
+                        paired_by_external_id,
+                        synced_at=now,
+                    )
+                    sync_calendar_internal_pair_status(
+                        row,
+                        preparation_by_external_id,
+                        synced_at=now,
+                    )
                 skipped += 1
                 continue
             if event.get("isCancelled"):
-                if row is not None and row.calendar_sync_status != "cancelled":
+                if row is not None:
+                    was_cancelled = row.calendar_sync_status == "cancelled"
                     row.calendar_imported = True
                     row.calendar_sync_status = "cancelled"
                     row.calendar_last_synced_at = now
-                    cancelled += 1
+                    sync_calendar_internal_pair_status(
+                        row,
+                        paired_by_external_id,
+                        synced_at=now,
+                    )
+                    sync_calendar_internal_pair_status(
+                        row,
+                        preparation_by_external_id,
+                        synced_at=now,
+                    )
+                    if not was_cancelled:
+                        cancelled += 1
                 continue
 
             starts_at = parse_graph_datetime(event.get("start"))
@@ -267,17 +566,17 @@ async def sync_external_calendar_events(
             participants = [users_by_email[email] for email in attendee_emails if email in users_by_email]
             mapped_department_id = choose_department_id(participants, departments)
             change_key = event.get("changeKey")
-            if (
+            unchanged = (
                 row is not None
                 and row.calendar_imported
                 and row.calendar_sync_status == "active"
                 and change_key
                 and row.calendar_change_key == change_key
                 and (row.calendar_categories or []) == categories
-            ):
+            )
+            if unchanged:
                 unchanged_meeting_ids.append(row.id)
-                continue
-            if row is None:
+            elif row is None:
                 if mapped_department_id is None:
                     skipped += 1
                     continue
@@ -327,6 +626,35 @@ async def sync_external_calendar_events(
                 db.add(MeetingParticipant(meeting_id=row.id, user_id=participant.id))
                 existing_participant_ids.add(participant.id)
 
+            await ensure_calendar_internal_pair(
+                db,
+                external_meeting=row,
+                participant_ids=existing_participant_ids,
+                paired_by_external_id=paired_by_external_id,
+                participant_ids_by_meeting=existing_participant_ids_by_meeting,
+                synced_at=now,
+            )
+            event_created_at = (
+                parse_graph_datetime(event.get("createdDateTime"))
+                or getattr(row, "created_at", None)
+                or now
+            )
+            preparation_starts_at = calendar_preparation_start(
+                row.starts_at,
+                event_created_at,
+                reserved_starts=reserved_preparation_starts,
+            )
+            reserved_preparation_starts.add(preparation_starts_at)
+            await ensure_calendar_preparation_pair(
+                db,
+                external_meeting=row,
+                starts_at=preparation_starts_at,
+                participant_ids=existing_participant_ids,
+                paired_by_external_id=preparation_by_external_id,
+                participant_ids_by_meeting=existing_participant_ids_by_meeting,
+                synced_at=now,
+            )
+
         if unchanged_meeting_ids:
             await db.execute(
                 update(Meeting)
@@ -340,10 +668,30 @@ async def sync_external_calendar_events(
             if row.starts_at is None or not (start <= row.starts_at < end):
                 row.calendar_sync_status = "out_of_window"
                 row.calendar_last_synced_at = now
+                sync_calendar_internal_pair_status(
+                    row,
+                    paired_by_external_id,
+                    synced_at=now,
+                )
+                sync_calendar_internal_pair_status(
+                    row,
+                    preparation_by_external_id,
+                    synced_at=now,
+                )
                 continue
             if str(row.microsoft_event_id) not in seen_event_ids:
                 row.calendar_sync_status = "cancelled"
                 row.calendar_last_synced_at = now
+                sync_calendar_internal_pair_status(
+                    row,
+                    paired_by_external_id,
+                    synced_at=now,
+                )
+                sync_calendar_internal_pair_status(
+                    row,
+                    preparation_by_external_id,
+                    synced_at=now,
+                )
                 cancelled += 1
 
         await db.commit()

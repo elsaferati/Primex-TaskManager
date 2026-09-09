@@ -1476,6 +1476,7 @@ export default function DepartmentKanban() {
   const [addingInternalMeetingItem, setAddingInternalMeetingItem] = React.useState(false)
   const [editingInternalMeetingItemId, setEditingInternalMeetingItemId] = React.useState<string | null>(null)
   const [editingInternalMeetingItem, setEditingInternalMeetingItem] = React.useState("")
+  const [editingInternalMeetingItemPosition, setEditingInternalMeetingItemPosition] = React.useState("1")
   const [savingInternalMeetingItem, setSavingInternalMeetingItem] = React.useState(false)
   const [noProjectOpen, setNoProjectOpen] = React.useState(false)
   const [noProjectTitle, setNoProjectTitle] = React.useState("")
@@ -6565,14 +6566,16 @@ export default function DepartmentKanban() {
     }
   }
 
-  const startEditInternalMeetingItem = (item: ChecklistItem) => {
+  const startEditInternalMeetingItem = (item: ChecklistItem, displayPosition: number) => {
     setEditingInternalMeetingItemId(item.id)
     setEditingInternalMeetingItem(item.title || "")
+    setEditingInternalMeetingItemPosition(String(displayPosition))
   }
 
   const cancelEditInternalMeetingItem = () => {
     setEditingInternalMeetingItemId(null)
     setEditingInternalMeetingItem("")
+    setEditingInternalMeetingItemPosition("1")
   }
 
   const saveInternalMeetingItem = async () => {
@@ -6582,19 +6585,48 @@ export default function DepartmentKanban() {
       toast.error("Checklist item title is required")
       return
     }
+    const requestedDisplayPosition = Number(editingInternalMeetingItemPosition)
+    if (!Number.isInteger(requestedDisplayPosition) || requestedDisplayPosition < 1) {
+      toast.error("Number must be 1 or greater")
+      return
+    }
+
+    const orderedWithoutCurrent = [...internalMeetingItems]
+      .filter((item) => item.id !== editingInternalMeetingItemId)
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    const slotSiblings = orderedWithoutCurrent.filter(
+      (item) => resolveInternalMeetingSlot(item.day) === internalSlot,
+    )
+    const targetIndex = Math.min(requestedDisplayPosition - 1, slotSiblings.length)
+    let requestedStoredPosition = orderedWithoutCurrent.length + 1
+    if (targetIndex < slotSiblings.length) {
+      requestedStoredPosition = orderedWithoutCurrent.findIndex((item) => item.id === slotSiblings[targetIndex].id) + 1
+    } else if (slotSiblings.length > 0) {
+      requestedStoredPosition = orderedWithoutCurrent.findIndex(
+        (item) => item.id === slotSiblings[slotSiblings.length - 1].id,
+      ) + 2
+    }
+
     setSavingInternalMeetingItem(true)
     try {
       const res = await apiFetch(`/checklist-items/${editingInternalMeetingItemId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title }),
+        body: JSON.stringify({ title, position: requestedStoredPosition }),
       })
       if (!res.ok) {
         toast.error("Failed to update internal meeting item")
         return
       }
       const updated = (await res.json()) as ChecklistItem
-      setInternalMeetingItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      const refreshedRes = internalMeetingChecklistId
+        ? await apiFetch(`/checklist-items?checklist_id=${internalMeetingChecklistId}`)
+        : null
+      if (refreshedRes?.ok) {
+        setInternalMeetingItems((await refreshedRes.json()) as ChecklistItem[])
+      } else {
+        setInternalMeetingItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      }
       cancelEditInternalMeetingItem()
       toast.success("Checklist item updated")
     } finally {
@@ -10105,7 +10137,7 @@ export default function DepartmentKanban() {
                   <div className="rounded-md border border-slate-200">
                     <Table>
                       <TableHeader>
-                        <TableRow>
+                        <TableRow className="bg-slate-100 hover:bg-slate-100">
                           <TableHead className="uppercase">Title</TableHead>
                           <TableHead className="w-[150px] uppercase">Date</TableHead>
                           <TableHead className="w-[110px] uppercase">Time</TableHead>
@@ -10337,7 +10369,7 @@ export default function DepartmentKanban() {
                     <div className="rounded-md border border-slate-200">
                       <Table>
                         <TableHeader>
-                          <TableRow>
+                          <TableRow className="bg-slate-100 hover:bg-slate-100">
                             <TableHead className="uppercase">Title</TableHead>
                             <TableHead className="w-[150px] uppercase">Date</TableHead>
                             <TableHead className="w-[110px] uppercase">Time</TableHead>
@@ -10782,11 +10814,25 @@ export default function DepartmentKanban() {
                             />
                             <div className="flex-1">
                               {isEditing ? (
-                                <Input
-                                  value={editingInternalMeetingItem}
-                                  onChange={(e) => setEditingInternalMeetingItem(e.target.value)}
-                                  placeholder="Checklist item"
-                                />
+                                <div className="flex items-center gap-2">
+                                  <Input
+                                    type="number"
+                                    min={1}
+                                    max={internalMeetingItems.filter(
+                                      (candidate) => resolveInternalMeetingSlot(candidate.day) === internalSlot,
+                                    ).length}
+                                    value={editingInternalMeetingItemPosition}
+                                    onChange={(e) => setEditingInternalMeetingItemPosition(e.target.value)}
+                                    aria-label="Checklist item number"
+                                    title="Order number"
+                                    className="w-20 shrink-0"
+                                  />
+                                  <Input
+                                    value={editingInternalMeetingItem}
+                                    onChange={(e) => setEditingInternalMeetingItem(e.target.value)}
+                                    placeholder="Checklist item"
+                                  />
+                                </div>
                               ) : (
                                 <div className="text-sm text-muted-foreground">
                                   {idx + 1}. {displayTitle}
@@ -10821,7 +10867,7 @@ export default function DepartmentKanban() {
                                     <Button
                                       size="icon"
                                       variant="outline"
-                                      onClick={() => startEditInternalMeetingItem(item)}
+                                      onClick={() => startEditInternalMeetingItem(item, idx + 1)}
                                       aria-label="Edit internal meeting item"
                                       title="Edit"
                                     >

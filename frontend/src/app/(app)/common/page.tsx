@@ -709,6 +709,7 @@ const commonTaskSortRank = (status?: string | null, isDone?: boolean) => {
 
 type SwimlaneCell = {
   title: string
+  meetingTimeLabel?: string
   subtitle?: string
   dateLabel?: string
   note?: string
@@ -744,6 +745,7 @@ type SwimlaneRow = {
   badgeClass: string
   badges?: { value: number; className: string; label?: string }[]
   headerBreakdown?: { value: number; label: string; className?: string }[]
+  missingOneHUsers?: { id: string; label: string; initials: string }[]
   items: SwimlaneCell[]
 }
 
@@ -7076,7 +7078,8 @@ export default function CommonViewPage() {
       ? sortByDateTime(filtered.external, (x) => x.date, (x) => x.time, (x) => x.title)
       : sortByTime(filtered.external, (x) => x.time, (x) => x.title)
     const externalItems: SwimlaneCell[] = externalSource.map((x) => ({
-      title: `${x.title} ${formatTimeLabel(x.time)}`.trim(),
+      title: x.title,
+      meetingTimeLabel: formatTimeLabel(x.time) || undefined,
       subtitle: x.department || "Department TBD",
       dateLabel: formatDateHuman(x.date),
       accentClass: [
@@ -7099,7 +7102,8 @@ export default function CommonViewPage() {
       ? sortByDateTime(filtered.internal, (x) => x.date, (x) => x.time, (x) => x.title)
       : sortByTime(filtered.internal, (x) => x.time, (x) => x.title)
     const internalItems: SwimlaneCell[] = internalSource.map((x) => ({
-      title: `${x.title} ${formatTimeLabel(x.time)}`.trim(),
+      title: x.title,
+      meetingTimeLabel: formatTimeLabel(x.time) || undefined,
       subtitle: x.department || "Department TBD",
       dateLabel: formatDateHuman(x.date),
       accentClass: [
@@ -7244,6 +7248,88 @@ export default function CommonViewPage() {
       oneHItems.filter((item) =>
         slot === null ? !normalizeOneHReportSlot(item.oneHReportSlot) : normalizeOneHReportSlot(item.oneHReportSlot) === slot
       )
+    const selectedOneHDate = selectedDates.size === 1 ? Array.from(selectedDates)[0] : null
+    const oneHUserIdByName = new Map<string, string>()
+    for (const userEntry of users) {
+      if (userEntry.full_name) oneHUserIdByName.set(userEntry.full_name.trim().toLowerCase(), userEntry.id)
+      if (userEntry.username) oneHUserIdByName.set(userEntry.username.trim().toLowerCase(), userEntry.id)
+      if (userEntry.email) oneHUserIdByName.set(userEntry.email.trim().toLowerCase(), userEntry.id)
+    }
+    const allOneHUsersOnLeave = selectedOneHDate
+      ? commonData.leave.some(
+          (leaveEntry) =>
+            leaveEntry.isAllUsers &&
+            selectedOneHDate >= leaveEntry.startDate &&
+            selectedOneHDate <= leaveEntry.endDate
+        )
+      : false
+    const oneHUsersOnLeave = new Set(
+      selectedOneHDate
+        ? commonData.leave
+            .filter(
+              (leaveEntry) =>
+                leaveEntry.userId &&
+                selectedOneHDate >= leaveEntry.startDate &&
+                selectedOneHDate <= leaveEntry.endDate
+            )
+            .map((leaveEntry) => leaveEntry.userId as string)
+        : []
+    )
+    const oneHEligibleUsers = selectedOneHDate
+      ? users
+          .filter((userEntry) => userEntry.is_active)
+          .filter((userEntry) => userEntry.role !== "ADMIN")
+          .filter((userEntry) => {
+            const identityValues = [
+              userEntry.full_name,
+              userEntry.username?.replace(/[._-]+/g, " "),
+              userEntry.email?.split("@")[0]?.replace(/[._-]+/g, " "),
+            ].filter((value): value is string => Boolean(value?.trim()))
+            return !identityValues.some((value) => ["GA", "KA", "HV", "HS"].includes(initials(value)))
+          })
+          .filter((userEntry) => selectedCommonUserId === "__all__" || userEntry.id === selectedCommonUserId)
+          .filter(() => !allOneHUsersOnLeave)
+          .filter((userEntry) => !oneHUsersOnLeave.has(userEntry.id))
+          .filter((userEntry) => !filtered.hiddenUsersByDate.get(selectedOneHDate)?.has(userEntry.id))
+          .sort((a, b) => {
+            const aDepartment = getDepartmentMeta(a.department_id || undefined)
+            const bDepartment = getDepartmentMeta(b.department_id || undefined)
+            if (aDepartment.rank !== bDepartment.rank) return aDepartment.rank - bDepartment.rank
+            if (aDepartment.rank === 3) {
+              const departmentNameComparison = aDepartment.name.localeCompare(bDepartment.name)
+              if (departmentNameComparison) return departmentNameComparison
+            }
+            const aOrder = a.weekly_planner_sort_order
+            const bOrder = b.weekly_planner_sort_order
+            if (aOrder != null || bOrder != null) {
+              if (aOrder == null) return 1
+              if (bOrder == null) return -1
+              if (aOrder !== bOrder) return aOrder - bOrder
+            }
+            const aLabel = a.full_name || a.username || a.email || ""
+            const bLabel = b.full_name || b.username || b.email || ""
+            return aLabel.localeCompare(bLabel)
+          })
+      : []
+    const buildMissingOneHUsers = (slot: OneHReportSlot | null) => {
+      if (!selectedOneHDate || !slot) return []
+      const usersWithSlot = new Set<string>()
+      for (const item of commonData.oneH) {
+        if (item.date !== selectedOneHDate || isWaitingClientTask(item)) continue
+        if (normalizeOneHReportSlot(item.oneHReportSlot) !== slot) continue
+        if (item.userId) usersWithSlot.add(item.userId)
+        for (const assignee of entryAssignees(item)) {
+          const assigneeId = oneHUserIdByName.get(assignee.trim().toLowerCase())
+          if (assigneeId) usersWithSlot.add(assigneeId)
+        }
+      }
+      return oneHEligibleUsers
+        .filter((userEntry) => !usersWithSlot.has(userEntry.id))
+        .map((userEntry) => {
+          const label = userEntry.full_name || userEntry.username || userEntry.email || "Unknown"
+          return { id: userEntry.id, label, initials: initials(label) }
+        })
+    }
     const oneHRows = isMultiDate
       ? [
           {
@@ -7268,6 +7354,7 @@ export default function CommonViewPage() {
             headerClass: "swimlane-header oneh",
             badgeClass: "swimlane-badge oneh",
             headerBreakdown: buildFastHeaderBreakdown(items),
+            missingOneHUsers: buildMissingOneHUsers(slotRow.slot),
             items,
           }
         })
@@ -7410,7 +7497,7 @@ export default function CommonViewPage() {
         items: feedbackItems,
       },
     ]
-  }, [filtered, filteredDiamondItems, isMultiDate, sortByDate, sortByDateTime, sortByTime, selectedDates, typeFilters, weekISOs])
+  }, [commonData.oneH, filtered, filteredDiamondItems, getDepartmentMeta, isMultiDate, selectedCommonUserId, sortByDate, sortByDateTime, sortByTime, selectedDates, typeFilters, users, weekISOs])
 
   const swimlaneColumnCount = React.useMemo(() => {
     if (!swimlaneRows.length) return 3
@@ -9332,6 +9419,46 @@ export default function CommonViewPage() {
           width: 100%;
           flex: 1 1 auto;
         }
+        .swimlane-header-main {
+          display: flex;
+          min-height: 0;
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .swimlane-header-main .swimlane-header-row {
+          flex: 0 0 auto;
+        }
+        .oneh-missing-users {
+          display: flex;
+          flex: 1 1 auto;
+          flex-direction: row;
+          flex-wrap: wrap;
+          align-content: flex-start;
+          align-items: flex-start;
+          justify-content: flex-start;
+          gap: 4px 8px;
+          width: 100%;
+          padding: 9px 2px 4px;
+          color: #dc2626;
+          font-size: 12px;
+          font-weight: 800;
+          line-height: 1.15;
+          letter-spacing: 0.3px;
+        }
+        .oneh-missing-users .oneh-missing-user {
+          display: inline-block;
+          color: #dc2626;
+          text-align: center;
+          white-space: nowrap;
+        }
+        .oneh-missing-users .oneh-missing-user:not(:last-child)::after {
+          content: "•";
+          display: inline-block;
+          margin-left: 8px;
+          color: #ef4444;
+          font-size: 9px;
+          vertical-align: middle;
+        }
         .swimlane-index {
           width: 24px;
           height: 24px;
@@ -9713,6 +9840,15 @@ export default function CommonViewPage() {
         }
         .swimlane-title-main.fast-task-layout .swimlane-title {
           flex: 0 0 100%;
+          width: 100%;
+        }
+        .swimlane-title-main.meeting-layout {
+          flex-direction: column;
+          align-items: flex-start;
+          flex-wrap: nowrap;
+        }
+        .swimlane-title-main.meeting-layout .swimlane-title {
+          flex: 0 0 auto;
           width: 100%;
         }
         .swimlane-title-main.priority .swimlane-assignees,
@@ -10243,6 +10379,36 @@ export default function CommonViewPage() {
           font-size: 11px;
           font-weight: 700;
           padding: 1px 4px;
+        }
+        .meeting-time-chip {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 0;
+          height: 22px;
+          padding: 0 8px;
+          border: 1px solid #93c5fd;
+          border-radius: 999px;
+          background: #eff6ff;
+          color: #1d4ed8;
+          font-size: 10px;
+          font-weight: 800;
+          line-height: 1;
+          white-space: nowrap;
+          flex: 0 0 auto;
+        }
+        .week-table-meeting-main {
+          display: flex;
+          flex: 1;
+          min-width: 0;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 3px;
+        }
+        .week-table-meeting-title {
+          min-width: 0;
+          white-space: pre-wrap;
+          line-height: 1.35;
         }
         .time-indicator {
           display: inline-flex;
@@ -14585,7 +14751,15 @@ export default function CommonViewPage() {
                               .filter(Boolean)
                               .join(" ")}
                           >
-                            <span>{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span>
+                            <div className="week-table-meeting-main">
+                              {formatTimeLabel(e.time) ? (
+                                <span className="meeting-time-chip">{formatTimeLabel(e.time)}</span>
+                              ) : null}
+                              <span className="week-table-meeting-title">
+                                <span className="week-table-line-number">{idx + 1}.</span>{" "}
+                                {commonPrintTitleLine(e.title)}
+                              </span>
+                            </div>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -14610,7 +14784,15 @@ export default function CommonViewPage() {
                               .filter(Boolean)
                               .join(" ")}
                           >
-                            <span>{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span>
+                            <div className="week-table-meeting-main">
+                              {formatTimeLabel(e.time) ? (
+                                <span className="meeting-time-chip">{formatTimeLabel(e.time)}</span>
+                              ) : null}
+                              <span className="week-table-meeting-title">
+                                <span className="week-table-line-number">{idx + 1}.</span>{" "}
+                                {commonPrintTitleLine(e.title)}
+                              </span>
+                            </div>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -14948,12 +15130,26 @@ export default function CommonViewPage() {
                         if (headerSubtext) {
                           return (
                             <>
-                              <div className="swimlane-header-row">
-                                <span className="swimlane-label-wrap">
-                                  <span className="swimlane-label">{row.label}</span>
-                                  {infoButton}
-                                </span>
-                                {badges}
+                              <div className="swimlane-header-main">
+                                <div className="swimlane-header-row">
+                                  <span className="swimlane-label-wrap">
+                                    <span className="swimlane-label">{row.label}</span>
+                                    {infoButton}
+                                  </span>
+                                  {badges}
+                                </div>
+                                {row.missingOneHUsers?.length ? (
+                                  <div
+                                    className="oneh-missing-users"
+                                    aria-label={`Pa slot ${headerSubtext}: ${row.missingOneHUsers.map((entry) => entry.label).join(", ")}`}
+                                  >
+                                    {row.missingOneHUsers.map((entry) => (
+                                      <span key={entry.id} className="oneh-missing-user" title={entry.label}>
+                                        {entry.initials}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : null}
                               </div>
                               <span className="swimlane-label-sub">{headerSubtext}</span>
                             </>
@@ -15063,6 +15259,7 @@ export default function CommonViewPage() {
                                       "swimlane-title-main",
                                       row.id === "priority" ? "priority" : "",
                                       isFastTaskRowId(row.id) ? "fast-task-layout" : "",
+                                      row.id === "external" || row.id === "internal" ? "meeting-layout" : "",
                                     ].filter(Boolean).join(" ")}
                                   >
                                     {!cell.placeholder && cell.assignees?.length ? (
@@ -15092,6 +15289,9 @@ export default function CommonViewPage() {
                                           </span>
                                         ) : null}
                                         {(row.id === "external" || row.id === "internal") ? renderSwimlaneMeetingStatusControl(cell) : null}
+                                        {(row.id === "external" || row.id === "internal") && cell.meetingTimeLabel ? (
+                                          <span className="meeting-time-chip">{cell.meetingTimeLabel}</span>
+                                        ) : null}
                                         {isFastTaskRowId(row.id) && row.id !== "waitingClient"
                                           ? renderFastTaskReorderControls(row.items, cell)
                                           : null}
@@ -15124,6 +15324,9 @@ export default function CommonViewPage() {
                                           </span>
                                         ) : null}
                                         {(row.id === "external" || row.id === "internal") ? renderSwimlaneMeetingStatusControl(cell) : null}
+                                        {(row.id === "external" || row.id === "internal") && cell.meetingTimeLabel ? (
+                                          <span className="meeting-time-chip">{cell.meetingTimeLabel}</span>
+                                        ) : null}
                                         {isFastTaskRowId(row.id) && row.id !== "waitingClient"
                                           ? renderFastTaskReorderControls(row.items, cell)
                                           : null}
@@ -15136,6 +15339,9 @@ export default function CommonViewPage() {
                                     ) : (row.id === "external" || row.id === "internal") ? (
                                       <div className="swimlane-assignees">
                                         {renderSwimlaneMeetingStatusControl(cell)}
+                                        {cell.meetingTimeLabel ? (
+                                          <span className="meeting-time-chip">{cell.meetingTimeLabel}</span>
+                                        ) : null}
                                       </div>
                                     ) : null}
                                     {row.id === "diamond" ? (
@@ -15145,7 +15351,9 @@ export default function CommonViewPage() {
                                     ) : null}
                                     <div className="swimlane-title">
                                       <span className="swimlane-print-title">
-                                        {commonPrintTitleLine(cell.title)}
+                                        {commonPrintTitleLine(
+                                          `${cell.title}${cell.meetingTimeLabel ? ` ${cell.meetingTimeLabel}` : ""}`,
+                                        )}
                                       </span>
                                       <span
                                         className={[

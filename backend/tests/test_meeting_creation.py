@@ -77,6 +77,11 @@ class TestMeetingCreation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(foreign_key.target_fullname, "meetings.id")
         self.assertEqual(foreign_key.ondelete, "CASCADE")
 
+    def test_preparation_internal_meeting_is_deleted_with_its_external_meeting(self) -> None:
+        foreign_key = next(iter(Meeting.__table__.c.pre_external_meeting_id.foreign_keys))
+        self.assertEqual(foreign_key.target_fullname, "meetings.id")
+        self.assertEqual(foreign_key.ondelete, "CASCADE")
+
     async def test_external_meeting_with_internal_time_creates_both_atomically(self) -> None:
         department_id = uuid.uuid4()
         participant_id = uuid.uuid4()
