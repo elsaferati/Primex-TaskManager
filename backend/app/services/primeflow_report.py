@@ -121,11 +121,12 @@ def _board_reminder_questions(report_day: date | None = None) -> list[ReportRemi
 def _partition_reminder_questions(
     questions: list[ReportReminderQuestion],
 ) -> tuple[list[tuple[int, ReportReminderQuestion]], list[tuple[int, ReportReminderQuestion]]]:
-    """Return day-specific extras first while preserving their original numbering."""
-    indexed = list(enumerate(questions, 1))
+    """Return day-specific extras first, numbering each group from one."""
+    extras = [question for question in questions if question.is_extra]
+    regular = [question for question in questions if not question.is_extra]
     return (
-        [(index, question) for index, question in indexed if question.is_extra],
-        [(index, question) for index, question in indexed if not question.is_extra],
+        list(enumerate(extras, 1)),
+        list(enumerate(regular, 1)),
     )
 
 
@@ -472,10 +473,12 @@ def render_plain_text(document: ReportDocument) -> str:
         if not questions:
             continue
         reminder_lines = [reminder_title]
-        for index, question in enumerate(questions, 1):
-            reminder_lines.append(f"{index}. {question.text}")
-            if question.guidance:
-                reminder_lines.append(f"   {question.guidance}")
+        extra_questions, regular_questions = _partition_reminder_questions(questions)
+        for indexed_questions in (extra_questions, regular_questions):
+            for index, question in indexed_questions:
+                reminder_lines.append(f"{index}. {question.text}")
+                if question.guidance:
+                    reminder_lines.append(f"   {question.guidance}")
         blocks.append("\n".join(reminder_lines))
     for section in document.sections:
         lines = [section.title]
@@ -652,9 +655,11 @@ def render_html(
                     f'({html.escape(question.guidance).replace(chr(10), " / ")})</span>'
                     if question.guidance else ""
                 )
+                item_tag = "div" if extra else "span"
+                item_style = "display:block;white-space:normal;" if extra else "white-space:normal;"
                 question_parts.append(
-                    f'<span style="white-space:normal;"><strong>{index}.</strong> '
-                    f'{html.escape(question.text)}{guidance}</span>'
+                    f'<{item_tag} style="{item_style}"><strong>{index}.</strong> '
+                    f'{html.escape(question.text)}{guidance}</{item_tag}>'
                 )
             data_attribute = ' data-extra-reminder-card="true"' if extra else ""
             margin = "0 0 8px" if extra else "0"
@@ -665,8 +670,12 @@ def render_html(
                 f'<tr><td bgcolor="{background}" style="background-color:{background};border:1px solid {border};'
                 f'border-left:6px solid {accent};padding:9px 10px;font-family:Arial,sans-serif;'
                 f'font-size:13px;line-height:1.45;color:{text_color};">'
-                + f' <strong style="display:inline-block;color:{accent};font-size:20px;line-height:1;'
-                'font-weight:900;vertical-align:-2px;padding:0 5px;">/</strong> '.join(question_parts)
+                + (
+                    "".join(question_parts)
+                    if extra
+                    else f' <strong style="display:inline-block;color:{accent};font-size:20px;line-height:1;'
+                    'font-weight:900;vertical-align:-2px;padding:0 5px;">/</strong> '.join(question_parts)
+                )
                 + '</td></tr></table>'
             )
 

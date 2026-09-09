@@ -133,40 +133,40 @@ const ONE_H_PRINT_CHECKLISTS = [
   {
     title: "STAFF - HAPAT PER 1H",
     questions: [
-      { question: "Hap doc dhe det", description: "" },
-      { question: "Share screen side by side DET/REZULTATIN", description: "" },
-      { question: "Sqaro slotin paraprak pastaj aktual", description: "" },
-      { question: "BZ Det nga Stafi per GA", description: "Komunikimi GA temas Det nga Stafi/ KA email" },
+      { question: "Hap doc dhe det", description: "", isExtra: false },
+      { question: "Share screen side by side DET/REZULTATIN", description: "", isExtra: false },
+      { question: "Sqaro slotin paraprak pastaj aktual", description: "", isExtra: false },
+      { question: "BZ Det nga Stafi per GA", description: "Komunikimi GA temas Det nga Stafi/ KA email", isExtra: false },
     ],
   },
   {
     title: "PYETJET PER 1H - BORD",
     questions: [
-      { question: "Slotin paraprak/aktual", description: "" },
-      { question: "A ke filluar me slotin aktual?", description: "" },
-      { question: "Nese jo, kur?", description: "" },
-      { question: "A kryhet sot?", description: "" },
-      { question: "A kryhet kete jave?", description: "" },
-      { question: "A arrihet RLZ javor?", description: "" },
-      { question: "Done? / Strikes? / Notes te reja? Data? AM/PM? Kujt?", description: "" },
-      { question: "BZ Notes", description: "Secili i lexon vet para BZ me GA" },
+      { question: "Slotin paraprak/aktual", description: "", isExtra: false },
+      { question: "A ke filluar me slotin aktual?", description: "", isExtra: false },
+      { question: "Nese jo, kur?", description: "", isExtra: false },
+      { question: "A kryhet sot?", description: "", isExtra: false },
+      { question: "A kryhet kete jave?", description: "", isExtra: false },
+      { question: "A arrihet RLZ javor?", description: "", isExtra: false },
+      { question: "Done? / Strikes? / Notes te reja? Data? AM/PM? Kujt?", description: "", isExtra: false },
+      { question: "BZ Notes", description: "Secili i lexon vet para BZ me GA", isExtra: false },
     ],
   },
 ] as const
 
 const THURSDAY_ONE_H_STAFF_QUESTIONS = [
-  { question: "Emails per missing info, per me vazhdu javen tjeter", description: "" },
-  { question: "Shikohen det qe mbesin vetem per neser (te premten)", description: "" },
+  { question: "Emails per missing info, per me vazhdu javen tjeter", description: "", isExtra: true },
+  { question: "Shikohen det qe mbesin vetem per neser (te premten)", description: "", isExtra: true },
 ] as const
 
 const THURSDAY_ONE_H_BOARD_QUESTIONS = [
-  { question: "Planifikimi javor short", description: "" },
+  { question: "Planifikimi javor short", description: "", isExtra: true },
 ] as const
 
 const FRIDAY_ONE_H_STAFF_QUESTIONS = [
-  { question: "Barazimi i planifikimit javor - next week", description: "" },
-  { question: "Barazimi i realizimit javor - this week", description: "" },
-  { question: "Emails per missing info, per me vazhdu javen tjeter", description: "" },
+  { question: "Barazimi i planifikimit javor - next week", description: "", isExtra: true },
+  { question: "Barazimi i realizimit javor - this week", description: "", isExtra: true },
+  { question: "Emails per missing info, per me vazhdu javen tjeter", description: "", isExtra: true },
 ] as const
 
 const oneHPrintChecklistsForDate = (reportDay: Date) =>
@@ -226,13 +226,23 @@ const escapePrintHtml = (value: string) =>
 const oneHPrintChecklistsHtml = (reportDay: Date) =>
   `<section class="one-h-print-checklists">${oneHPrintChecklistsForDate(reportDay).map(
     ({ title, questions }) => {
-      const questionContent = questions
+      const regularQuestions = questions.filter(({ isExtra }) => !isExtra)
+      const extraQuestions = questions.filter(({ isExtra }) => isExtra)
+      const regularContent = regularQuestions
         .map(({ question, description }, index) =>
           `<span class="one-h-print-checklist-item"><strong>${index + 1}. ${escapePrintHtml(question)}</strong>${
             description ? ` <span class="one-h-print-checklist-description">(${escapePrintHtml(description)})</span>` : ""
           }</span>`
         )
         .join('<span class="one-h-print-checklist-separator"> / </span>')
+      const extraContent = extraQuestions
+        .map(({ question, description }, index) =>
+          `<div class="one-h-print-checklist-extra-item"><strong>${index + 1}. ${escapePrintHtml(question)}</strong>${
+            description ? ` <span class="one-h-print-checklist-description">(${escapePrintHtml(description)})</span>` : ""
+          }</div>`
+        )
+        .join("")
+      const questionContent = extraContent + regularContent
       return `<div class="one-h-print-checklist"><div class="one-h-print-checklist-title">${escapePrintHtml(title)}</div><div class="one-h-print-checklist-items">${questionContent}</div></div>`
     }
   ).join("")}</section>`
@@ -244,7 +254,13 @@ function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
         <div key={title} className="one-h-print-checklist">
           <div className="one-h-print-checklist-title">{title}</div>
           <div className="one-h-print-checklist-items">
-            {questions.map(({ question, description }, index) => (
+            {questions.filter(({ isExtra }) => isExtra).map(({ question, description }, index) => (
+              <div key={question} className="one-h-print-checklist-extra-item">
+                <strong>{index + 1}. {question}</strong>
+                {description ? <span className="one-h-print-checklist-description"> ({description})</span> : null}
+              </div>
+            ))}
+            {questions.filter(({ isExtra }) => !isExtra).map(({ question, description }, index) => (
               <React.Fragment key={question}>
                 {index > 0 ? <span className="one-h-print-checklist-separator"> / </span> : null}
                 <span className="one-h-print-checklist-item">

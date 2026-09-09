@@ -696,15 +696,29 @@ def _one_h_checklists_html(report_day: date | None = None) -> str:
     """The two preparation checklists shown above every 1H Shtypi task grid."""
     board_questions, staff_questions = _one_h_checklists_for_day(report_day)
 
-    def checklist(title: str, questions: tuple[tuple[str, str], ...], *, board: bool = False) -> str:
+    def checklist(
+        title: str,
+        questions: tuple[tuple[str, str], ...],
+        *,
+        regular_count: int,
+        board: bool = False,
+    ) -> str:
         separators = (
             '<span style="font-size:20px;font-weight:900;color:#111827;line-height:12px;"> / </span>'
         )
-        question_text = separators.join(
+        regular_text = separators.join(
             f'<strong>{index}. {html.escape(question)}</strong>'
             + (f' <span style="color:#475569;">({html.escape(description)})</span>' if description else "")
-            for index, (question, description) in enumerate(questions, 1)
+            for index, (question, description) in enumerate(questions[:regular_count], 1)
         )
+        extra_text = "".join(
+            '<div data-extra-checklist-question="true" style="display:block;">'
+            f'<strong>{index}. {html.escape(question)}</strong>'
+            + (f' <span style="color:#475569;">({html.escape(description)})</span>' if description else "")
+            + '</div>'
+            for index, (question, description) in enumerate(questions[regular_count:], 1)
+        )
+        question_text = extra_text + regular_text
         board_marker = ' data-board-checklist-columns="true"' if board else ""
         return (
             '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
@@ -720,10 +734,10 @@ def _one_h_checklists_html(report_day: date | None = None) -> str:
         'data-one-h-checklist-columns="true" style="width:100%;border-collapse:collapse;margin:0 0 14px;">'
         '<tr>'
         '<td width="50%" valign="top" style="width:50%;padding:0 6px 0 0;vertical-align:top;">'
-        f"{checklist('STAFF - HAPAT PER 1H', staff_questions)}"
+        f"{checklist('STAFF - HAPAT PER 1H', staff_questions, regular_count=len(ONE_H_STAFF_CHECKLIST))}"
         '</td>'
         '<td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
-        f"{checklist('PYETJET PER 1H - BORD', board_questions, board=True)}"
+        f"{checklist('PYETJET PER 1H - BORD', board_questions, regular_count=len(ONE_H_BOARD_CHECKLIST), board=True)}"
         '</td>'
         '</tr></table>'
     )
@@ -1197,9 +1211,9 @@ def _excel_table_attachment(
         """Write each preparation list as a title row plus one compact content row."""
         checklist_fill = PatternFill("solid", fgColor="EEF2FF")
         board_questions, staff_questions = _one_h_checklists_for_day(checklist_date)
-        for start_column, end_column, title, questions in (
-            (1, 4, "STAFF - HAPAT PER 1H", staff_questions),
-            (5, 8, "PYETJET PER 1H - BORD", board_questions),
+        for start_column, end_column, title, questions, regular_count in (
+            (1, 4, "STAFF - HAPAT PER 1H", staff_questions, len(ONE_H_STAFF_CHECKLIST)),
+            (5, 8, "PYETJET PER 1H - BORD", board_questions, len(ONE_H_BOARD_CHECKLIST)),
         ):
             sheet.merge_cells(start_row=row_number, start_column=start_column, end_row=row_number, end_column=end_column)
             title_cell = sheet.cell(row_number, start_column, title)
@@ -1216,9 +1230,14 @@ def _excel_table_attachment(
             question_cell = sheet.cell(
                 row_number + 1,
                 start_column,
-                " / ".join(
+                "\n".join(
                     f"{index}. {question}" + (f" ({description})" if description else "")
-                    for index, (question, description) in enumerate(questions, 1)
+                    for index, (question, description) in enumerate(questions[regular_count:], 1)
+                )
+                + ("\n" if questions[regular_count:] else "")
+                + " / ".join(
+                    f"{index}. {question}" + (f" ({description})" if description else "")
+                    for index, (question, description) in enumerate(questions[:regular_count], 1)
                 ),
             )
             question_cell.font = Font(bold=True, size=10)
@@ -2268,20 +2287,28 @@ async def _build_print_report(
         + re.sub(r"^.*?<body[^>]*>|</body>.*$", "", html_body, flags=re.S)
         + "</div>"
     )
+
+    def plain_checklist_lines(
+        questions: tuple[tuple[str, str], ...], regular_count: int
+    ) -> list[str]:
+        regular_lines = [
+            f"{index}. {question}" + (f" ({description})" if description else "")
+            for index, (question, description) in enumerate(questions[:regular_count], 1)
+        ]
+        extra_lines = [
+            f"{index}. {question}" + (f" ({description})" if description else "")
+            for index, (question, description) in enumerate(questions[regular_count:], 1)
+        ]
+        return extra_lines + regular_lines
+
     plain_rows = [
         report_title,
         "",
         "PYETJET PER 1H - BORD",
-        *(
-            f"{index}. {question}" + (f" ({description})" if description else "")
-            for index, (question, description) in enumerate(board_questions, 1)
-        ),
+        *plain_checklist_lines(board_questions, len(ONE_H_BOARD_CHECKLIST)),
         "",
         "STAFF - HAPAT PER 1H",
-        *(
-            f"{index}. {question}" + (f" ({description})" if description else "")
-            for index, (question, description) in enumerate(staff_questions, 1)
-        ),
+        *plain_checklist_lines(staff_questions, len(ONE_H_STAFF_CHECKLIST)),
         "",
     ]
     plain_rows.extend(_closing_sections_plain_text(closing_sections))

@@ -176,6 +176,9 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertEqual(rendered_html.count('data-extra-reminder-card="true"'), 2)
         self.assertIn("border:1px solid #dc2626", rendered_html)
         self.assertIn("color:#b91c1c", rendered_html)
+        self.assertIn('<div style="display:block;white-space:normal;"><strong>1.</strong> Planifikimi javor short</div>', rendered_html)
+        self.assertIn('<div style="display:block;white-space:normal;"><strong>1.</strong> Emails per missing info, per me vazhdu javen tjeter</div>', rendered_html)
+        self.assertIn('<div style="display:block;white-space:normal;"><strong>2.</strong> Shikohen det qe mbesin vetem per neser (te premten)</div>', rendered_html)
         self.assertLess(
             rendered_html.index("Emails per missing info, per me vazhdu javen tjeter"),
             rendered_html.index("Hap doc dhe det"),
@@ -194,6 +197,10 @@ class PrimeFlowReportTests(unittest.TestCase):
             word_xml.index("Emails per missing info, per me vazhdu javen tjeter"),
             word_xml.index("Hap doc dhe det"),
         )
+        self.assertIn("1. Emails per missing info, per me vazhdu javen tjeter", word_xml)
+        self.assertIn("2. Shikohen det qe mbesin vetem per neser (te premten)", word_xml)
+        plain = render_plain_text(document)
+        self.assertIn("1. Emails per missing info, per me vazhdu javen tjeter\n2. Shikohen det qe mbesin vetem per neser (te premten)", plain)
         self.assertGreater(len(render_png(document)), 1000)
 
     def test_friday_reports_add_week_balancing_staff_questions(self) -> None:
@@ -221,6 +228,9 @@ class PrimeFlowReportTests(unittest.TestCase):
         )
         rendered_html = render_html(document)
         self.assertEqual(rendered_html.count('data-extra-reminder-card="true"'), 1)
+        self.assertIn('<div style="display:block;white-space:normal;"><strong>1.</strong> Barazimi i planifikimit javor - next week</div>', rendered_html)
+        self.assertIn('<div style="display:block;white-space:normal;"><strong>2.</strong> Barazimi i realizimit javor - this week</div>', rendered_html)
+        self.assertIn('<div style="display:block;white-space:normal;"><strong>3.</strong> Emails per missing info, per me vazhdu javen tjeter</div>', rendered_html)
         self.assertLess(
             rendered_html.index("Barazimi i planifikimit javor - next week"),
             rendered_html.index("Hap doc dhe det"),
