@@ -9,7 +9,7 @@ from pathlib import Path
 from datetime import date, datetime, time, timedelta
 from typing import Callable
 
-from sqlalchemy import select, text
+from sqlalchemy import and_, select, text
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
@@ -17,6 +17,7 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
 from app.db import SessionLocal
 from app.models.enums import GaNoteStatus
 from app.models.ga_note import GaNote
+from app.models.plan_note import PlanNote
 from app.models.primeflow_report_delivery_run import PrimeFlowReportDeliveryRun
 from app.models.primeflow_report_recipient import PrimeFlowReportRecipient
 from app.models.primeflow_report_snapshot import PrimeFlowReportSnapshot
@@ -30,6 +31,7 @@ from app.services.primeflow_report import (
 )
 from app.services.one_h_ga_attachments import build_ga_only_1h_attachments, render_ga_tables_html
 from app.services.task_strike_events import render_text_for_interval
+from app.services.task_title_rules import normalize_email_task_title
 from app.services.tomorrow_print_report import build_today_print_report
 
 logger = logging.getLogger(__name__)
@@ -273,18 +275,57 @@ async def _text_overrides_for_1h_interval(
     task_ids = set(titles) | set(descriptions)
     if not task_ids:
         return {}, {}
+    # Load the current task/note text and its strike history in one statement.
+    # Common View is fetched through a separate HTTP request and can cross a
+    # task-save commit boundary. Using its text together with newer strike
+    # events made a fresh report temporarily suppress blue/green strikes until
+    # a later regeneration happened to receive matching snapshots.
     async with SessionLocal() as db:
-        interval_start = strike_interval_start(day, slot)
-        events = (await db.execute(
-            select(TaskStrikeEvent)
-            .where(TaskStrikeEvent.task_id.in_(task_ids))
-            .where(TaskStrikeEvent.occurred_at <= interval_end)
-            .order_by(TaskStrikeEvent.occurred_at, TaskStrikeEvent.id)
-        )).scalars().all()
+        rows = (await db.execute(
+            select(
+                Task.id,
+                Task.title,
+                Task.description,
+                GaNote.content,
+                PlanNote.content,
+                TaskStrikeEvent,
+            )
+            .outerjoin(GaNote, Task.ga_note_origin_id == GaNote.id)
+            .outerjoin(PlanNote, Task.plan_note_origin_id == PlanNote.id)
+            .outerjoin(
+                TaskStrikeEvent,
+                and_(
+                    TaskStrikeEvent.task_id == Task.id,
+                    TaskStrikeEvent.occurred_at <= interval_end,
+                ),
+            )
+            .where(Task.id.in_(task_ids))
+            .order_by(Task.id, TaskStrikeEvent.occurred_at, TaskStrikeEvent.id)
+        )).all()
 
     by_task: dict[uuid.UUID, list[TaskStrikeEvent]] = {}
-    for event in events:
-        by_task.setdefault(event.task_id, []).append(event)
+    current_titles: dict[uuid.UUID, str] = {}
+    current_descriptions: dict[uuid.UUID, str | None] = {}
+    for task_id, task_title, task_description, ga_content, plan_content, event in rows:
+        source_title = ga_content or plan_content or task_title or ""
+        normalized_title = "\n".join(
+            " ".join(line.split())
+            for line in str(source_title).replace("\r\n", "\n").replace("\r", "\n").split("\n")
+            if line.strip()
+        )
+        current_titles[task_id] = normalize_email_task_title(normalized_title)
+        current_descriptions[task_id] = task_description
+        if event is not None:
+            by_task.setdefault(task_id, []).append(event)
+
+    # A task removed between the Common View request and this query can safely
+    # retain the payload value. Every task still present uses authoritative text
+    # from the same database snapshot as the event rows.
+    titles.update({task_id: value for task_id, value in current_titles.items() if task_id in titles})
+    descriptions.update({
+        task_id: value for task_id, value in current_descriptions.items() if task_id in descriptions
+    })
+    interval_start = strike_interval_start(day, slot)
     title_overrides = {
         str(task_id): render_text_for_interval(
             title,

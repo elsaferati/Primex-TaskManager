@@ -2449,16 +2449,16 @@ OPEN_TASK_EXPORT_HEADERS = [
     "BZ ME",
     "TITLE",
     "PROJECT",
-    "WHEN",
-    "WHEN PLANNED",
+    "WHEN MANUAL",
     "STATUS MANUAL",
-    "STATUS PLANNED",
+    "WHEN PF",
+    "STATUS PF",
     "KOMENT",
 ]
 
 
 def _open_task_baseline_column_numbers(ws) -> tuple[int, int, int]:
-    """Find editable planning columns in both legacy and current Open Tasks exports."""
+    """Find editable planning columns in legacy and current Open Tasks exports."""
     header_values = [
         str(cell.value).strip().upper() if cell.value is not None else ""
         for cell in ws[4]
@@ -2473,7 +2473,11 @@ def _open_task_baseline_column_numbers(ws) -> tuple[int, int, int]:
             detail=f"Missing {header} column in Open Tasks workbook.",
         )
 
-    when_column = find_column("WHEN")
+    try:
+        when_column = find_column("WHEN MANUAL")
+    except HTTPException:
+        # Older Open Tasks exports called the manual column simply WHEN.
+        when_column = find_column("WHEN")
     try:
         status_column = find_column("STATUS MANUAL", after=when_column)
     except HTTPException:
@@ -2522,12 +2526,19 @@ def _open_task_planned_status(task: Task) -> str:
     return ""
 
 
-def _open_task_difference(manual_value: str | None, planned_value: str | None) -> str:
+def _open_task_pf_display_value(manual_value: str | None, planned_value: str | None) -> str:
+    """Show the PF value, including matches, and make missing PF plans explicit."""
     manual = (manual_value or "").strip().upper()
     planned = (planned_value or "").strip().upper()
     if manual and not planned:
         return "UNPLANNED"
-    return planned if manual != planned else ""
+    return planned
+
+
+def _open_task_values_match(manual_value: str | None, planned_value: str | None) -> bool:
+    manual = (manual_value or "").strip().upper()
+    planned = (planned_value or "").strip().upper()
+    return manual == planned
 
 
 def _open_task_wrapped_line_count(value: object, column_width: float) -> int:
@@ -2944,6 +2955,8 @@ async def export_open_tasks_xlsx(
 
     source_values_present: set[str] = set()
     system_data_rows: list[int] = []
+    mismatch_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+    mismatch_font = Font(color="FFFFFF", bold=True)
     for idx, (group, task) in enumerate(export_rows, start=1):
         project = project_map.get(task.project_id) if task.project_id else None
         department = department_map.get(task.department_id) if task.department_id else None
@@ -2972,9 +2985,9 @@ async def export_open_tasks_xlsx(
             _strip_html(task.title) or "",
             project.title if project else "",
             baseline.when_value if baseline else "",
-            _open_task_difference(baseline.when_value, planned_when) if baseline else "",
             baseline.status_value if baseline else "",
-            _open_task_difference(baseline.status_value, planned_status) if baseline else "",
+            _open_task_pf_display_value(baseline.when_value, planned_when) if baseline else "",
+            _open_task_pf_display_value(baseline.status_value, planned_status) if baseline else "",
             baseline.comment_value if baseline else "",
         ]
         for col_idx, value in enumerate(values, start=1):
@@ -2982,6 +2995,13 @@ async def export_open_tasks_xlsx(
             cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True, readingOrder=1)
             if col_idx == 1:
                 cell.font = Font(bold=True)
+        if baseline:
+            if not _open_task_values_match(baseline.when_value, planned_when):
+                ws.cell(row=data_row, column=19).fill = mismatch_fill
+                ws.cell(row=data_row, column=19).font = mismatch_font
+            if not _open_task_values_match(baseline.status_value, planned_status):
+                ws.cell(row=data_row, column=20).fill = mismatch_fill
+                ws.cell(row=data_row, column=20).font = mismatch_font
         data_row += 1
 
     last_row = max(header_row, data_row - 1)
@@ -3017,7 +3037,7 @@ async def export_open_tasks_xlsx(
         ws.add_data_validation(when_validation)
         ws.add_data_validation(status_validation)
         when_validation.add(f"{get_column_letter(17)}5:{get_column_letter(17)}{data_row - 1}")
-        status_validation.add(f"{get_column_letter(19)}5:{get_column_letter(19)}{data_row - 1}")
+        status_validation.add(f"{get_column_letter(18)}5:{get_column_letter(18)}{data_row - 1}")
 
     metadata = wb.create_sheet("_PRIMEFLOW")
     metadata.sheet_state = "veryHidden"

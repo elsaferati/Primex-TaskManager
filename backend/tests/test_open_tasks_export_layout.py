@@ -14,10 +14,11 @@ from app.api.routers.exports import (
     OPEN_TASK_WHEN_VALUES,
     _normalize_open_task_baseline_value,
     _open_task_baseline_column_numbers,
-    _open_task_difference,
+    _open_task_pf_display_value,
     _open_task_planned_status,
     _open_task_planning_when,
     _open_task_source_label,
+    _open_task_values_match,
     _open_task_wrapped_line_count,
     export_open_tasks_xlsx,
     import_open_tasks_baseline,
@@ -53,18 +54,19 @@ class TestOpenTasksExportLayout(unittest.TestCase):
     def test_comparison_columns_are_paired_in_requested_order(self) -> None:
         self.assertEqual(
             OPEN_TASK_EXPORT_HEADERS[16:21],
-            ["WHEN", "WHEN PLANNED", "STATUS MANUAL", "STATUS PLANNED", "KOMENT"],
+            ["WHEN MANUAL", "STATUS MANUAL", "WHEN PF", "STATUS PF", "KOMENT"],
         )
 
     def test_baseline_columns_are_found_in_legacy_and_current_layouts(self) -> None:
+        legacy_tail = ["WHEN", "WHEN PLANNED", "STATUS", "STATUS PLANNED", "KOMENT"]
         legacy_headers = [
-            "STATUS" if header == "STATUS MANUAL" else header
-            for header in OPEN_TASK_EXPORT_HEADERS
-            if header != "TASK ID"
-        ]
+            header for header in OPEN_TASK_EXPORT_HEADERS[:16] if header != "TASK ID"
+        ] + legacy_tail
+        previous_headers = OPEN_TASK_EXPORT_HEADERS[:16] + legacy_tail
         for headers, expected in (
             (legacy_headers, (16, 18, 20)),
-            (OPEN_TASK_EXPORT_HEADERS, (17, 19, 21)),
+            (previous_headers, (17, 19, 21)),
+            (OPEN_TASK_EXPORT_HEADERS, (17, 18, 21)),
         ):
             workbook = Workbook()
             worksheet = workbook.active
@@ -104,14 +106,15 @@ class TestOpenTasksExportLayout(unittest.TestCase):
         self.assertEqual(_open_task_planned_status(task(is_r1=True)), "R1")
         self.assertEqual(_open_task_planned_status(task()), "")
 
-    def test_only_non_matching_planned_values_are_displayed(self) -> None:
-        self.assertEqual(_open_task_difference("THIS WEEK", "THIS WEEK"), "")
-        self.assertEqual(_open_task_difference("THIS WEEK", "NEXT WEEK"), "NEXT WEEK")
-        self.assertEqual(_open_task_difference("1H", "1H"), "")
-        self.assertEqual(_open_task_difference("1H", "BLLOK"), "BLLOK")
-        self.assertEqual(_open_task_difference("THIS WEEK", None), "UNPLANNED")
-        self.assertEqual(_open_task_difference("1H", ""), "UNPLANNED")
-        self.assertEqual(_open_task_difference(None, None), "")
+    def test_pf_values_are_always_displayed_and_matches_are_detected(self) -> None:
+        self.assertEqual(_open_task_pf_display_value("THIS WEEK", "THIS WEEK"), "THIS WEEK")
+        self.assertEqual(_open_task_pf_display_value("THIS WEEK", "NEXT WEEK"), "NEXT WEEK")
+        self.assertEqual(_open_task_pf_display_value("1H", "1H"), "1H")
+        self.assertEqual(_open_task_pf_display_value("1H", "BLLOK"), "BLLOK")
+        self.assertEqual(_open_task_pf_display_value("THIS WEEK", None), "UNPLANNED")
+        self.assertEqual(_open_task_pf_display_value(None, None), "")
+        self.assertTrue(_open_task_values_match(" this week ", "THIS WEEK"))
+        self.assertFalse(_open_task_values_match("THIS WEEK", "NEXT WEEK"))
 
     def test_baseline_import_normalizes_and_validates_values(self) -> None:
         self.assertEqual(
@@ -164,10 +167,8 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
         ws = workbook.active
         ws.title = "OPEN TASKS"
         legacy_headers = [
-            "STATUS" if header == "STATUS MANUAL" else header
-            for header in OPEN_TASK_EXPORT_HEADERS
-            if header != "TASK ID"
-        ]
+            header for header in OPEN_TASK_EXPORT_HEADERS[:16] if header != "TASK ID"
+        ] + ["WHEN", "WHEN PLANNED", "STATUS", "STATUS PLANNED", "KOMENT"]
         for column, header in enumerate(legacy_headers, start=1):
             ws.cell(4, column, header)
         ws.cell(5, 16, " this week ")
@@ -264,8 +265,12 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ws.cell(5, 2).value, str(task_id))
         self.assertEqual(
             [ws.cell(5, column).value for column in range(17, 22)],
-            ["THIS WEEK", "NEXT WEEK", "1H", None, "Before planning"],
+            ["THIS WEEK", "1H", "NEXT WEEK", "1H", "Before planning"],
         )
+        self.assertEqual(ws.cell(5, 19).fill.fgColor.rgb, "00FF0000")
+        self.assertEqual(ws.cell(5, 19).font.color.rgb, "00FFFFFF")
+        self.assertTrue(ws.cell(5, 19).font.bold)
+        self.assertEqual(ws.cell(5, 20).fill.fill_type, None)
         self.assertEqual(ws.freeze_panes, "C5")
         self.assertEqual(workbook["_PRIMEFLOW"].sheet_state, "veryHidden")
         self.assertEqual(workbook["_PRIMEFLOW"]["B1"].value, "2026-09-14")
