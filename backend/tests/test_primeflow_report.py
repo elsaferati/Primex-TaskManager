@@ -188,6 +188,15 @@ class PrimeFlowReportTests(unittest.TestCase):
             rendered_html.index("Planifikimi javor short"),
             rendered_html.index("Slotin paraprak/aktual"),
         )
+        self.assertLess(
+            rendered_html.index("Shikohen det qe mbesin vetem per neser (te premten)"),
+            rendered_html.index(REMINDER_SECTION_TITLE),
+        )
+        self.assertLess(
+            rendered_html.index("Planifikimi javor short"),
+            rendered_html.index(BOARD_REMINDER_SECTION_TITLE),
+        )
+        self.assertIn('data-day-specific-reminder-columns="true"', rendered_html)
 
         word_xml = zipfile.ZipFile(io.BytesIO(render_docx(document))).read(
             "word/document.xml"

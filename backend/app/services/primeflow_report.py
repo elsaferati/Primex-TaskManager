@@ -480,16 +480,25 @@ def render_plain_text(document: ReportDocument) -> str:
     )
     if any(question.is_extra for _, questions in reminder_groups for question in questions):
         blocks.append(_day_specific_question_label(document.report_date))
+        for reminder_title, questions in reminder_groups:
+            extra_questions, _ = _partition_reminder_questions(questions)
+            if not extra_questions:
+                continue
+            reminder_lines = [reminder_title]
+            for index, question in extra_questions:
+                reminder_lines.append(f"{index}. {question.text}")
+                if question.guidance:
+                    reminder_lines.append(f"   {question.guidance}")
+            blocks.append("\n".join(reminder_lines))
     for reminder_title, questions in reminder_groups:
         if not questions:
             continue
         reminder_lines = [reminder_title]
-        extra_questions, regular_questions = _partition_reminder_questions(questions)
-        for indexed_questions, is_extra in ((extra_questions, True), (regular_questions, False)):
-            for index, question in indexed_questions:
-                reminder_lines.append(f"{index}. {question.text}")
-                if question.guidance:
-                    reminder_lines.append(f"   {question.guidance}")
+        _, regular_questions = _partition_reminder_questions(questions)
+        for index, question in regular_questions:
+            reminder_lines.append(f"{index}. {question.text}")
+            if question.guidance:
+                reminder_lines.append(f"   {question.guidance}")
         blocks.append("\n".join(reminder_lines))
     for section in document.sections:
         lines = [section.title]
@@ -648,7 +657,14 @@ def render_html(
             "</table>"
         )
 
-    def reminder_column(title: str, questions: list[ReportReminderQuestion]) -> str:
+    def reminder_column(
+        title: str,
+        questions: list[ReportReminderQuestion],
+        *,
+        show_title: bool = True,
+        show_extra: bool = True,
+        show_regular: bool = True,
+    ) -> str:
         def reminder_card(
             indexed_questions: list[tuple[int, ReportReminderQuestion]], *, extra: bool
         ) -> str:
@@ -692,15 +708,19 @@ def render_html(
 
         extra_questions, regular_questions = _partition_reminder_questions(questions)
         return (
-            section_title_block(title)
-            + reminder_card(extra_questions, extra=True)
-            + reminder_card(regular_questions, extra=False)
+            (section_title_block(title) if show_title else "")
+            + (reminder_card(extra_questions, extra=True) if show_extra else "")
+            + (reminder_card(regular_questions, extra=False) if show_regular else "")
         )
 
-    def board_reminder_column(questions: list[ReportReminderQuestion]) -> str:
+    def board_reminder_column(
+        questions: list[ReportReminderQuestion], *, show_extra: bool = True
+    ) -> str:
         return (
             '<div data-board-reminder-columns="true">'
-            + reminder_column(BOARD_REMINDER_SECTION_TITLE, questions)
+            + reminder_column(
+                BOARD_REMINDER_SECTION_TITLE, questions, show_extra=show_extra
+            )
             + '</div>'
         )
 
@@ -728,9 +748,14 @@ def render_html(
     if pre_sections_html:
         body_chunks.append(pre_sections_html)
 
+    reminder_groups = (
+        (REMINDER_SECTION_TITLE, document.reminders),
+        (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
+    )
+
     if any(
         question.is_extra
-        for questions in (document.board_reminders, document.reminders)
+        for _, questions in reminder_groups
         for question in questions
     ):
         body_chunks.append(
@@ -740,6 +765,18 @@ def render_html(
             'border-left:6px solid #dc2626;">'
             f'{html.escape(_day_specific_question_label(document.report_date))}</div>'
         )
+        body_chunks.append(
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+            'data-day-specific-reminder-columns="true" style="width:100%;border-collapse:collapse;">'
+            '<tr>'
+            '<td width="50%" valign="top" style="width:50%;padding:0 6px 0 0;vertical-align:top;">'
+            f'{reminder_column("", document.reminders, show_title=False, show_regular=False)}'
+            '</td>'
+            '<td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
+            f'{reminder_column("", document.board_reminders, show_title=False, show_regular=False)}'
+            '</td>'
+            '</tr></table>'
+        )
 
     if document.board_reminders and document.reminders:
         body_chunks.append(
@@ -747,17 +784,17 @@ def render_html(
             'data-reminder-columns="true" style="width:100%;border-collapse:collapse;">'
             '<tr>'
             '<td width="50%" valign="top" style="width:50%;padding:0 6px 0 0;vertical-align:top;">'
-            f"{reminder_column(REMINDER_SECTION_TITLE, document.reminders)}"
+            f"{reminder_column(REMINDER_SECTION_TITLE, document.reminders, show_extra=False)}"
             '</td>'
             '<td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
-            f"{board_reminder_column(document.board_reminders)}"
+            f"{board_reminder_column(document.board_reminders, show_extra=False)}"
             '</td>'
             '</tr></table>'
         )
     elif document.board_reminders:
-        body_chunks.append(board_reminder_column(document.board_reminders))
+        body_chunks.append(board_reminder_column(document.board_reminders, show_extra=False))
     elif document.reminders:
-        body_chunks.append(reminder_column(REMINDER_SECTION_TITLE, document.reminders))
+        body_chunks.append(reminder_column(REMINDER_SECTION_TITLE, document.reminders, show_extra=False))
 
     for section_index, section in enumerate(document.sections):
         if section_index:
@@ -894,6 +931,39 @@ def render_docx(document: ReportDocument) -> bytes:
         description_run = cell.add_paragraph().add_run(description)
         description_run.font.size = Pt(7.5)
         description_run.font.color.rgb = RGBColor.from_string("475569")
+    reminder_groups = (
+        (REMINDER_SECTION_TITLE, document.reminders),
+        (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
+    )
+
+    def add_reminder_card(
+        indexed_questions: list[tuple[int, ReportReminderQuestion]], *, extra: bool
+    ) -> None:
+        if not indexed_questions:
+            return
+        card_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+        shade(card_cell, "#fff7f7" if extra else "#f8fafc")
+        border(card_cell, "#dc2626" if extra else "#94a3b8")
+        for question_position, (index, question) in enumerate(indexed_questions):
+            paragraph = card_cell.paragraphs[0] if question_position == 0 else card_cell.add_paragraph()
+            add_marked_runs(
+                paragraph,
+                f"{index}. {question.text}",
+                f"{index}. {question.text}",
+                bold=True,
+                color="#b91c1c" if extra else "#050505",
+            )
+            if question.guidance:
+                guidance = card_cell.add_paragraph()
+                add_marked_runs(
+                    guidance,
+                    question.guidance,
+                    question.guidance,
+                    bold=False,
+                    color="#dc2626" if extra else "#64748b",
+                )
+        doc.add_paragraph().paragraph_format.space_after = Pt(0)
+
     if any(
         question.is_extra
         for questions in (document.board_reminders, document.reminders)
@@ -906,10 +976,10 @@ def render_docx(document: ReportDocument) -> bytes:
         day_label_run.bold = True
         day_label_run.font.size = Pt(10)
         day_label_run.font.color.rgb = RGBColor.from_string("B91C1C")
-    for reminder_title, questions in (
-        (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
-        (REMINDER_SECTION_TITLE, document.reminders),
-    ):
+        for _, questions in reminder_groups:
+            extra_questions, _ = _partition_reminder_questions(questions)
+            add_reminder_card(extra_questions, extra=True)
+    for reminder_title, questions in reminder_groups:
         if not questions:
             continue
         doc.add_paragraph()
@@ -918,39 +988,8 @@ def render_docx(document: ReportDocument) -> bytes:
         reminder_run = reminder_header.paragraphs[0].add_run(reminder_title)
         reminder_run.bold = True
         reminder_run.font.size = Pt(13)
-        extra_questions, regular_questions = _partition_reminder_questions(questions)
-        for indexed_questions, is_extra in (
-            (extra_questions, True),
-            (regular_questions, False),
-        ):
-            if not indexed_questions:
-                continue
-            card_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
-            shade(card_cell, "#fff7f7" if is_extra else "#f8fafc")
-            border(card_cell, "#dc2626" if is_extra else "#94a3b8")
-            for question_position, (index, question) in enumerate(indexed_questions):
-                paragraph = (
-                    card_cell.paragraphs[0]
-                    if question_position == 0
-                    else card_cell.add_paragraph()
-                )
-                add_marked_runs(
-                    paragraph,
-                    f"{index}. {question.text}",
-                    f"{index}. {question.text}",
-                    bold=True,
-                    color="#b91c1c" if is_extra else "#050505",
-                )
-                if question.guidance:
-                    guidance = card_cell.add_paragraph()
-                    add_marked_runs(
-                        guidance,
-                        question.guidance,
-                        question.guidance,
-                        bold=False,
-                        color="#dc2626" if is_extra else "#64748b",
-                    )
-            doc.add_paragraph().paragraph_format.space_after = Pt(0)
+        _, regular_questions = _partition_reminder_questions(questions)
+        add_reminder_card(regular_questions, extra=False)
     for section in document.sections:
         doc.add_paragraph()
         section_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
@@ -1083,9 +1122,53 @@ def render_png(document: ReportDocument) -> bytes:
         draw.line((bounds[0], strike_y, bounds[2], strike_y), fill=color, width=2)
         draw.text((text_left, top + 26), description, fill="#64748b", font=font)
     y += legend_height + 18
+    reminder_groups = (
+        (REMINDER_SECTION_TITLE, document.reminders),
+        (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
+    )
+
+    def draw_reminder_card(
+        indexed_questions: list[tuple[int, ReportReminderQuestion]], *, extra: bool
+    ) -> None:
+        nonlocal y
+        if not indexed_questions:
+            return
+        card_lines: list[tuple[str, bool]] = []
+        for index, question in indexed_questions:
+            card_lines.extend(
+                (line, True)
+                for line in (textwrap.wrap(f"{index}. {question.text}", 95) or [""])
+            )
+            card_lines.extend(
+                (line, False)
+                for line in (textwrap.wrap(question.guidance, 105) if question.guidance else [])
+            )
+        card_height = 25 + 28 * len(card_lines)
+        accent = "#dc2626" if extra else "#64748b"
+        draw.rounded_rectangle(
+            (margin + 5, y, width - margin, y + card_height),
+            radius=8,
+            fill="#fff7f7" if extra else "#f8fafc",
+            outline=accent,
+            width=2,
+        )
+        draw.rectangle((margin + 5, y + 4, margin + 11, y + card_height - 4), fill=accent)
+        line_y = y + 12
+        for line, is_title in card_lines:
+            draw.text(
+                (margin + 25, line_y),
+                line,
+                fill=("#b91c1c" if is_title else "#dc2626")
+                if extra
+                else ("#050505" if is_title else "#64748b"),
+                font=bold if is_title else font,
+            )
+            line_y += 28
+        y += card_height + 12
+
     if any(
         question.is_extra
-        for questions in (document.board_reminders, document.reminders)
+        for _, questions in reminder_groups
         for question in questions
     ):
         draw.text(
@@ -1095,57 +1178,19 @@ def render_png(document: ReportDocument) -> bytes:
             font=bold,
         )
         y += 38
-    for reminder_title, questions in (
-        (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
-        (REMINDER_SECTION_TITLE, document.reminders),
-    ):
+        for _, questions in reminder_groups:
+            extra_questions, _ = _partition_reminder_questions(questions)
+            draw_reminder_card(extra_questions, extra=True)
+        y += 14
+    for reminder_title, questions in reminder_groups:
         if not questions:
             continue
         draw.rectangle((margin, y, width - margin, y + 48), fill="#eef2ff")
         draw.rectangle((margin, y, margin + 7, y + 48), fill="#2563eb")
         draw.text((margin + 18, y + 11), reminder_title, fill="#0f172a", font=bold)
         y += 62
-        extra_questions, regular_questions = _partition_reminder_questions(questions)
-        for indexed_questions, is_extra in (
-            (extra_questions, True),
-            (regular_questions, False),
-        ):
-            if not indexed_questions:
-                continue
-            card_lines: list[tuple[str, bool]] = []
-            for index, question in indexed_questions:
-                card_lines.extend(
-                    (line, True)
-                    for line in (textwrap.wrap(f"{index}. {question.text}", 95) or [""])
-                )
-                card_lines.extend(
-                    (line, False)
-                    for line in (
-                        textwrap.wrap(question.guidance, 105) if question.guidance else []
-                    )
-                )
-            card_height = 25 + 28 * len(card_lines)
-            accent = "#dc2626" if is_extra else "#64748b"
-            draw.rounded_rectangle(
-                (margin + 5, y, width - margin, y + card_height),
-                radius=8,
-                fill="#fff7f7" if is_extra else "#f8fafc",
-                outline=accent,
-                width=2,
-            )
-            draw.rectangle((margin + 5, y + 4, margin + 11, y + card_height - 4), fill=accent)
-            line_y = y + 12
-            for line, is_title in card_lines:
-                draw.text(
-                    (margin + 25, line_y),
-                    line,
-                    fill=("#b91c1c" if is_title else "#dc2626")
-                    if is_extra
-                    else ("#050505" if is_title else "#64748b"),
-                    font=bold if is_title else font,
-                )
-                line_y += 28
-            y += card_height + 12
+        _, regular_questions = _partition_reminder_questions(questions)
+        draw_reminder_card(regular_questions, extra=False)
         y += 14
     for section in document.sections:
         draw.rectangle((margin, y, width - margin, y + 48), fill="#eef2ff")

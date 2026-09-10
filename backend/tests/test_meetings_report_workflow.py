@@ -1038,6 +1038,7 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         rendered = _render_ascii_table_html(rows, "todo")
         self.assertIn("PRJK", rendered)
         self.assertIn("PrimeFlow Task Manager", rendered)
+        self.assertIn('<col width="110">', rendered)
 
     def test_project_column_uses_dash_for_fast_tasks(self) -> None:
         task = SimpleNamespace(
@@ -1053,6 +1054,9 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
 
         self.assertEqual(len(header.split("|")), len(data.split("|")))
         self.assertIn("| -", data)
+        rendered = _render_ascii_table_html(rows, "todo")
+        self.assertIn('<col width="44">', rendered)
+        self.assertNotIn('<col width="110">', rendered)
 
     def test_without_progress_includes_task_active_before_later_due_date(self) -> None:
         task = SimpleNamespace(

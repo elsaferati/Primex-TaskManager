@@ -19,6 +19,7 @@ from app.services.tomorrow_closing_sections import (
     _system_task_tyo_label,
 )
 from app.services.tomorrow_print_report import (
+    _closing_table_has_project_titles,
     _closing_sections_html,
     _docx_table_attachment,
     _excel_table_attachment,
@@ -88,6 +89,26 @@ def closing_fixture() -> list[ClosingSection]:
 
 
 class TomorrowClosingFormatParityTests(unittest.TestCase):
+    def test_empty_project_column_is_compact_but_populated_project_column_expands(self) -> None:
+        empty_table = ClosingTable(
+            label="SHTYER DUE DATE",
+            columns=["NR", "KUSH", "DEP", "PRJK", "AM/PM", "TITULLI"],
+            rows=[ClosingTableRow(values=["1", "FG", "GD", "-", "AM", "Fast task"])],
+        )
+        populated_table = ClosingTable(
+            label="SHTYER DUE DATE",
+            columns=["NR", "KUSH", "DEP", "PRJK", "AM/PM", "TITULLI"],
+            rows=[ClosingTableRow(values=["1", "FG", "GD", "Brand Refresh", "AM", "Project task"])],
+        )
+
+        self.assertFalse(_closing_table_has_project_titles(empty_table))
+        self.assertTrue(_closing_table_has_project_titles(populated_table))
+        empty_html = _closing_sections_html([ClosingSection(title="EMPTY", tables=[empty_table])])
+        populated_html = _closing_sections_html([ClosingSection(title="FULL", tables=[populated_table])])
+        self.assertIn('<th width="1%"', empty_html)
+        self.assertIn("white-space:nowrap;width:1%", empty_html)
+        self.assertIn('<th width="10%"', populated_html)
+
     def test_only_overdue_tyo_values_use_the_alert_style(self) -> None:
         self.assertFalse(_is_overdue_tyo_value("T"))
         self.assertFalse(_is_overdue_tyo_value("-"))
