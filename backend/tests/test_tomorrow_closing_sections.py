@@ -19,6 +19,7 @@ from app.services.tomorrow_closing_sections import (
     _system_task_tyo_label,
 )
 from app.services.tomorrow_print_report import (
+    _closing_table_has_project_titles,
     _closing_sections_html,
     _docx_table_attachment,
     _excel_table_attachment,
@@ -34,9 +35,9 @@ def closing_fixture() -> list[ClosingSection]:
             title="DET PA PROGRESS",
             tables=[ClosingTable(
                 label="TODO",
-                columns=["NR", "KUSH", "DEP", "AM/PM", "TITULLI", "ARSYEJA", "KOMENT"],
+                columns=["NR", "KUSH", "DEP", "PRJK", "AM/PM", "TITULLI", "ARSYEJA", "KOMENT"],
                 rows=[ClosingTableRow(
-                    values=["1", "EF", "DEV", "PM", "Pink task", "Urgjence", "Pres input"],
+                    values=["1", "EF", "DEV", "PrimeFlow", "PM", "Pink task", "Urgjence", "Pres input"],
                     status="TODO",
                 )],
                 tone="todo",
@@ -63,10 +64,10 @@ def closing_fixture() -> list[ClosingSection]:
             title="DET E SHTYERA",
             tables=[ClosingTable(
                 label="SHTYER DUE DATE",
-                columns=["NR", "KUSH", "DEP", "AM/PM", "LLOJI", "NGA", "NE", "TITULLI"],
+                columns=["NR", "KUSH", "DEP", "PRJK", "AM/PM", "LLOJI", "NGA", "NE", "TITULLI"],
                 rows=[ClosingTableRow(
                     values=[
-                        "1", "FG", "GD", "PM", "P",
+                        "1", "FG", "GD", "Brand Refresh", "PM", "P",
                         "START: 02.09.2026\nDUE: 02.09.2026",
                         "START: 03.09.2026\nDUE: 03.09.2026",
                         "Moved task",
@@ -88,6 +89,26 @@ def closing_fixture() -> list[ClosingSection]:
 
 
 class TomorrowClosingFormatParityTests(unittest.TestCase):
+    def test_empty_project_column_is_compact_but_populated_project_column_expands(self) -> None:
+        empty_table = ClosingTable(
+            label="SHTYER DUE DATE",
+            columns=["NR", "KUSH", "DEP", "PRJK", "AM/PM", "TITULLI"],
+            rows=[ClosingTableRow(values=["1", "FG", "GD", "-", "AM", "Fast task"])],
+        )
+        populated_table = ClosingTable(
+            label="SHTYER DUE DATE",
+            columns=["NR", "KUSH", "DEP", "PRJK", "AM/PM", "TITULLI"],
+            rows=[ClosingTableRow(values=["1", "FG", "GD", "Brand Refresh", "AM", "Project task"])],
+        )
+
+        self.assertFalse(_closing_table_has_project_titles(empty_table))
+        self.assertTrue(_closing_table_has_project_titles(populated_table))
+        empty_html = _closing_sections_html([ClosingSection(title="EMPTY", tables=[empty_table])])
+        populated_html = _closing_sections_html([ClosingSection(title="FULL", tables=[populated_table])])
+        self.assertIn('<th width="1%"', empty_html)
+        self.assertIn("white-space:nowrap;width:1%", empty_html)
+        self.assertIn('<th width="10%"', populated_html)
+
     def test_only_overdue_tyo_values_use_the_alert_style(self) -> None:
         self.assertFalse(_is_overdue_tyo_value("T"))
         self.assertFalse(_is_overdue_tyo_value("-"))
@@ -160,8 +181,8 @@ class TomorrowClosingFormatParityTests(unittest.TestCase):
     def test_html_xlsx_png_and_docx_contain_same_closing_sections(self) -> None:
         sections = closing_fixture()
         expected = [section.title for section in sections] + [
-            "Pink task", "System unfinished", "Pa progres", "Pres sqarim",
-            "Moved task", "Undiscussed note",
+            "PrimeFlow", "Pink task", "System unfinished", "Pa progres", "Pres sqarim",
+            "Brand Refresh", "Moved task", "Undiscussed note",
         ]
 
         html = _closing_sections_html(sections)
@@ -175,6 +196,9 @@ class TomorrowClosingFormatParityTests(unittest.TestCase):
         self.assertIn('width="1%"', html)
         self.assertIn("white-space:nowrap;width:1%", html)
         self.assertIn('width="16%"', html)
+        self.assertIn('width="10%"', html)
+        self.assertLess(html.index("DEP"), html.index("PRJK"))
+        self.assertLess(html.index("PRJK"), html.index("AM/PM"))
         self.assertIn("border-bottom:3px solid #334155", html)
         self.assertIn("T/Y/O", html)
         self.assertIn("background-color:#DC2626;color:#FFFFFF", html)

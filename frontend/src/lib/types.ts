@@ -298,6 +298,7 @@ export interface TaskStatus {
 
 export interface PxJavPlanningBrief {
   dl?: string | null
+  lloji_det?: "1H" | "P" | "BLLOK" | "R1" | null
   dg?: boolean | null
   dg_kush?: string | null
   dg_kush_user_ids?: string[]

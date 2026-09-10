@@ -83,6 +83,7 @@ function planningBriefProgress(brief?: PxJavPlanningBrief | null) {
   if (!brief) return 0
   return [
     Boolean(brief.dl?.trim()),
+    Boolean(brief.lloji_det),
     typeof brief.dg === "boolean" && (!brief.dg || Boolean(brief.dg_kush?.trim())),
     Boolean(brief.hapat?.trim()),
     Boolean(brief.kush?.trim()),
@@ -93,6 +94,7 @@ function planningBriefProgress(brief?: PxJavPlanningBrief | null) {
 function planningBriefDraft(brief?: PxJavPlanningBrief | null): PxJavPlanningBrief {
   return {
     dl: brief?.dl || "",
+    lloji_det: brief?.lloji_det || null,
     dg: typeof brief?.dg === "boolean" ? brief.dg : null,
     dg_kush: brief?.dg_kush || "",
     dg_kush_user_ids: brief?.dg_kush_user_ids || [],
@@ -941,6 +943,7 @@ export default function NextWeekPlanPage() {
     try {
       const hasAnswer = Boolean(
         brief.dl?.trim() ||
+        brief.lloji_det ||
         typeof brief.dg === "boolean" ||
         brief.hapat?.trim() ||
         brief.kush?.trim() ||
@@ -953,6 +956,7 @@ export default function NextWeekPlanPage() {
           planning_brief: hasAnswer
             ? {
                 dl: brief.dl?.trim() || null,
+                lloji_det: brief.lloji_det || null,
                 dg: typeof brief.dg === "boolean" ? brief.dg : null,
                 dg_kush: brief.dg === true ? brief.dg_kush?.trim() || null : null,
                 dg_kush_user_ids: brief.dg === true ? brief.dg_kush_user_ids || [] : [],
@@ -3430,7 +3434,7 @@ export default function NextWeekPlanPage() {
                             <span className="absolute right-1 top-0.5 z-10 text-[9px] font-medium text-violet-600">Duke ruajtur...</span>
                           ) : null}
                           <div className="divide-y overflow-hidden rounded border border-slate-200 bg-white">
-                            <div className="grid min-h-6 grid-cols-[44px_minmax(0,1fr)]">
+                            <div className="grid min-h-6 grid-cols-[64px_minmax(0,1fr)]">
                               <label htmlFor={`planning-dl-${note.id}`} className="bg-slate-50 px-1 py-0.5 text-[10px] font-semibold">DL</label>
                               <Input
                                 id={`planning-dl-${note.id}`}
@@ -3443,7 +3447,7 @@ export default function NextWeekPlanPage() {
                                 className="h-6 rounded-none border-0 px-1.5 text-[11px] shadow-none focus-visible:ring-1"
                               />
                             </div>
-                            <div className="grid min-h-6 grid-cols-[44px_minmax(0,1fr)]">
+                            <div className="grid min-h-6 grid-cols-[64px_minmax(0,1fr)]">
                               <label className="bg-slate-50 px-1 py-0.5 text-[10px] font-semibold">DG</label>
                               <div className="flex min-w-0 items-center gap-1 p-0.5">
                                 <Select
@@ -3482,7 +3486,7 @@ export default function NextWeekPlanPage() {
                                 ) : null}
                               </div>
                             </div>
-                            <div className="grid min-h-6 grid-cols-[44px_minmax(0,1fr)]">
+                            <div className="grid min-h-6 grid-cols-[64px_minmax(0,1fr)]">
                               <label htmlFor={`planning-hapat-${note.id}`} className="bg-slate-50 px-1 py-0.5 text-[10px] font-semibold">HAPAT</label>
                               <div className="flex items-center p-0.5">
                                 <Select
@@ -3503,7 +3507,7 @@ export default function NextWeekPlanPage() {
                                 </Select>
                               </div>
                             </div>
-                            <div className="grid min-h-6 grid-cols-[44px_minmax(0,1fr)]">
+                            <div className="grid min-h-6 grid-cols-[64px_minmax(0,1fr)]">
                               <label htmlFor={`planning-kush-${note.id}`} className="bg-slate-50 px-1 py-0.5 text-[10px] font-semibold">KUSH</label>
                               <Input
                                 id={`planning-kush-${note.id}`}
@@ -3516,7 +3520,7 @@ export default function NextWeekPlanPage() {
                                 className="h-6 rounded-none border-0 px-1.5 text-[11px] shadow-none focus-visible:ring-1"
                               />
                             </div>
-                            <div className="grid min-h-6 grid-cols-[44px_minmax(0,1fr)]">
+                            <div className="grid min-h-6 grid-cols-[64px_minmax(0,1fr)]">
                               <label htmlFor={`planning-sq-${note.id}`} className="bg-slate-50 px-1 py-0.5 text-[10px] font-semibold">SQ</label>
                               <Input
                                 id={`planning-sq-${note.id}`}
@@ -3528,6 +3532,33 @@ export default function NextWeekPlanPage() {
                                 disabled={isClosed || isSavingPlanning}
                                 className="h-6 rounded-none border-0 px-1.5 text-[11px] shadow-none focus-visible:ring-1"
                               />
+                            </div>
+                            <div className="grid min-h-6 grid-cols-[64px_minmax(0,1fr)]">
+                              <label htmlFor={`planning-lloji-det-${note.id}`} className="bg-slate-50 px-1 py-0.5 text-[10px] font-semibold">LLOJI DET</label>
+                              <div className="flex items-center p-0.5">
+                                <Select
+                                  value={note.planning_brief?.lloji_det || "__unset__"}
+                                  onValueChange={(value) => {
+                                    const previousBrief = note.planning_brief ? planningBriefDraft(note.planning_brief) : null
+                                    const nextBrief = {
+                                      ...planningBriefDraft(note.planning_brief),
+                                      lloji_det: value === "__unset__" ? null : value as "1H" | "P" | "BLLOK" | "R1",
+                                    }
+                                    updatePlanningBriefDraft(note.id, nextBrief)
+                                    void savePlanningBrief(note.id, nextBrief, previousBrief)
+                                  }}
+                                  disabled={isClosed || isSavingPlanning}
+                                >
+                                  <SelectTrigger id={`planning-lloji-det-${note.id}`} className="h-6 w-[96px] px-2 text-[10px]"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__unset__">—</SelectItem>
+                                    <SelectItem value="1H">1H</SelectItem>
+                                    <SelectItem value="P">P</SelectItem>
+                                    <SelectItem value="BLLOK">BLLOK</SelectItem>
+                                    <SelectItem value="R1">R1</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
                             </div>
                           </div>
                         </td>
@@ -3956,9 +3987,16 @@ export default function NextWeekPlanPage() {
             <div className="space-y-3">
               {taskDialogNote.planning_brief ? (
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
-                  <span>Ky task do ta marrë automatikisht planifikimin nga PX JAV.</span>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span>Ky task do ta marrë automatikisht planifikimin nga PX JAV.</span>
+                    {taskDialogNote.planning_brief.lloji_det ? (
+                      <Badge variant="outline" className="shrink-0 border-violet-300 bg-white text-violet-800">
+                        LLOJI DET: {taskDialogNote.planning_brief.lloji_det}
+                      </Badge>
+                    ) : null}
+                  </div>
                   <Badge variant="outline" className="shrink-0 border-violet-200 bg-white text-violet-700">
-                    {planningBriefProgress(taskDialogNote.planning_brief)}/5
+                    {planningBriefProgress(taskDialogNote.planning_brief)}/6
                   </Badge>
                 </div>
               ) : null}

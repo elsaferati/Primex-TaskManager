@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.services.meeting_palette import meeting_report_color
 from app.services.meetings_report import common_view_item_sort_key, next_working_day
-from app.services.primeflow_report import GmailService, PrimeFlowClient
+from app.services.primeflow_report import GmailService, PrimeFlowClient, REPORT_SENDER_EMAIL
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
 from app.services.tomorrow_closing_sections import (
     ClosingSection,
@@ -93,6 +93,14 @@ def _one_h_checklists_for_day(
     if report_day is not None and report_day.weekday() == 4:
         return ONE_H_BOARD_CHECKLIST, ONE_H_STAFF_CHECKLIST + FRIDAY_ONE_H_STAFF_CHECKLIST
     return ONE_H_BOARD_CHECKLIST, ONE_H_STAFF_CHECKLIST
+
+
+def _day_specific_question_label(report_day: date | None) -> str:
+    if report_day is not None and report_day.weekday() == 3:
+        return "E ENJTE- PYETJET E TE ENJTES"
+    if report_day is not None and report_day.weekday() == 4:
+        return "E PREMTE - PYETJET E TE PREMTES"
+    return ""
 
 # Gmail can remove style blocks from message bodies. Keep the styles that form
 # the report grid inline so the received email matches the preview.
@@ -696,29 +704,27 @@ def _one_h_checklists_html(report_day: date | None = None) -> str:
     """The two preparation checklists shown above every 1H Shtypi task grid."""
     board_questions, staff_questions = _one_h_checklists_for_day(report_day)
 
-    def checklist(
-        title: str,
-        questions: tuple[tuple[str, str], ...],
-        *,
-        regular_count: int,
-        board: bool = False,
-    ) -> str:
+    def question_text(questions: tuple[tuple[str, str], ...], *, extra: bool) -> str:
+        if extra:
+            return "".join(
+                '<div data-extra-checklist-question="true" style="display:block;">'
+                f'<strong>{index}. {html.escape(question)}</strong>'
+                + (f' <span style="color:#dc2626;font-weight:400;">({html.escape(description)})</span>' if description else "")
+                + '</div>'
+                for index, (question, description) in enumerate(questions, 1)
+            )
         separators = (
             '<span style="font-size:20px;font-weight:900;color:#111827;line-height:12px;"> / </span>'
         )
-        regular_text = separators.join(
+        return separators.join(
             f'<strong>{index}. {html.escape(question)}</strong>'
             + (f' <span style="color:#475569;">({html.escape(description)})</span>' if description else "")
-            for index, (question, description) in enumerate(questions[:regular_count], 1)
+            for index, (question, description) in enumerate(questions, 1)
         )
-        extra_text = "".join(
-            '<div data-extra-checklist-question="true" style="display:block;">'
-            f'<strong>{index}. {html.escape(question)}</strong>'
-            + (f' <span style="color:#475569;">({html.escape(description)})</span>' if description else "")
-            + '</div>'
-            for index, (question, description) in enumerate(questions[regular_count:], 1)
-        )
-        question_text = extra_text + regular_text
+
+    def checklist(
+        title: str, questions: tuple[tuple[str, str], ...], *, board: bool = False
+    ) -> str:
         board_marker = ' data-board-checklist-columns="true"' if board else ""
         return (
             '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
@@ -726,18 +732,44 @@ def _one_h_checklists_html(report_day: date | None = None) -> str:
             '<tr><th style="background-color:#eef2ff;border-left:5px solid #2563eb;padding:10px 12px;'
             f'font-family:Arial,sans-serif;font-size:14px;text-align:left;">{html.escape(title)}</th></tr>'
             '<tr><td style="border:1px solid #64748b;padding:8px 10px;font-family:Arial,sans-serif;'
-            f'font-size:12px;line-height:1.45;">{question_text}</td></tr></table>'
+            f'font-size:12px;line-height:1.45;">{question_text(questions, extra=False)}</td></tr></table>'
         )
 
+    day_label = _day_specific_question_label(report_day)
+    staff_extra = staff_questions[len(ONE_H_STAFF_CHECKLIST):]
+    board_extra = board_questions[len(ONE_H_BOARD_CHECKLIST):]
+    weekday_block = (
+        '<div data-day-specific-question-label="true" style="font-family:Arial,sans-serif;'
+        'font-size:13px;font-weight:800;color:#b91c1c;margin:0 0 7px;padding:6px 10px;'
+        'background:#fff7f7;border-left:6px solid #dc2626;">'
+        f'{html.escape(day_label)}</div>'
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+        'data-day-specific-checklist-columns="true" style="width:100%;border-collapse:collapse;margin:0 0 10px;">'
+        '<tr><td width="50%" valign="top" style="width:50%;padding:0 6px 0 0;vertical-align:top;">'
+        '<div style="background:#fff7f7;border:1px solid #dc2626;border-left:6px solid #dc2626;'
+        'padding:9px 10px;font-family:Arial,sans-serif;font-size:13px;line-height:1.45;color:#b91c1c;">'
+        f'{question_text(staff_extra, extra=True)}</div></td>'
+        '<td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
+        + (
+            '<div style="background:#fff7f7;border:1px solid #dc2626;border-left:6px solid #dc2626;'
+            'padding:9px 10px;font-family:Arial,sans-serif;font-size:13px;line-height:1.45;color:#b91c1c;">'
+            f'{question_text(board_extra, extra=True)}</div>'
+            if board_extra else ""
+        )
+        + '</td></tr></table>'
+        if day_label else ""
+    )
     return (
+        weekday_block
+        +
         '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
         'data-one-h-checklist-columns="true" style="width:100%;border-collapse:collapse;margin:0 0 14px;">'
         '<tr>'
         '<td width="50%" valign="top" style="width:50%;padding:0 6px 0 0;vertical-align:top;">'
-        f"{checklist('STAFF - HAPAT PER 1H', staff_questions, regular_count=len(ONE_H_STAFF_CHECKLIST))}"
+        f"{checklist('STAFF - HAPAT PER 1H', staff_questions[:len(ONE_H_STAFF_CHECKLIST)])}"
         '</td>'
         '<td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
-        f"{checklist('PYETJET PER 1H - BORD', board_questions, regular_count=len(ONE_H_BOARD_CHECKLIST), board=True)}"
+        f"{checklist('PYETJET PER 1H - BORD', board_questions[:len(ONE_H_BOARD_CHECKLIST)], board=True)}"
         '</td>'
         '</tr></table>'
     )
@@ -998,6 +1030,18 @@ def _empty_closing_table_row(table: ClosingTable) -> ClosingTableRow:
     return ClosingTableRow(values=values)
 
 
+def _closing_table_has_project_titles(table: ClosingTable) -> bool:
+    if "PRJK" not in table.columns:
+        return False
+    project_index = table.columns.index("PRJK")
+    return any(
+        len(row.values) > project_index
+        and str(row.values[project_index]).strip().upper()
+        not in {"", "-", "(ASNJE DETYRE)", "(ASNJË DETYRË)"}
+        for row in table.rows
+    )
+
+
 def _is_overdue_tyo_value(value: Any) -> bool:
     normalized = str(value or "").strip().upper()
     if normalized == "Y":
@@ -1021,11 +1065,18 @@ def _closing_sections_html(sections: list[ClosingSection]) -> str:
                 f'<div style="margin:8px 0 4px;font-family:Arial,sans-serif;font-size:12px;font-weight:700;">'
                 f'{html.escape(table.label)}:</div>'
             )
+            project_has_titles = _closing_table_has_project_titles(table)
             compact_columns = {
                 "NR", "KUSH", "DEP", "AM/PM", "LLOJI", "NGA", "NE", "T/Y/O",
                 "DISK", "FROM", "TIME",
             }
-            widths = {"ARSYEJA": "16%", "KOMENT": "20%"}
+            if "PRJK" in table.columns and not project_has_titles:
+                compact_columns.add("PRJK")
+            widths = {
+                "PRJK": "10%" if project_has_titles else "1%",
+                "ARSYEJA": "16%",
+                "KOMENT": "20%",
+            }
             def header_cell(column: str) -> str:
                 width = widths.get(column)
                 width_attr = f' width="{width}"' if width else (' width="1%"' if column in compact_columns else "")
@@ -1210,10 +1261,46 @@ def _excel_table_attachment(
     def write_checklists(row_number: int) -> int:
         """Write each preparation list as a title row plus one compact content row."""
         checklist_fill = PatternFill("solid", fgColor="EEF2FF")
+        weekday_fill = PatternFill("solid", fgColor="FFF7F7")
         board_questions, staff_questions = _one_h_checklists_for_day(checklist_date)
-        for start_column, end_column, title, questions, regular_count in (
-            (1, 4, "STAFF - HAPAT PER 1H", staff_questions, len(ONE_H_STAFF_CHECKLIST)),
-            (5, 8, "PYETJET PER 1H - BORD", board_questions, len(ONE_H_BOARD_CHECKLIST)),
+        staff_extra = staff_questions[len(ONE_H_STAFF_CHECKLIST):]
+        board_extra = board_questions[len(ONE_H_BOARD_CHECKLIST):]
+        day_label = _day_specific_question_label(checklist_date)
+        if day_label:
+            sheet.merge_cells(start_row=row_number, start_column=1, end_row=row_number, end_column=8)
+            label_cell = sheet.cell(row_number, 1, day_label)
+            label_cell.fill = weekday_fill
+            label_cell.font = Font(color="B91C1C", bold=True, size=10)
+            label_cell.alignment = Alignment(vertical="center")
+            label_cell.border = border
+            for start_column, end_column, questions in (
+                (1, 4, staff_extra),
+                (5, 8, board_extra),
+            ):
+                sheet.merge_cells(
+                    start_row=row_number + 1,
+                    start_column=start_column,
+                    end_row=row_number + 1,
+                    end_column=end_column,
+                )
+                extra_cell = sheet.cell(
+                    row_number + 1,
+                    start_column,
+                    "\n".join(
+                        f"{index}. {question}" + (f" ({description})" if description else "")
+                        for index, (question, description) in enumerate(questions, 1)
+                    ),
+                )
+                extra_cell.fill = weekday_fill
+                extra_cell.font = Font(color="B91C1C", bold=True, size=10)
+                extra_cell.alignment = Alignment(vertical="center", wrap_text=True)
+                extra_cell.border = border
+            sheet.row_dimensions[row_number + 1].height = 48
+            row_number += 2
+
+        for start_column, end_column, title, questions in (
+            (1, 4, "STAFF - HAPAT PER 1H", staff_questions[:len(ONE_H_STAFF_CHECKLIST)]),
+            (5, 8, "PYETJET PER 1H - BORD", board_questions[:len(ONE_H_BOARD_CHECKLIST)]),
         ):
             sheet.merge_cells(start_row=row_number, start_column=start_column, end_row=row_number, end_column=end_column)
             title_cell = sheet.cell(row_number, start_column, title)
@@ -1230,14 +1317,9 @@ def _excel_table_attachment(
             question_cell = sheet.cell(
                 row_number + 1,
                 start_column,
-                "\n".join(
+                " / ".join(
                     f"{index}. {question}" + (f" ({description})" if description else "")
-                    for index, (question, description) in enumerate(questions[regular_count:], 1)
-                )
-                + ("\n" if questions[regular_count:] else "")
-                + " / ".join(
-                    f"{index}. {question}" + (f" ({description})" if description else "")
-                    for index, (question, description) in enumerate(questions[:regular_count], 1)
+                    for index, (question, description) in enumerate(questions, 1)
                 ),
             )
             question_cell.font = Font(bold=True, size=10)
@@ -1605,8 +1687,10 @@ def _docx_table_attachment(
             heading(f"{closing_table.label}:", size=8.5)
             table = document.add_table(rows=1, cols=len(closing_table.columns))
             table.style = "Table Grid"
+            project_has_titles = _closing_table_has_project_titles(closing_table)
             width_weights = {
                 "NR": .28, "KUSH": .42, "DEP": .42, "AM/PM": .48, "LLOJI": .48,
+                "PRJK": 1.0 if project_has_titles else .42,
                 "NGA": 1.0, "NE": 1.0, "TITULLI": 5.6, "ARSYEJA": 1.25,
                 "KOMENT": 1.55, "T/Y/O": .48, "DISK": .42, "NOTE": 8.0,
                 "FROM": .58, "TIME": .58,
@@ -2127,7 +2211,7 @@ def _png_table_attachment(
 
     preferred = {
         "NR": 42, "KUSH": 62, "DEP": 58, "AM/PM": 68, "LLOJI": 68,
-        "NGA": 155, "NE": 155, "TITULLI": 760, "ARSYEJA": 230, "KOMENT": 285,
+        "PRJK": 180, "NGA": 155, "NE": 155, "TITULLI": 760, "ARSYEJA": 230, "KOMENT": 285,
         "T/Y/O": 68, "DISK": 62, "NOTE": 1100, "FROM": 75, "TIME": 72,
     }
     layouts: list[tuple[ClosingSection, list[tuple[ClosingTable, list[int], list[tuple[ClosingTableRow, int]]]]]] = []
@@ -2137,7 +2221,11 @@ def _png_table_attachment(
         closing_height += 42
         table_layouts = []
         for table in section.tables:
-            raw = [preferred.get(column, 160) for column in table.columns]
+            project_has_titles = _closing_table_has_project_titles(table)
+            raw = [
+                75 if column == "PRJK" and not project_has_titles else preferred.get(column, 160)
+                for column in table.columns
+            ]
             scale = available / sum(raw)
             widths = [max(48, int(value * scale)) for value in raw]
             widths[-1] += available - sum(widths)
@@ -2288,27 +2376,33 @@ async def _build_print_report(
         + "</div>"
     )
 
-    def plain_checklist_lines(
-        questions: tuple[tuple[str, str], ...], regular_count: int
-    ) -> list[str]:
-        regular_lines = [
+    def plain_checklist_lines(questions: tuple[tuple[str, str], ...]) -> list[str]:
+        return [
             f"{index}. {question}" + (f" ({description})" if description else "")
-            for index, (question, description) in enumerate(questions[:regular_count], 1)
+            for index, (question, description) in enumerate(questions, 1)
         ]
-        extra_lines = [
-            f"{index}. {question}" + (f" ({description})" if description else "")
-            for index, (question, description) in enumerate(questions[regular_count:], 1)
-        ]
-        return extra_lines + regular_lines
 
+    day_label = _day_specific_question_label(checklist_date)
+    staff_extra = staff_questions[len(ONE_H_STAFF_CHECKLIST):]
+    board_extra = board_questions[len(ONE_H_BOARD_CHECKLIST):]
     plain_rows = [
         report_title,
         "",
-        "PYETJET PER 1H - BORD",
-        *plain_checklist_lines(board_questions, len(ONE_H_BOARD_CHECKLIST)),
+        *(
+            [
+                day_label,
+                *plain_checklist_lines(staff_extra),
+                *plain_checklist_lines(board_extra),
+                "",
+            ]
+            if day_label else []
+        ),
         "",
         "STAFF - HAPAT PER 1H",
-        *plain_checklist_lines(staff_questions, len(ONE_H_STAFF_CHECKLIST)),
+        *plain_checklist_lines(staff_questions[:len(ONE_H_STAFF_CHECKLIST)]),
+        "",
+        "PYETJET PER 1H - BORD",
+        *plain_checklist_lines(board_questions[:len(ONE_H_BOARD_CHECKLIST)]),
         "",
     ]
     plain_rows.extend(_closing_sections_plain_text(closing_sections))
@@ -2412,10 +2506,9 @@ async def build_today_print_report(
 
 async def send_tomorrow_print_report(report: dict[str, Any], recipients: dict[str, list[str]]) -> dict[str, Any]:
     recipients = ensure_required_shtypi_recipient(recipients)
-    sender = "130primex.eu@gmail.com"
     password = os.getenv("EMAIL_PASSWORD") or settings.EMAIL_PASSWORD
     if not password:
         raise ValueError("Missing email configuration: EMAIL_PASSWORD")
-    return await GmailService(sender=sender, password=password).send_verified(
+    return await GmailService(sender=REPORT_SENDER_EMAIL, password=password).send_verified(
         report["subject"], recipients, report["plain_text"], report["html"], attachments=report.get("attachments")
     )

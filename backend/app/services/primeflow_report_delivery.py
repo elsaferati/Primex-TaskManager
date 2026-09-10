@@ -25,7 +25,7 @@ from app.models.task_strike_event import TaskStrikeEvent
 from app.models.user import User
 from app.services.primeflow_report import (
     GmailService, GmailVerificationError, PrimeFlowClient,
-    ReportDocument, ReportReminderQuestion, ReportUndiscussedNote, clean_description, build_report_document,
+    REPORT_SENDER_EMAIL, ReportDocument, ReportReminderQuestion, ReportUndiscussedNote, clean_description, build_report_document,
     predecessor, render_docx, render_html, render_plain_text, render_png, report_subject, report_timezone,
 )
 from app.services.one_h_ga_attachments import build_ga_only_1h_attachments, render_ga_tables_html
@@ -100,10 +100,16 @@ def validate_report_config(*, require_gmail: bool = True) -> None:
     if not os.getenv("PRIMEFLOW_ACCESS_TOKEN"):
         required.extend(["PRIMEFLOW_EMAIL", "PRIMEFLOW_PASSWORD"])
     if require_gmail:
-        required.extend(["EMAIL_USER", "EMAIL_PASSWORD"])
+        required.append("EMAIL_PASSWORD")
     missing = sorted({name for name in required if not os.getenv(name)})
     if missing:
         raise RuntimeError("Missing required report configuration: " + ", ".join(missing))
+    configured_sender = (os.getenv("EMAIL_USER") or REPORT_SENDER_EMAIL).strip()
+    if require_gmail and configured_sender.casefold() != REPORT_SENDER_EMAIL.casefold():
+        raise RuntimeError(
+            f"PrimeFlow reports must be sent from {REPORT_SENDER_EMAIL}; "
+            f"configured sender is {configured_sender}"
+        )
     report_timezone()
 
 

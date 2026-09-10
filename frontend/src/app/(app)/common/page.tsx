@@ -182,6 +182,13 @@ const oneHPrintChecklistsForDate = (reportDay: Date) =>
           : [...checklist.questions],
   }))
 
+const oneHDaySpecificQuestionLabel = (reportDay: Date) =>
+  reportDay.getDay() === 4
+    ? "E ENJTE- PYETJET E TE ENJTES"
+    : reportDay.getDay() === 5
+      ? "E PREMTE - PYETJET E TE PREMTES"
+      : ""
+
 const getNextWorkingDay = (from: Date) => {
   const next = new Date(from.getFullYear(), from.getMonth(), from.getDate())
   next.setDate(next.getDate() + 1)
@@ -224,7 +231,9 @@ const escapePrintHtml = (value: string) =>
   value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#039;")
 
 const oneHPrintChecklistsHtml = (reportDay: Date) =>
-  `<section class="one-h-print-checklists">${oneHPrintChecklistsForDate(reportDay).map(
+  `<section class="one-h-print-checklists">${oneHDaySpecificQuestionLabel(reportDay)
+    ? `<div class="one-h-print-checklist-day-label">${escapePrintHtml(oneHDaySpecificQuestionLabel(reportDay))}</div>`
+    : ""}${oneHPrintChecklistsForDate(reportDay).map(
     ({ title, questions }) => {
       const regularQuestions = questions.filter(({ isExtra }) => !isExtra)
       const extraQuestions = questions.filter(({ isExtra }) => isExtra)
@@ -250,6 +259,11 @@ const oneHPrintChecklistsHtml = (reportDay: Date) =>
 function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
   return (
     <section className="one-h-print-checklists">
+      {oneHDaySpecificQuestionLabel(reportDay) ? (
+        <div className="one-h-print-checklist-day-label">
+          {oneHDaySpecificQuestionLabel(reportDay)}
+        </div>
+      ) : null}
       {oneHPrintChecklistsForDate(reportDay).map(({ title, questions }) => (
         <div key={title} className="one-h-print-checklist">
           <div className="one-h-print-checklist-title">{title}</div>
@@ -4887,6 +4901,7 @@ export default function CommonViewPage() {
   .one-h-print-checklists { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; margin:0 0 12px; }
   .one-h-print-checklist-title { background:#eef2ff; border-left:5px solid #2563eb; padding:8px 10px; font-size:11px; font-weight:700; }
   .one-h-print-checklist-items { border:1px solid #64748b; padding:6px 8px; font-size:8px; line-height:1.35; }
+  .one-h-print-checklist-day-label { grid-column:1 / -1; margin:0 0 4px; font-weight:800; }
   .one-h-print-checklist-separator { font-size:13px; font-weight:900; line-height:8px; }
   .one-h-print-checklist-description { color:#475569; }
   table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9px; line-height: 1.2; }
@@ -8286,6 +8301,11 @@ export default function CommonViewPage() {
             color: #000 !important;
             font-size: 7px;
             line-height: 1.3;
+          }
+          .one-h-print-checklist-day-label {
+            grid-column: 1 / -1;
+            margin: 0 0 3px;
+            font-weight: 800;
           }
           .one-h-print-checklist-separator {
             font-size: 12px;

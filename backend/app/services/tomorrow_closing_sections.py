@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.daily_planner_snapshot import DailyPlannerSnapshot
 from app.models.department import Department
+from app.models.project import Project
 from app.models.task import Task
 from app.services.after_break_report import _blue_note_rows
 from app.services.daily_report_logic import daily_report_tyo_label, planned_range_for_daily_report
@@ -119,6 +120,23 @@ async def build_tomorrow_closing_sections(
     tasks = (
         await db.execute(select(Task).where(Task.is_active.is_(True)))
     ).scalars().all()
+    project_ids = {
+        task.project_id
+        for task in tasks
+        if getattr(task, "project_id", None) is not None
+    }
+    project_titles_by_id = (
+        {
+            project_id: title
+            for project_id, title in (
+                await db.execute(
+                    select(Project.id, Project.title).where(Project.id.in_(project_ids))
+                )
+            ).all()
+        }
+        if project_ids
+        else {}
+    )
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
     all_participant_ids = await _all_participant_user_ids(db)
@@ -161,6 +179,13 @@ async def build_tomorrow_closing_sections(
             _m3_am_pm_label(task),
         ]
 
+    def project_title(task: Task) -> str:
+        return str(project_titles_by_id.get(getattr(task, "project_id", None), "-") or "-")
+
+    def common_values_with_project(task: Task) -> list[str]:
+        owner, department, am_pm = common_values(task)
+        return [owner, department, project_title(task), am_pm]
+
     no_progress = ordered(
         [task for task in tasks if _is_without_progress_for_m3_day(task, report_day)]
     )
@@ -172,12 +197,10 @@ async def build_tomorrow_closing_sections(
         reason, comment = daily_rlz.get(task.id, ("-", "-"))
         row = _task_row(
             task,
-            [str(index), *common_values(task)],
+            [str(index), *common_values_with_project(task)],
             status="TODO",
         )
         row.values.extend([reason or "-", comment or "-"])
-        # TITULLI belongs before the M3 RLZ explanation columns.
-        row.values = [*row.values[:4], row.values[4], *row.values[5:]]
         no_progress_rows.append(row)
 
     snapshots = (
@@ -224,7 +247,7 @@ async def build_tomorrow_closing_sections(
                     task,
                     [
                         str(index),
-                        *common_values(task),
+                        *common_values_with_project(task),
                         _m3_task_type_label(task),
                         _stack_start_due(date_from),
                         _stack_start_due(date_to),
@@ -242,7 +265,7 @@ async def build_tomorrow_closing_sections(
                 ClosingTable(
                     label="TODO",
                     columns=[
-                        "NR", "KUSH", "DEP", "AM/PM", "TITULLI", "ARSYEJA", "KOMENT"
+                        "NR", "KUSH", "DEP", "PRJK", "AM/PM", "TITULLI", "ARSYEJA", "KOMENT"
                     ],
                     rows=no_progress_rows,
                     tone="todo",
@@ -268,14 +291,14 @@ async def build_tomorrow_closing_sections(
                 ClosingTable(
                     label="SHTYER START DHE DUE DATE",
                     columns=[
-                        "NR", "KUSH", "DEP", "AM/PM", "LLOJI", "NGA", "NE", "TITULLI"
+                        "NR", "KUSH", "DEP", "PRJK", "AM/PM", "LLOJI", "NGA", "NE", "TITULLI"
                     ],
                     rows=postponed_rows(postponed_both, postponed_both_ranges),
                 ),
                 ClosingTable(
                     label="SHTYER DUE DATE",
                     columns=[
-                        "NR", "KUSH", "DEP", "AM/PM", "LLOJI", "NGA", "NE", "TITULLI"
+                        "NR", "KUSH", "DEP", "PRJK", "AM/PM", "LLOJI", "NGA", "NE", "TITULLI"
                     ],
                     rows=postponed_rows(postponed, postponed_ranges),
                 ),

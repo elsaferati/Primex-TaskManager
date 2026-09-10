@@ -2434,6 +2434,7 @@ OPEN_TASK_WHEN_VALUES = {"SOT", "THIS WEEK", "NEXT WEEK", "FUTURE"}
 OPEN_TASK_BASELINE_STATUS_VALUES = {"PERSONAL", "1H", "BLLOK", "R1"}
 OPEN_TASK_EXPORT_HEADERS = [
     "NR",
+    "TASK ID",
     "GROUP",
     "SOURCE",
     "PX JAV",
@@ -2450,10 +2451,36 @@ OPEN_TASK_EXPORT_HEADERS = [
     "PROJECT",
     "WHEN",
     "WHEN PLANNED",
-    "STATUS",
+    "STATUS MANUAL",
     "STATUS PLANNED",
     "KOMENT",
 ]
+
+
+def _open_task_baseline_column_numbers(ws) -> tuple[int, int, int]:
+    """Find editable planning columns in both legacy and current Open Tasks exports."""
+    header_values = [
+        str(cell.value).strip().upper() if cell.value is not None else ""
+        for cell in ws[4]
+    ]
+
+    def find_column(header: str, *, after: int = 0) -> int:
+        for column, value in enumerate(header_values, start=1):
+            if column > after and value == header:
+                return column
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Missing {header} column in Open Tasks workbook.",
+        )
+
+    when_column = find_column("WHEN")
+    try:
+        status_column = find_column("STATUS MANUAL", after=when_column)
+    except HTTPException:
+        # Legacy Open Tasks exports used a second column named STATUS.
+        status_column = find_column("STATUS", after=when_column)
+    comment_column = find_column("KOMENT", after=status_column)
+    return when_column, status_column, comment_column
 
 
 def _open_task_planning_when(value: datetime | date | None, current_week_start: date) -> str:
@@ -2498,6 +2525,8 @@ def _open_task_planned_status(task: Task) -> str:
 def _open_task_difference(manual_value: str | None, planned_value: str | None) -> str:
     manual = (manual_value or "").strip().upper()
     planned = (planned_value or "").strip().upper()
+    if manual and not planned:
+        return "UNPLANNED"
     return planned if manual != planned else ""
 
 
@@ -2589,6 +2618,8 @@ async def import_open_tasks_baseline(
     if not row_task_pairs:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The workbook contains no task rows.")
 
+    when_column, planning_status_column, comment_column = _open_task_baseline_column_numbers(ws)
+
     task_ids = {task_id for _, task_id in row_task_pairs}
     accessible_tasks = (
         await db.execute(select(Task).where(Task.id.in_(task_ids)))
@@ -2621,12 +2652,12 @@ async def import_open_tasks_baseline(
         if task_id not in accessible_task_map:
             continue
         when_value = _normalize_open_task_baseline_value(
-            ws.cell(row=excel_row, column=16).value,
+            ws.cell(row=excel_row, column=when_column).value,
             OPEN_TASK_WHEN_VALUES,
             "WHEN",
         )
         status_value = _normalize_open_task_baseline_value(
-            ws.cell(row=excel_row, column=18).value,
+            ws.cell(row=excel_row, column=planning_status_column).value,
             OPEN_TASK_BASELINE_STATUS_VALUES,
             "STATUS",
         )
@@ -2639,7 +2670,7 @@ async def import_open_tasks_baseline(
             db.add(baseline)
         baseline.when_value = when_value
         baseline.status_value = status_value
-        comment_value = ws.cell(row=excel_row, column=20).value
+        comment_value = ws.cell(row=excel_row, column=comment_column).value
         baseline.comment_value = str(comment_value).strip() if comment_value is not None else None
         baseline.uploaded_by = user.id
         imported += 1
@@ -2925,6 +2956,7 @@ async def export_open_tasks_xlsx(
         planned_status = _open_task_planned_status(task) if baseline else ""
         values = [
             idx,
+            str(task.id),
             group,
             source_label,
             "Yes" if task.plan_note_origin_id else "",
@@ -2955,25 +2987,26 @@ async def export_open_tasks_xlsx(
     last_row = max(header_row, data_row - 1)
     widths = {
         1: 5,
-        2: 20,
-        3: 10,
-        4: 18,
-        5: 9,
-        6: 24,
-        7: 8,
-        8: 12,
+        2: 38,
+        3: 20,
+        4: 10,
+        5: 18,
+        6: 9,
+        7: 24,
+        8: 8,
         9: 12,
-        10: 15,
-        11: 10,
-        12: 18,
-        13: 14,
-        14: 44,
-        15: 34,
-        16: 16,
+        10: 12,
+        11: 15,
+        12: 10,
+        13: 18,
+        14: 14,
+        15: 44,
+        16: 34,
         17: 16,
         18: 16,
         19: 16,
-        20: 34,
+        20: 16,
+        21: 34,
     }
     for col_idx in range(1, last_col + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 16)
@@ -2983,8 +3016,8 @@ async def export_open_tasks_xlsx(
         status_validation = DataValidation(type="list", formula1='"PERSONAL,1H,BLLOK,R1"', allow_blank=True)
         ws.add_data_validation(when_validation)
         ws.add_data_validation(status_validation)
-        when_validation.add(f"{get_column_letter(16)}5:{get_column_letter(16)}{data_row - 1}")
-        status_validation.add(f"{get_column_letter(18)}5:{get_column_letter(18)}{data_row - 1}")
+        when_validation.add(f"{get_column_letter(17)}5:{get_column_letter(17)}{data_row - 1}")
+        status_validation.add(f"{get_column_letter(19)}5:{get_column_letter(19)}{data_row - 1}")
 
     metadata = wb.create_sheet("_PRIMEFLOW")
     metadata.sheet_state = "veryHidden"
@@ -3002,12 +3035,12 @@ async def export_open_tasks_xlsx(
     # dropdown to reveal them again.
     visible_sources = sorted(source_values_present - {"SYSTEM"})
     if system_data_rows and visible_sources:
-        source_filter = FilterColumn(colId=2)
+        source_filter = FilterColumn(colId=3)
         source_filter.filters = Filters(filter=visible_sources)
         ws.auto_filter.filterColumn.append(source_filter)
         for r_idx in system_data_rows:
             ws.row_dimensions[r_idx].hidden = True
-    ws.freeze_panes = "B5"
+    ws.freeze_panes = "C5"
     ws.print_title_rows = f"{header_row}:{header_row}"
     ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
     ws.page_setup.orientation = "landscape"

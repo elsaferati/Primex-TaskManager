@@ -19,7 +19,7 @@ from app.models.weekly_planning_audit import (
     WeeklyPlanningAuditRun,
     WeeklyPlanningAuditSettings,
 )
-from app.services.primeflow_report import GmailService
+from app.services.primeflow_report import GmailService, REPORT_SENDER_EMAIL
 from app.services.weekly_planning_audit import (
     build_weekly_planning_audit,
     normalize_week_start,
@@ -351,7 +351,7 @@ async def send_report_run(
         attachment = path.read_bytes()
         if hashlib.sha256(attachment).hexdigest() != run.file_checksum:
             raise ValueError("Stored report checksum does not match")
-        sender_domain = os.environ.get("EMAIL_USER", "primeflow.local").rsplit("@", 1)[-1]
+        sender_domain = REPORT_SENDER_EMAIL.rsplit("@", 1)[-1]
         stable_message_id = stable_smtp_message_id(
             run_id=run.id,
             delivery_id=delivery.id,

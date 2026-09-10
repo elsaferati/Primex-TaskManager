@@ -346,17 +346,28 @@ def test_thursday_checklists_add_week_closing_questions_in_html_and_excel() -> N
     assert "Planifikimi javor short" in checklists_html
     assert "Emails per missing info, per me vazhdu javen tjeter" in checklists_html
     assert "Shikohen det qe mbesin vetem per neser (te premten)" in checklists_html
+    assert checklists_html.count("E ENJTE- PYETJET E TE ENJTES") == 1
     assert '<div data-extra-checklist-question="true" style="display:block;"><strong>1. Planifikimi javor short</strong></div>' in checklists_html
     assert '<div data-extra-checklist-question="true" style="display:block;"><strong>1. Emails per missing info, per me vazhdu javen tjeter</strong></div>' in checklists_html
     assert '<div data-extra-checklist-question="true" style="display:block;"><strong>2. Shikohen det qe mbesin vetem per neser (te premten)</strong></div>' in checklists_html
+    assert checklists_html.index("E ENJTE- PYETJET E TE ENJTES") < checklists_html.index("Emails per missing info")
+    assert checklists_html.index("Shikohen det qe mbesin") < checklists_html.index("STAFF - HAPAT PER 1H")
+    assert checklists_html.index("Planifikimi javor short") < checklists_html.index("PYETJET PER 1H - BORD")
+    assert 'data-day-specific-question-label="true"' in checklists_html
+    assert 'data-day-specific-checklist-columns="true"' in checklists_html
 
     _, content, _ = _excel_table_attachment([], [], date(2026, 9, 4), checklist_date=thursday)
     sheet = load_workbook(BytesIO(content)).active
+    assert sheet["A3"].value == "E ENJTE- PYETJET E TE ENJTES"
     assert "Planifikimi javor short" in sheet["E4"].value
     assert "Emails per missing info, per me vazhdu javen tjeter" in sheet["A4"].value
     assert "Shikohen det qe mbesin vetem per neser (te premten)" in sheet["A4"].value
-    assert sheet["A4"].value.startswith("1. Emails per missing info, per me vazhdu javen tjeter\n2. Shikohen det qe mbesin vetem per neser (te premten)\n1. Hap doc dhe det")
-    assert sheet["E4"].value.startswith("1. Planifikimi javor short\n1. Slotin paraprak/aktual")
+    assert sheet["A5"].value == "STAFF - HAPAT PER 1H"
+    assert sheet["E5"].value == "PYETJET PER 1H - BORD"
+    assert sheet["A6"].value.startswith("1. Hap doc dhe det")
+    assert sheet["E6"].value.startswith("1. Slotin paraprak/aktual")
+    assert sheet["A3"].font.color.rgb == "00B91C1C"
+    assert sheet["A4"].fill.fgColor.rgb == "00FFF7F7"
 
 
 def test_tomorrow_report_uses_delivery_day_for_thursday_questions() -> None:
@@ -372,7 +383,7 @@ def test_tomorrow_report_uses_delivery_day_for_thursday_questions() -> None:
     assert sent_thursday["target_date"] == "2026-09-04"
     assert "Planifikimi javor short" in sent_thursday["html"]
     assert "Emails per missing info, per me vazhdu javen tjeter" in sent_thursday["plain_text"]
-    assert "1. Emails per missing info, per me vazhdu javen tjeter\n2. Shikohen det qe mbesin vetem per neser (te premten)\n1. Hap doc dhe det" in sent_thursday["plain_text"]
+    assert sent_thursday["plain_text"].count("E ENJTE- PYETJET E TE ENJTES") == 1
     assert "Planifikimi javor short" not in sent_wednesday["html"]
 
 
@@ -384,16 +395,21 @@ def test_friday_checklists_add_staff_questions_and_keep_board_unchanged() -> Non
     assert "Barazimi i realizimit javor - this week" in checklists_html
     assert "Emails per missing info, per me vazhdu javen tjeter" in checklists_html
     assert "Planifikimi javor short" not in checklists_html
+    assert checklists_html.count("E PREMTE - PYETJET E TE PREMTES") == 1
     assert '<div data-extra-checklist-question="true" style="display:block;"><strong>1. Barazimi i planifikimit javor - next week</strong></div>' in checklists_html
     assert '<div data-extra-checklist-question="true" style="display:block;"><strong>2. Barazimi i realizimit javor - this week</strong></div>' in checklists_html
     assert '<div data-extra-checklist-question="true" style="display:block;"><strong>3. Emails per missing info, per me vazhdu javen tjeter</strong></div>' in checklists_html
+    assert checklists_html.index("E PREMTE - PYETJET E TE PREMTES") < checklists_html.index("Barazimi i planifikimit")
+    assert checklists_html.index("Emails per missing info") < checklists_html.index("STAFF - HAPAT PER 1H")
 
     _, content, _ = _excel_table_attachment([], [], date(2026, 9, 7), checklist_date=friday)
     sheet = load_workbook(BytesIO(content)).active
+    assert sheet["A3"].value == "E PREMTE - PYETJET E TE PREMTES"
     assert "Barazimi i planifikimit javor - next week" in sheet["A4"].value
     assert "Barazimi i realizimit javor - this week" in sheet["A4"].value
-    assert "Planifikimi javor short" not in sheet["E4"].value
-    assert sheet["A4"].value.startswith("1. Barazimi i planifikimit javor - next week\n2. Barazimi i realizimit javor - this week\n3. Emails per missing info, per me vazhdu javen tjeter\n1. Hap doc dhe det")
+    assert sheet["E4"].value is None
+    assert sheet["A5"].value == "STAFF - HAPAT PER 1H"
+    assert sheet["A6"].value.startswith("1. Hap doc dhe det")
 
 
 def test_tomorrow_report_uses_delivery_day_for_friday_questions() -> None:
@@ -403,11 +419,24 @@ def test_tomorrow_report_uses_delivery_day_for_friday_questions() -> None:
         build_tomorrow_print_report(date(2026, 9, 4), payload={"items": {}})
     )
 
-    assert "1. Barazimi i planifikimit javor - next week\n2. Barazimi i realizimit javor - this week\n3. Emails per missing info, per me vazhdu javen tjeter\n1. Hap doc dhe det" in report["plain_text"]
+    assert report["plain_text"].count("E PREMTE - PYETJET E TE PREMTES") == 1
 
     assert report["target_date"] == "2026-09-07"
     assert "Barazimi i planifikimit javor - next week" in report["html"]
     assert "Barazimi i realizimit javor - this week" in report["plain_text"]
+
+
+def test_today_report_puts_thursday_questions_under_the_weekday_title() -> None:
+    report = asyncio.run(
+        build_today_print_report(date(2026, 9, 3), payload={"items": {}})
+    )
+
+    html = report["html"]
+    assert report["target_date"] == "2026-09-03"
+    assert html.index("E ENJTE- PYETJET E TE ENJTES") < html.index("Emails per missing info")
+    assert html.index("Shikohen det qe mbesin") < html.index("STAFF - HAPAT PER 1H")
+    assert html.index("Planifikimi javor short") < html.index("PYETJET PER 1H - BORD")
+    assert html.count('data-day-specific-question-label="true"') == 1
 
 
 def test_email_table_removes_added_and_done_editor_markers() -> None:

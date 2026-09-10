@@ -28,6 +28,7 @@ export function PxJavPlanningBriefView({ brief, loading = false }: PxJavPlanning
     ["HAPAT", brief.hapat?.trim() || "—"],
     ["KUSH", brief.kush?.trim() || "—"],
     ["SQ", brief.sq?.trim() || "—"],
+    ["LLOJI DET", brief.lloji_det || "—"],
   ]
 
   return (
@@ -38,7 +39,7 @@ export function PxJavPlanningBriefView({ brief, loading = false }: PxJavPlanning
       </div>
       <dl className="divide-y divide-violet-100 text-sm">
         {rows.map(([label, value]) => (
-          <div key={label} className="grid grid-cols-[58px_minmax(0,1fr)]">
+          <div key={label} className="grid grid-cols-[76px_minmax(0,1fr)]">
             <dt className="bg-violet-50/60 px-2 py-1.5 text-[11px] font-semibold text-violet-700">{label}</dt>
             <dd className="whitespace-pre-wrap break-words px-2 py-1.5 text-slate-800">{value}</dd>
           </div>

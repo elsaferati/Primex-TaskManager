@@ -105,6 +105,7 @@ function compactWidthForHeader(header: string) {
   const value = normalizeHeader(header)
   if (value === "NR") return "48px"
   if (value === "WHO" || value === "DEP" || value === "FROM" || value === "TO" || value === "PER") return "64px"
+  if (value === "PRJK") return "fit-content(120px)"
   if (value === "DISK") return "40px"
   if (value === "TIME") return "76px"
   if (value === "DATA" || value === "DATE") return "96px"
@@ -720,9 +721,19 @@ export function ReportSectionPreview({
                     {visible.cells.map((cell, cellIndex) => {
                       const header = normalizeHeader(visible.headers[cellIndex] || headers[cellIndex] || "")
                       const narrow = isNarrowTableHeader(header)
+                      const projectColumnStyle = header === "PRJK"
+                        ? {
+                            width: "1%",
+                            maxWidth: "140px",
+                            whiteSpace: "normal" as const,
+                            overflowWrap: "break-word" as const,
+                            wordBreak: "normal" as const,
+                          }
+                        : undefined
                       return (
                         <th
                           key={cellIndex}
+                          style={projectColumnStyle}
                           className={`border-b border-r border-slate-300 py-1.5 align-top last:border-r-0 ${
                             header === "DISK" || header === "MBAJTUR?" || header === "MBAJTUR"
                               ? "px-1 text-center"
@@ -768,6 +779,15 @@ export function ReportSectionPreview({
                     {visible.cells.map((cell, cellIndex) => {
                       const header = normalizeHeader(visible.headers[cellIndex] || headers[cellIndex] || "")
                       const narrow = isNarrowTableHeader(header)
+                      const projectColumnStyle = header === "PRJK"
+                        ? {
+                            width: "1%",
+                            maxWidth: "140px",
+                            whiteSpace: "normal" as const,
+                            overflowWrap: "break-word" as const,
+                            wordBreak: "normal" as const,
+                          }
+                        : undefined
                       const displayedCell = previewTableCell(cell, header)
                       const stackedDate = displayedCell.includes("\n")
                       const meetingFrame = highlightedMeeting
@@ -779,6 +799,7 @@ export function ReportSectionPreview({
                       return (
                         <td
                           key={cellIndex}
+                          style={projectColumnStyle}
                           className={`border-b border-r border-slate-200 py-1.5 align-top last:border-r-0 ${
                             stackedDate
                               ? "px-0"

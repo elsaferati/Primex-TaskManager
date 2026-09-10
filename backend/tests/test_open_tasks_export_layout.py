@@ -13,6 +13,7 @@ from app.api.routers.exports import (
     OPEN_TASK_EXPORT_HEADERS,
     OPEN_TASK_WHEN_VALUES,
     _normalize_open_task_baseline_value,
+    _open_task_baseline_column_numbers,
     _open_task_difference,
     _open_task_planned_status,
     _open_task_planning_when,
@@ -51,9 +52,25 @@ class TestOpenTasksExportLayout(unittest.TestCase):
 
     def test_comparison_columns_are_paired_in_requested_order(self) -> None:
         self.assertEqual(
-            OPEN_TASK_EXPORT_HEADERS[15:20],
-            ["WHEN", "WHEN PLANNED", "STATUS", "STATUS PLANNED", "KOMENT"],
+            OPEN_TASK_EXPORT_HEADERS[16:21],
+            ["WHEN", "WHEN PLANNED", "STATUS MANUAL", "STATUS PLANNED", "KOMENT"],
         )
+
+    def test_baseline_columns_are_found_in_legacy_and_current_layouts(self) -> None:
+        legacy_headers = [
+            "STATUS" if header == "STATUS MANUAL" else header
+            for header in OPEN_TASK_EXPORT_HEADERS
+            if header != "TASK ID"
+        ]
+        for headers, expected in (
+            (legacy_headers, (16, 18, 20)),
+            (OPEN_TASK_EXPORT_HEADERS, (17, 19, 21)),
+        ):
+            workbook = Workbook()
+            worksheet = workbook.active
+            for column, header in enumerate(headers, start=1):
+                worksheet.cell(4, column, header)
+            self.assertEqual(_open_task_baseline_column_numbers(worksheet), expected)
 
     def test_planning_when_uses_upcoming_week_as_this_week(self) -> None:
         current_monday = date(2026, 9, 7)
@@ -92,6 +109,8 @@ class TestOpenTasksExportLayout(unittest.TestCase):
         self.assertEqual(_open_task_difference("THIS WEEK", "NEXT WEEK"), "NEXT WEEK")
         self.assertEqual(_open_task_difference("1H", "1H"), "")
         self.assertEqual(_open_task_difference("1H", "BLLOK"), "BLLOK")
+        self.assertEqual(_open_task_difference("THIS WEEK", None), "UNPLANNED")
+        self.assertEqual(_open_task_difference("1H", ""), "UNPLANNED")
         self.assertEqual(_open_task_difference(None, None), "")
 
     def test_baseline_import_normalizes_and_validates_values(self) -> None:
@@ -144,6 +163,13 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
         workbook = Workbook()
         ws = workbook.active
         ws.title = "OPEN TASKS"
+        legacy_headers = [
+            "STATUS" if header == "STATUS MANUAL" else header
+            for header in OPEN_TASK_EXPORT_HEADERS
+            if header != "TASK ID"
+        ]
+        for column, header in enumerate(legacy_headers, start=1):
+            ws.cell(4, column, header)
         ws.cell(5, 16, " this week ")
         ws.cell(5, 18, "bllok")
         ws.cell(5, 20, "Move after customer reply")
@@ -233,11 +259,14 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
         workbook = load_workbook(io.BytesIO(content), data_only=False)
         ws = workbook["OPEN TASKS"]
 
-        self.assertEqual([ws.cell(4, column).value for column in range(16, 21)], OPEN_TASK_EXPORT_HEADERS[15:20])
+        self.assertEqual([ws.cell(4, column).value for column in range(17, 22)], OPEN_TASK_EXPORT_HEADERS[16:21])
+        self.assertEqual(ws.cell(4, 2).value, "TASK ID")
+        self.assertEqual(ws.cell(5, 2).value, str(task_id))
         self.assertEqual(
-            [ws.cell(5, column).value for column in range(16, 21)],
+            [ws.cell(5, column).value for column in range(17, 22)],
             ["THIS WEEK", "NEXT WEEK", "1H", None, "Before planning"],
         )
+        self.assertEqual(ws.freeze_panes, "C5")
         self.assertEqual(workbook["_PRIMEFLOW"].sheet_state, "veryHidden")
         self.assertEqual(workbook["_PRIMEFLOW"]["B1"].value, "2026-09-14")
         self.assertEqual(workbook["_PRIMEFLOW"]["B3"].value, str(task_id))

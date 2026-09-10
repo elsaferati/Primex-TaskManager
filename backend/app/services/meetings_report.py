@@ -18,6 +18,7 @@ from app.models.department import Department
 from app.models.enums import CommonApprovalStatus, CommonCategory
 from app.models.meeting import Meeting
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
+from app.models.project import Project
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
@@ -871,11 +872,14 @@ def _m3_status_table(
     daily_rlz_by_task: dict[Any, tuple[str, str]] | None = None,
     date_range_by_task: dict[Any, tuple[str, str]] | None = None,
     products_by_task: dict[Any, str] | None = None,
+    project_titles_by_id: dict[Any, str] | None = None,
     include_priority_tone: bool = False,
 ) -> list[str]:
     columns: list[tuple[str, int]] = [("NR", 2), ("KUSH", 5)]
     if include_department:
         columns.append(("DEP", 5))
+    if project_titles_by_id is not None:
+        columns.append(("PRJK", 24))
     if include_added_week:
         columns.append(("KRIJUAR", 7))
     if include_am_pm:
@@ -909,6 +913,8 @@ def _m3_status_table(
     if not tasks:
         values = ["-", "-"]
         if include_department:
+            values.append("-")
+        if project_titles_by_id is not None:
             values.append("-")
         if include_added_week:
             values.append("-")
@@ -952,6 +958,17 @@ def _m3_status_table(
         )
         task_type = _m3_task_type_label(task) if include_type else ""
         department = _m3_department_label(task, department_codes) if include_department else ""
+        project_lines = (
+            [
+                str(
+                    project_titles_by_id.get(getattr(task, "project_id", None), "-")
+                    or "-"
+                ).replace("|", "/").strip()
+                or "-"
+            ]
+            if project_titles_by_id is not None
+            else []
+        )
         added_week = _m3_added_week_label(task, week_start) if include_added_week else ""
         am_pm = _m3_am_pm_label(task) if include_am_pm else ""
         postponed_from, postponed_to = (date_range_by_task or {}).get(task.id, ("-", "-"))
@@ -975,6 +992,8 @@ def _m3_status_table(
         values = [str(index), owner]
         if include_department:
             values.append(department)
+        if project_titles_by_id is not None:
+            values.append(project_lines[0])
         if include_added_week:
             values.append(added_week)
         if include_am_pm:
@@ -991,11 +1010,17 @@ def _m3_status_table(
         if daily_rlz_by_task is not None:
             values.extend((reason_lines[0], comment_lines[0]))
         rows.append(table_row(values))
-        continuation_count = max(len(padded_titles), len(reason_lines), len(comment_lines))
+        continuation_count = max(
+            len(padded_titles), len(project_lines), len(reason_lines), len(comment_lines)
+        )
         for line_index in range(1, continuation_count):
             continuation = ["", ""]
             if include_department:
                 continuation.append("")
+            if project_titles_by_id is not None:
+                continuation.append(
+                    project_lines[line_index] if line_index < len(project_lines) else ""
+                )
             if include_added_week:
                 continuation.append("")
             if include_am_pm:
@@ -1139,6 +1164,21 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     ).scalars().all()
     report_tasks_by_id = {task.id: task for task in [*tasks, *completed_tasks]}
     report_tasks = list(report_tasks_by_id.values())
+    project_ids = {
+        task.project_id for task in report_tasks if getattr(task, "project_id", None) is not None
+    }
+    project_titles_by_id = (
+        {
+            project_id: title
+            for project_id, title in (
+                await db.execute(
+                    select(Project.id, Project.title).where(Project.id.in_(project_ids))
+                )
+            ).all()
+        }
+        if project_ids
+        else {}
+    )
     names = await _assignee_names(db, report_tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, report_tasks)
     all_participant_ids = await _all_participant_user_ids(db)
@@ -1328,6 +1368,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 include_department=True,
                 include_am_pm=True,
                 department_codes=department_codes,
+                project_titles_by_id=project_titles_by_id,
                 daily_rlz_by_task=daily_rlz_by_task,
                 **table_kwargs,
             )
@@ -1343,6 +1384,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 include_am_pm=True,
                 department_codes=department_codes,
                 date_range_by_task=postponed_both_date_ranges,
+                project_titles_by_id=project_titles_by_id,
                 include_priority_tone=True,
                 **table_kwargs,
             )
@@ -1357,6 +1399,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 include_am_pm=True,
                 department_codes=department_codes,
                 date_range_by_task=postponed_date_ranges,
+                project_titles_by_id=project_titles_by_id,
                 include_priority_tone=True,
                 **table_kwargs,
             )[1:]
@@ -2392,7 +2435,7 @@ h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
 .report-table{{width:100%;border-collapse:collapse;table-layout:auto;font:12px/1.3 Arial,sans-serif}}
 .report-table th{{background:#e5e7eb;color:#111827;text-align:left;font-weight:700;border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}}
 .report-table td{{border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}}
-.report-table .n{{white-space:nowrap}}.report-table tr.todo td{{background:#fbcfe8;color:#111827}}.report-table tr.in-progress td{{background:#fef3c7;color:#111827}}.report-table tr.waiting td{{background:#ffedd5;color:#9a3412}}.report-table tr.waiting-client td{{background:#e2c15b;color:#4f3a00}}.report-table tr.done td{{background:#d4ffe1;color:#111827}}.report-table tr.late td{{background:#fee2e2;color:#111827}}.report-table tr.deadline td{{background:#dc2626;color:#fff}}.report-table tr.eight-am td{{background:#fff;color:#111827;border-top:3px solid #dc2626;border-bottom:3px solid #dc2626}}.report-table tr.eight-am td:first-child{{border-left:3px solid #dc2626}}.report-table tr.eight-am td:last-child{{border-right:3px solid #dc2626}}.report-table tr.notes td{{background:#dbeafe;color:#111827}}.report-table .disk-yes,.report-table .held{{background:#dcfce7!important;color:#166534!important;font-weight:700;text-align:center}}.report-table .disk-no,.report-table .canceled{{background:#fee2e2!important;color:#991b1b!important;font-weight:700;text-align:center}}.report-table tr.highlight td{{border-top:3px solid #2563eb;border-bottom:3px solid #2563eb}}.report-table tr.highlight td:first-child{{border-left:3px solid #2563eb}}.report-table tr.highlight td:last-child{{border-right:3px solid #2563eb}}.report-table tr.highlight .title{{color:#2563eb;font-weight:700}}
+.report-table .n{{white-space:nowrap}}.report-table .prjk{{max-width:110px;white-space:normal;overflow-wrap:break-word;word-break:normal}}.report-table tr.todo td{{background:#fbcfe8;color:#111827}}.report-table tr.in-progress td{{background:#fef3c7;color:#111827}}.report-table tr.waiting td{{background:#ffedd5;color:#9a3412}}.report-table tr.waiting-client td{{background:#e2c15b;color:#4f3a00}}.report-table tr.done td{{background:#d4ffe1;color:#111827}}.report-table tr.late td{{background:#fee2e2;color:#111827}}.report-table tr.deadline td{{background:#dc2626;color:#fff}}.report-table tr.eight-am td{{background:#fff;color:#111827;border-top:3px solid #dc2626;border-bottom:3px solid #dc2626}}.report-table tr.eight-am td:first-child{{border-left:3px solid #dc2626}}.report-table tr.eight-am td:last-child{{border-right:3px solid #dc2626}}.report-table tr.notes td{{background:#dbeafe;color:#111827}}.report-table .disk-yes,.report-table .held{{background:#dcfce7!important;color:#166534!important;font-weight:700;text-align:center}}.report-table .disk-no,.report-table .canceled{{background:#fee2e2!important;color:#991b1b!important;font-weight:700;text-align:center}}.report-table tr.highlight td{{border-top:3px solid #2563eb;border-bottom:3px solid #2563eb}}.report-table tr.highlight td:first-child{{border-left:3px solid #2563eb}}.report-table tr.highlight td:last-child{{border-right:3px solid #2563eb}}.report-table tr.highlight .title{{color:#2563eb;font-weight:700}}
 @media only screen and (max-width:600px){{
 body{{padding:8px!important}}
 h1{{font-size:18px!important;line-height:1.2!important}}
@@ -2716,7 +2759,7 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
             [cell for index, cell in enumerate(row) if index != status_index]
             for row in body_rows
         ]
-    column_widths = _email_column_widths(header)
+    column_widths = _email_column_widths(header, body_rows)
     header_html = "".join(
         f"<th{_email_column_width_attr(column_widths[index])}{_email_column_class(cell)}>{html.escape(cell)}</th>"
         for index, cell in enumerate(header)
@@ -2892,6 +2935,8 @@ def _email_column_width_attr(width: str) -> str:
 
 def _email_column_class_name(header_cell: str) -> str:
     name = _normalized_table_header(header_cell)
+    if name == "PRJK":
+        return "prjk"
     if name in {"NR", "TIME", "ORA", "KOHA", "DISK", "LATE", "T/Y/O", "FROM", "TO", "DATA", "DATE", "DEP", "TYPE", "AM/PM", "MBAJTUR", "MBAJTUR?", "ANULUAR", "PA STATUS"}:
         return "n"
     return ""
@@ -2902,7 +2947,9 @@ def _email_column_class(header_cell: str) -> str:
     return f' class="{class_name}"' if class_name else ""
 
 
-def _email_column_widths(header: list[str]) -> list[str]:
+def _email_column_widths(
+    header: list[str], body_rows: list[list[str]] | None = None
+) -> list[str]:
     """Give utility columns only the space they need; reserve the rest for title/note text."""
     if not header:
         return []
@@ -2911,6 +2958,7 @@ def _email_column_widths(header: list[str]) -> list[str]:
         "NR": "24",
         "WHO": "34",
         "DEP": "34",
+        "PRJK": "110",
         "ADDED": "48",
         "TYPE": "42",
         "AM/PM": "42",
@@ -2937,6 +2985,14 @@ def _email_column_widths(header: list[str]) -> list[str]:
     }
     normalized = [_normalized_table_header(cell) for cell in header]
     widths = ["auto" if name in content_names else fixed_by_name.get(name, "56") for name in normalized]
+    if "PRJK" in normalized and body_rows is not None:
+        project_index = normalized.index("PRJK")
+        has_project_title = any(
+            len(row) > project_index
+            and str(row[project_index]).strip().upper() not in {"", "-", "(ASNJE DETYRE)", "(ASNJË DETYRË)"}
+            for row in body_rows
+        )
+        widths[project_index] = "110" if has_project_title else "44"
     if normalized and not any(name in content_names for name in normalized):
         widths[-1] = "auto"
     return widths
@@ -3494,11 +3550,11 @@ def render_section_report_docx(
                 run.bold = bold
                 run.font.color.rgb = RGBColor.from_string(color.lstrip("#"))
 
-    def table_widths(header: list[str]) -> list[int]:
+    def table_widths(header: list[str], rows: list[list[str]]) -> list[int]:
         # Email uses a 600px shell with compact utility columns.  Map the same
         # proportions to Word's usable page width (10166 twips at these margins).
         available = 10166
-        raw = _email_column_widths(header)
+        raw = _email_column_widths(header, rows)
         widths: list[int | None] = []
         for value in raw:
             if value == "auto":
@@ -3582,7 +3638,7 @@ def render_section_report_docx(
         header = block["header"]
         table = document.add_table(rows=1, cols=len(header))
         table.autofit = False
-        column_widths = table_widths(header)
+        column_widths = table_widths(header, block["rows"])
         for index, grid_column in enumerate(table._tbl.tblGrid.gridCol_lst):
             grid_column.w = Twips(column_widths[index])
         for index, value in enumerate(header):
@@ -3700,10 +3756,10 @@ def render_section_report_png(
             lines.append(current)
         return lines or [""]
 
-    def widths(header: list[str]) -> list[int]:
+    def widths(header: list[str], rows: list[list[str]]) -> list[int]:
         available = width - 2 * margin
         result: list[int | None] = []
-        for item in _email_column_widths(header):
+        for item in _email_column_widths(header, rows):
             result.append(None if item == "auto" else max(64, int(float(item.rstrip("%")) * (available / 100 if item.endswith("%") else 2))))
         fixed, autos = sum(item or 0 for item in result), sum(item is None for item in result)
         if fixed >= available:
@@ -3734,7 +3790,7 @@ def render_section_report_png(
             return 37
         if block["kind"] == "text":
             return 8 + sum(23 * len(wrap(line.strip(), font, width - 2 * margin)) for line in block["lines"] if line.strip())
-        column_widths = widths(block["header"])
+        column_widths = widths(block["header"], block["rows"])
         rows = 34 + (32 if block["caption"] else 0)
         for row in block["rows"]:
             row_height = max(31, 8 + max(len(wrap(str(value), font, max(20, column_widths[index] - 12))) for index, value in enumerate(row)) * 22)
@@ -3784,7 +3840,7 @@ def render_section_report_png(
                 draw.rectangle((margin, y, width - margin, y + 32), fill="#F8FAFC", outline="#CBD5E1")
                 draw.text((margin + 10, y + 6), str(block["caption"]), fill="#111827", font=bold)
                 y += 32
-            header, column_widths = block["header"], widths(block["header"])
+            header, column_widths = block["header"], widths(block["header"], block["rows"])
             x = margin
             for index, value in enumerate(header):
                 right = x + column_widths[index]
