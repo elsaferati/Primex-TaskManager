@@ -885,6 +885,10 @@ export default function TaskDetailsPage() {
                     <dt className="bg-violet-50 px-3 py-3 text-xs font-semibold text-violet-700">SQ</dt>
                     <dd className="whitespace-pre-wrap px-3 py-3 text-slate-800">{planningBrief.sq || "—"}</dd>
                   </div>
+                  <div className="grid sm:grid-cols-[120px_minmax(0,1fr)]">
+                    <dt className="bg-violet-50 px-3 py-3 text-xs font-semibold text-violet-700">LLOJI DET</dt>
+                    <dd className="whitespace-pre-wrap px-3 py-3 text-slate-800">{planningBrief.lloji_det || "—"}</dd>
+                  </div>
                 </dl>
                 <p className="mt-3 text-xs text-violet-700">Ndryshimet e këtij planifikimi menaxhohen në PX JAV.</p>
               </CardContent>

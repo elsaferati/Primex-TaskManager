@@ -130,6 +130,14 @@ def _partition_reminder_questions(
     )
 
 
+def _day_specific_question_label(report_day: date | None) -> str:
+    if report_day is not None and report_day.weekday() == 3:
+        return "E ENJTE- PYETJET E TE ENJTES"
+    if report_day is not None and report_day.weekday() == 4:
+        return "E PREMTE - PYETJET E TE PREMTES"
+    return ""
+
+
 class ReportDocument(BaseModel):
     subject: str
     report_date: date
@@ -466,15 +474,18 @@ def build_report_document(
 
 def render_plain_text(document: ReportDocument) -> str:
     blocks = [document.subject, f"Generated: {document.generated_at.isoformat()}", ""]
-    for reminder_title, questions in (
+    reminder_groups = (
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
         (REMINDER_SECTION_TITLE, document.reminders),
-    ):
+    )
+    if any(question.is_extra for _, questions in reminder_groups for question in questions):
+        blocks.append(_day_specific_question_label(document.report_date))
+    for reminder_title, questions in reminder_groups:
         if not questions:
             continue
         reminder_lines = [reminder_title]
         extra_questions, regular_questions = _partition_reminder_questions(questions)
-        for indexed_questions in (extra_questions, regular_questions):
+        for indexed_questions, is_extra in ((extra_questions, True), (regular_questions, False)):
             for index, question in indexed_questions:
                 reminder_lines.append(f"{index}. {question.text}")
                 if question.guidance:
@@ -717,6 +728,19 @@ def render_html(
     if pre_sections_html:
         body_chunks.append(pre_sections_html)
 
+    if any(
+        question.is_extra
+        for questions in (document.board_reminders, document.reminders)
+        for question in questions
+    ):
+        body_chunks.append(
+            '<div data-day-specific-question-label="true" '
+            'style="font-family:Arial,sans-serif;font-size:13px;font-weight:800;'
+            'color:#b91c1c;margin:0 0 7px;padding:6px 10px;background:#fff7f7;'
+            'border-left:6px solid #dc2626;">'
+            f'{html.escape(_day_specific_question_label(document.report_date))}</div>'
+        )
+
     if document.board_reminders and document.reminders:
         body_chunks.append(
             '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
@@ -870,6 +894,18 @@ def render_docx(document: ReportDocument) -> bytes:
         description_run = cell.add_paragraph().add_run(description)
         description_run.font.size = Pt(7.5)
         description_run.font.color.rgb = RGBColor.from_string("475569")
+    if any(
+        question.is_extra
+        for questions in (document.board_reminders, document.reminders)
+        for question in questions
+    ):
+        day_label = doc.add_paragraph()
+        day_label_run = day_label.add_run(
+            _day_specific_question_label(document.report_date)
+        )
+        day_label_run.bold = True
+        day_label_run.font.size = Pt(10)
+        day_label_run.font.color.rgb = RGBColor.from_string("B91C1C")
     for reminder_title, questions in (
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
         (REMINDER_SECTION_TITLE, document.reminders),
@@ -1047,6 +1083,18 @@ def render_png(document: ReportDocument) -> bytes:
         draw.line((bounds[0], strike_y, bounds[2], strike_y), fill=color, width=2)
         draw.text((text_left, top + 26), description, fill="#64748b", font=font)
     y += legend_height + 18
+    if any(
+        question.is_extra
+        for questions in (document.board_reminders, document.reminders)
+        for question in questions
+    ):
+        draw.text(
+            (margin + 5, y),
+            _day_specific_question_label(document.report_date),
+            fill="#b91c1c",
+            font=bold,
+        )
+        y += 38
     for reminder_title, questions in (
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
         (REMINDER_SECTION_TITLE, document.reminders),

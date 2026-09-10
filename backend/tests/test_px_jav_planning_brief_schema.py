@@ -12,6 +12,7 @@ class PxJavPlanningBriefSchemaTests(unittest.TestCase):
         brief = PxJavPlanningBrief.model_validate(
             {
                 "dl": "  12.09.2026  ",
+                "lloji_det": "1H",
                 "dg": False,
                 "dg_kush": "  Person që nuk duhet ruajtur  ",
                 "hapat": "  Hapi 1  ",
@@ -21,6 +22,7 @@ class PxJavPlanningBriefSchemaTests(unittest.TestCase):
         )
 
         self.assertEqual(brief.dl, "12.09.2026")
+        self.assertEqual(brief.lloji_det, "1H")
         self.assertIsNone(brief.dg_kush)
         self.assertEqual(brief.hapat, "Hapi 1")
         self.assertEqual(brief.kush, "AD")
@@ -48,6 +50,10 @@ class PxJavPlanningBriefSchemaTests(unittest.TestCase):
         brief = PxJavPlanningBrief.model_validate({"kush_user_ids": [user_id, user_id]})
 
         self.assertEqual(brief.kush_user_ids, [user_id])
+
+    def test_rejects_unknown_task_guidance_type(self) -> None:
+        with self.assertRaises(ValueError):
+            PxJavPlanningBrief.model_validate({"lloji_det": "NORMAL"})
 
     def test_update_distinguishes_omitted_brief_from_explicit_removal(self) -> None:
         omitted = PlanNoteUpdate.model_validate({})

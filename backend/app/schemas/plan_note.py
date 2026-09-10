@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -28,6 +29,7 @@ class PlanNoteAttachmentOut(BaseModel):
 
 class PxJavPlanningBrief(BaseModel):
     dl: str | None = Field(default=None, max_length=4000)
+    lloji_det: Literal["1H", "P", "BLLOK", "R1"] | None = None
     dg: bool | None = None
     dg_kush: str | None = Field(default=None, max_length=4000)
     dg_kush_user_ids: list[uuid.UUID] = Field(default_factory=list)

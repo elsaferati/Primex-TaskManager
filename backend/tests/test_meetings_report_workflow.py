@@ -998,11 +998,13 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
 
     def test_todo_table_includes_department_after_who(self) -> None:
         department_id = uuid.uuid4()
+        project_id = uuid.uuid4()
         task = SimpleNamespace(
             id=uuid.uuid4(),
             title="Pink task",
             status="TODO",
             system_template_origin_id=None,
+            project_id=project_id,
             department_id=department_id,
             assigned_to=None,
             fast_task_order=None,
@@ -1018,10 +1020,39 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
             {},
             include_department=True,
             department_codes={department_id: "PCM"},
+            project_titles_by_id={project_id: "PrimeFlow Task Manager"},
         )
-        header = next(row for row in rows if "KUSH" in row and "DEP" in row and "TITULLI" in row)
+        header = next(
+            row
+            for row in rows
+            if "KUSH" in row and "DEP" in row and "PRJK" in row and "TITULLI" in row
+        )
         self.assertLess(header.index("KUSH"), header.index("DEP"))
-        self.assertTrue(any("PCM" in row and "Pink task" in row for row in rows))
+        self.assertLess(header.index("DEP"), header.index("PRJK"))
+        self.assertTrue(
+            any(
+                "PCM" in row and "PrimeFlow Task Manager" in row and "Pink task" in row
+                for row in rows
+            )
+        )
+        rendered = _render_ascii_table_html(rows, "todo")
+        self.assertIn("PRJK", rendered)
+        self.assertIn("PrimeFlow Task Manager", rendered)
+
+    def test_project_column_uses_dash_for_fast_tasks(self) -> None:
+        task = SimpleNamespace(
+            id=uuid.uuid4(), title="Standalone fast task", status="TODO",
+            system_template_origin_id=None, project_id=None, assigned_to=None,
+            fast_task_order=None, is_deadline_important=False, due_date=None,
+            start_date=None, completed_at=None, created_at=None,
+        )
+
+        rows = _m3_status_table("TODO", [task], {}, project_titles_by_id={})
+        header = next(row for row in rows if "PRJK" in row and "TITULLI" in row)
+        data = next(row for row in rows if "Standalone fast task" in row)
+
+        self.assertEqual(len(header.split("|")), len(data.split("|")))
+        self.assertIn("| -", data)
 
     def test_without_progress_includes_task_active_before_later_due_date(self) -> None:
         task = SimpleNamespace(
@@ -1085,6 +1116,7 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
 class MeetingsReportCombinedPostponementTests(unittest.IsolatedAsyncioTestCase):
     async def test_combined_start_due_dates_do_not_shift_task_title_column(self) -> None:
         task_id = uuid.uuid4()
+        project_id = uuid.uuid4()
         report_day = date(2026, 9, 1)
         task = SimpleNamespace(
             id=task_id,
@@ -1095,7 +1127,7 @@ class MeetingsReportCombinedPostponementTests(unittest.IsolatedAsyncioTestCase):
             completed_at=None,
             system_template_origin_id=None,
             system_task_slot_id=None,
-            project_id=None,
+            project_id=project_id,
             assigned_to=None,
             fast_task_order=None,
             is_deadline_important=False,
@@ -1141,10 +1173,17 @@ class MeetingsReportCombinedPostponementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(postponed_both, [task])
         self.assertNotIn("|", date_ranges[task_id][0])
         self.assertNotIn("|", date_ranges[task_id][1])
-        rows = _m3_status_table("", postponed_both, {}, date_range_by_task=date_ranges)
-        header = next(row for row in rows if "TITULLI" in row)
+        rows = _m3_status_table(
+            "",
+            postponed_both,
+            {},
+            date_range_by_task=date_ranges,
+            project_titles_by_id={project_id: "Long Postponed Project Name"},
+        )
+        header = next(row for row in rows if "PRJK" in row and "TITULLI" in row)
         data = next(row for row in rows if "Actual task title" in row)
         self.assertEqual(len(header.split("|")), len(data.split("|")))
+        self.assertTrue(any("Long Postponed Project" in row for row in rows))
         rendered = _render_ascii_table_html(rows)
         self.assertIn("START: 01.09.2026</div>", rendered)
         self.assertIn("DUE: 01.09.2026</div>", rendered)
