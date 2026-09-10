@@ -549,6 +549,8 @@ async def update_plan_note_task_bundle(
                         start_date=item.start_date,
                         due_date=item.due_date,
                         finish_period=item.finish_period,
+                        one_h_report_slot=item.one_h_report_slot,
+                        one_h_report_slot_is_set="one_h_report_slot" in item.model_fields_set,
                         is_deadline_important=item.is_deadline_important,
                         priority=item.priority,
                         is_bllok=item.is_bllok,

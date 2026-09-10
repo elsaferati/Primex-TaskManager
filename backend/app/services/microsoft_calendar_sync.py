@@ -44,6 +44,7 @@ ONE_H_SLOT_TIMES = (
     time(15, 50),
 )
 ONE_H_PROTECTED_TIMES = frozenset((slot.hour, slot.minute) for slot in ONE_H_SLOT_TIMES)
+ROUTINE_EXTERNAL_CATEGORY_MARKERS = ("daily", "weekly", "standup", "brown")
 
 
 @dataclass(frozen=True)
@@ -190,6 +191,25 @@ def is_common_view_visible_meeting(meeting: Meeting) -> bool:
 def is_annual_leave_event(event: dict[str, Any]) -> bool:
     categories = graph_event_categories(event)
     return is_annual_leave_title_or_categories(event.get("subject"), categories)
+
+
+def is_routine_external_meeting(
+    categories: list[str] | None,
+    recurrence_type: str | None = None,
+) -> bool:
+    """Match TAK EXT meetings rendered with the brown Common View tone."""
+    normalized_categories = [
+        str(category).strip().casefold()
+        for category in (categories or [])
+        if str(category).strip()
+    ]
+    if any(
+        marker in category
+        for category in normalized_categories
+        for marker in ROUTINE_EXTERNAL_CATEGORY_MARKERS
+    ):
+        return True
+    return str(recurrence_type or "").strip().casefold() in {"daily", "weekly"}
 
 
 def choose_department_id(
@@ -427,6 +447,18 @@ def sync_calendar_internal_pair_status(
     internal_meeting.calendar_last_synced_at = synced_at
 
 
+async def delete_calendar_internal_pair(
+    db: AsyncSession,
+    external_meeting: Meeting,
+    paired_by_external_id: dict[Any, Meeting],
+) -> None:
+    """Delete an automatic TAK INT when its TAK EXT is routine/brown."""
+    internal_meeting = paired_by_external_id.pop(external_meeting.id, None)
+    if internal_meeting is None:
+        return
+    await db.delete(internal_meeting)
+
+
 async def sync_external_calendar_events(
     db: AsyncSession,
     *,
@@ -634,26 +666,34 @@ async def sync_external_calendar_events(
                 participant_ids_by_meeting=existing_participant_ids_by_meeting,
                 synced_at=now,
             )
-            event_created_at = (
-                parse_graph_datetime(event.get("createdDateTime"))
-                or getattr(row, "created_at", None)
-                or now
-            )
-            preparation_starts_at = calendar_preparation_start(
-                row.starts_at,
-                event_created_at,
-                reserved_starts=reserved_preparation_starts,
-            )
-            reserved_preparation_starts.add(preparation_starts_at)
-            await ensure_calendar_preparation_pair(
-                db,
-                external_meeting=row,
-                starts_at=preparation_starts_at,
-                participant_ids=existing_participant_ids,
-                paired_by_external_id=preparation_by_external_id,
-                participant_ids_by_meeting=existing_participant_ids_by_meeting,
-                synced_at=now,
-            )
+
+            if is_routine_external_meeting(categories, row.recurrence_type):
+                await delete_calendar_internal_pair(
+                    db,
+                    row,
+                    preparation_by_external_id,
+                )
+            else:
+                event_created_at = (
+                    parse_graph_datetime(event.get("createdDateTime"))
+                    or getattr(row, "created_at", None)
+                    or now
+                )
+                preparation_starts_at = calendar_preparation_start(
+                    row.starts_at,
+                    event_created_at,
+                    reserved_starts=reserved_preparation_starts,
+                )
+                reserved_preparation_starts.add(preparation_starts_at)
+                await ensure_calendar_preparation_pair(
+                    db,
+                    external_meeting=row,
+                    starts_at=preparation_starts_at,
+                    participant_ids=existing_participant_ids,
+                    paired_by_external_id=preparation_by_external_id,
+                    participant_ids_by_meeting=existing_participant_ids_by_meeting,
+                    synced_at=now,
+                )
 
         if unchanged_meeting_ids:
             await db.execute(

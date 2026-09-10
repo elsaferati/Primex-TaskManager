@@ -17,6 +17,7 @@ from app.services.microsoft_calendar_sync import (
     calendar_preparation_start,
     ensure_calendar_internal_pair,
     ensure_calendar_preparation_pair,
+    is_routine_external_meeting,
     sync_external_calendar_events,
     sync_calendar_internal_pair_status,
 )
@@ -36,6 +37,7 @@ class _ListResult:
 class _FakeDb:
     def __init__(self, execute_results: list[list[object]] | None = None) -> None:
         self.added: list[object] = []
+        self.deleted: list[object] = []
         self.execute_results = list(execute_results or [])
         self.commit_count = 0
 
@@ -49,6 +51,9 @@ class _FakeDb:
 
     async def execute(self, _statement: object) -> _ListResult:
         return _ListResult(self.execute_results.pop(0))
+
+    async def delete(self, value: object) -> None:
+        self.deleted.append(value)
 
     async def commit(self) -> None:
         self.commit_count += 1
@@ -100,6 +105,101 @@ class TestMicrosoftCalendarInternalPair(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after.starts_at.astimezone(local_timezone).time(), time(14, 20))
         self.assertEqual(before.starts_at.astimezone(local_timezone).time(), time(10, 15))
         self.assertEqual(db.commit_count, 1)
+
+    async def test_brown_routine_external_meeting_creates_only_follow_up_pair(self) -> None:
+        department_id = uuid.uuid4()
+        department = SimpleNamespace(id=department_id, code="DEV", name="Development")
+        db = _FakeDb(execute_results=[[], [department], []])
+        event = {
+            "id": "routine-weekly-event",
+            "changeKey": "change-1",
+            "createdDateTime": "2026-09-08T07:00:00Z",
+            "subject": "Weekly team meeting",
+            "categories": ["Weekly"],
+            "start": {"dateTime": "2026-09-09T11:30:00Z"},
+            "end": {"dateTime": "2026-09-09T12:00:00Z"},
+        }
+
+        with patch(
+            "app.services.microsoft_calendar_sync.fetch_calendar_events",
+            new=AsyncMock(return_value=[event]),
+        ):
+            await sync_external_calendar_events(
+                db,
+                access_token="not-used-by-mock",
+                connected_by_user_id=uuid.uuid4(),
+                start=datetime(2026, 9, 9, tzinfo=timezone.utc),
+                end=datetime(2026, 9, 10, tzinfo=timezone.utc),
+            )
+
+        meetings = [row for row in db.added if isinstance(row, Meeting)]
+        self.assertEqual(len(meetings), 2)
+        external = next(row for row in meetings if row.meeting_type == "external")
+        follow_up = next(row for row in meetings if row.meeting_type == "internal")
+        self.assertEqual(follow_up.paired_external_meeting_id, external.id)
+        self.assertIsNone(follow_up.pre_external_meeting_id)
+
+    async def test_only_existing_preparation_pair_is_deleted_when_external_becomes_brown(self) -> None:
+        department_id = uuid.uuid4()
+        external = Meeting(
+            id=uuid.uuid4(),
+            title="Weekly team meeting",
+            starts_at=datetime(2026, 9, 9, 11, 30, tzinfo=timezone.utc),
+            ends_at=datetime(2026, 9, 9, 12, 0, tzinfo=timezone.utc),
+            microsoft_event_id="routine-weekly-event",
+            meeting_type="external",
+            department_id=department_id,
+            created_by=uuid.uuid4(),
+            calendar_imported=True,
+            calendar_sync_status="active",
+            calendar_change_key="old-change",
+        )
+        after = Meeting(
+            id=uuid.uuid4(),
+            title=external.title,
+            starts_at=datetime(2026, 9, 9, 12, 20, tzinfo=timezone.utc),
+            meeting_type="internal",
+            department_id=department_id,
+            created_by=external.created_by,
+            paired_external_meeting_id=external.id,
+            calendar_sync_status="active",
+        )
+        before = Meeting(
+            id=uuid.uuid4(),
+            title=external.title,
+            starts_at=datetime(2026, 9, 9, 6, 20, tzinfo=timezone.utc),
+            meeting_type="internal",
+            department_id=department_id,
+            created_by=external.created_by,
+            pre_external_meeting_id=external.id,
+            calendar_sync_status="active",
+        )
+        department = SimpleNamespace(id=department_id, code="DEV", name="Development")
+        db = _FakeDb(execute_results=[[], [department], [external], [after], [before], []])
+        event = {
+            "id": external.microsoft_event_id,
+            "changeKey": "new-change",
+            "subject": external.title,
+            "categories": ["Brown"],
+            "start": {"dateTime": "2026-09-09T11:30:00Z"},
+            "end": {"dateTime": "2026-09-09T12:00:00Z"},
+        }
+
+        with patch(
+            "app.services.microsoft_calendar_sync.fetch_calendar_events",
+            new=AsyncMock(return_value=[event]),
+        ):
+            await sync_external_calendar_events(
+                db,
+                access_token="not-used-by-mock",
+                connected_by_user_id=external.created_by,
+                start=datetime(2026, 9, 9, tzinfo=timezone.utc),
+                end=datetime(2026, 9, 10, tzinfo=timezone.utc),
+            )
+
+        self.assertEqual(db.deleted, [before])
+        self.assertEqual(after.calendar_sync_status, "active")
+        self.assertEqual([row for row in db.added if isinstance(row, Meeting)], [])
 
     async def test_creates_one_internal_meeting_in_the_next_one_h_slot_and_reuses_it(self) -> None:
         external_id = uuid.uuid4()
@@ -272,6 +372,17 @@ class TestCalendarPreparationSchedule(unittest.TestCase):
 
         self.assertEqual(result.date(), self.local_datetime(14, 8, 15).date())
         self.assertEqual(result.time(), time(8, 15))
+
+
+class TestRoutineExternalMeeting(unittest.TestCase):
+    def test_matches_the_same_categories_as_the_brown_common_view_tone(self) -> None:
+        for category in ("Weekly", "DAILY", "Team standup", "Brown category"):
+            with self.subTest(category=category):
+                self.assertTrue(is_routine_external_meeting([category]))
+
+    def test_regular_red_external_meeting_is_not_routine(self) -> None:
+        self.assertFalse(is_routine_external_meeting(["Online"]))
+        self.assertFalse(is_routine_external_meeting([]))
 
 
 class TestCalendarFollowUpSchedule(unittest.TestCase):

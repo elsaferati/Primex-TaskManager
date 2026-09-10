@@ -19,6 +19,7 @@ from app.models.task import Task
 from app.models.user import User
 from app.services.ga_time_table import get_ga_time_table_rows
 from app.services.meeting_palette import meeting_report_color
+from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.meetings_report import (
     _ascii_table_is_empty,
     _ascii_table_block,
@@ -141,6 +142,11 @@ async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
         await db.execute(select(Meeting).execution_options(populate_existing=True))
     ).scalars().all()
     for meeting in meetings:
+        # Keep the emailed timetable aligned with Common View/Admin Tasks.
+        # In particular, Outlook PV events and cancelled/excluded sync rows
+        # are stored as meetings but must not be rendered as TAK EXT/TAK INT.
+        if not is_common_view_visible_meeting(meeting):
+            continue
         meeting_time = _meeting_time(meeting)
         if meeting_time is None:
             continue
@@ -367,6 +373,8 @@ async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
         await db.execute(select(Meeting).execution_options(populate_existing=True))
     ).scalars().all()
     for meeting in meetings:
+        if not is_common_view_visible_meeting(meeting):
+            continue
         meeting_time = _meeting_time(meeting)
         if meeting_time is None:
             continue

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date
+from datetime import date, datetime
 from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -216,6 +216,48 @@ LATE:
         self.assertIn('<td colspan="2"', rendered)
         self.assertIn("07:30<br>08:00", rendered)
         self.assertNotIn("<img", rendered)
+
+    async def test_timetable_email_uses_common_view_meeting_visibility(self) -> None:
+        def meeting(
+            title: str,
+            meeting_type: str,
+            hour: int,
+            *,
+            calendar_imported: bool = False,
+        ):
+            return SimpleNamespace(
+                id=title,
+                title=title,
+                meeting_type=meeting_type,
+                starts_at=datetime(2026, 8, 24, hour, 0),
+                created_at=datetime(2026, 8, 24, hour, 0),
+                recurrence_type="none",
+                recurrence_days_of_week=None,
+                recurrence_days_of_month=None,
+                calendar_categories=[],
+                calendar_imported=calendar_imported,
+                microsoft_event_id=title if calendar_imported else None,
+                calendar_sync_status="active",
+            )
+
+        meetings = [
+            meeting("Visible external", "external", 9),
+            meeting("Visible internal", "internal", 10),
+            meeting("DV PV 24.08-28.08.2026", "external", 11, calendar_imported=True),
+        ]
+        db = SimpleNamespace(execute=AsyncMock(side_effect=[
+            _result(list(DEFAULT_GA_TIME_TABLE_ROWS)),
+            _result([SimpleNamespace(id="ga-user")]),
+            _result([]),
+            _result([]),
+            _result(meetings),
+        ]))
+
+        rendered = await render_ga_time_table_html(db, date(2026, 8, 24))
+
+        self.assertIn("TAK EXT: Visible external", rendered)
+        self.assertIn("TAK INT: Visible internal", rendered)
+        self.assertNotIn("DV PV 24.08-28.08.2026", rendered)
 
     async def test_timetable_email_reloads_latest_saved_content_on_each_render(self) -> None:
         def entry(content: str):

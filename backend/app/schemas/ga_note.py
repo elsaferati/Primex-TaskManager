@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class GaNoteAttachmentOut(BaseModel):
@@ -85,6 +85,7 @@ class GaNoteTaskAssigneeStateUpdate(BaseModel):
     start_date: datetime | None = None
     due_date: datetime | None = None
     finish_period: TaskFinishPeriod | None = None
+    one_h_report_slot: str | None = Field(default=None, pattern=r"^(10:00|11:00|11:50|14:20|16:00)$")
     is_deadline_important: bool = False
     priority: TaskPriority = TaskPriority.NORMAL
     is_bllok: bool = False
