@@ -57,7 +57,7 @@ class TestSystemTaskReplacementValidation(IsolatedAsyncioTestCase):
         )
         db.execute.assert_not_awaited()
 
-    async def test_missing_replacements_are_rejected_when_required(self) -> None:
+    async def test_missing_zv1_is_rejected_when_required(self) -> None:
         db = SimpleNamespace(execute=AsyncMock())
         with self.assertRaises(HTTPException) as missing_error:
             await _validate_replacement_users(
@@ -69,6 +69,38 @@ class TestSystemTaskReplacementValidation(IsolatedAsyncioTestCase):
             )
         self.assertEqual(missing_error.exception.status_code, 400)
         db.execute.assert_not_awaited()
+
+    async def test_zv2_is_optional_when_zv1_is_required(self) -> None:
+        zv1_id = uuid.uuid4()
+        db = SimpleNamespace(
+            execute=AsyncMock(
+                return_value=_UsersResult([SimpleNamespace(id=zv1_id, is_active=True)])
+            )
+        )
+        await _validate_replacement_users(
+            db,
+            zv1_user_id=zv1_id,
+            zv2_user_id=None,
+            assignee_ids=[],
+            required=True,
+        )
+        db.execute.assert_awaited_once()
+
+    async def test_zv2_can_be_selected_independently_when_replacements_are_optional(self) -> None:
+        zv2_id = uuid.uuid4()
+        db = SimpleNamespace(
+            execute=AsyncMock(
+                return_value=_UsersResult([SimpleNamespace(id=zv2_id, is_active=True)])
+            )
+        )
+        await _validate_replacement_users(
+            db,
+            zv1_user_id=None,
+            zv2_user_id=zv2_id,
+            assignee_ids=[],
+            required=False,
+        )
+        db.execute.assert_awaited_once()
 
     async def test_replacements_must_be_distinct_and_outside_assignees(self) -> None:
         user_id = uuid.uuid4()

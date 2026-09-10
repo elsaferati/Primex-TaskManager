@@ -118,28 +118,30 @@ async def _validate_replacement_users(
     assignee_ids: list[uuid.UUID] | None,
     required: bool,
 ) -> None:
-    if zv1_user_id is None or zv2_user_id is None:
-        if required or zv1_user_id is not None or zv2_user_id is not None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="ZV1 and ZV2 are both required for specifically assigned tasks",
-            )
+    if required and zv1_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ZV1 is required for specifically assigned tasks",
+        )
+
+    replacement_user_ids = {user_id for user_id in (zv1_user_id, zv2_user_id) if user_id is not None}
+    if not replacement_user_ids:
         return
-    if zv1_user_id == zv2_user_id:
+    if zv1_user_id is not None and zv1_user_id == zv2_user_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="ZV1 and ZV2 must be different users",
         )
-    if {zv1_user_id, zv2_user_id} & set(assignee_ids or []):
+    if replacement_user_ids & set(assignee_ids or []):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="ZV1 and ZV2 cannot also be assignees",
         )
 
     replacement_users = (
-        await db.execute(select(User).where(User.id.in_({zv1_user_id, zv2_user_id})))
+        await db.execute(select(User).where(User.id.in_(replacement_user_ids)))
     ).scalars().all()
-    if len(replacement_users) != 2:
+    if len(replacement_users) != len(replacement_user_ids):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Replacement user not found")
     if any(not user.is_active for user in replacement_users):
         raise HTTPException(

@@ -120,10 +120,12 @@ function replacementsRequired(assigneeIds: string[]) {
 
 function replacementSelectionError(zv1UserId: string, zv2UserId: string, assigneeIds: string[]) {
   if (!zv1UserId && !zv2UserId && !replacementsRequired(assigneeIds)) return null
-  if (!zv1UserId || !zv2UserId) {
-    return "ZV1 and ZV2 are required for specifically assigned tasks."
+  if (!zv1UserId && replacementsRequired(assigneeIds)) {
+    return "ZV1 is required for specifically assigned tasks."
   }
-  if (zv1UserId === zv2UserId) return "ZV1 and ZV2 must be different users."
+  if (zv1UserId && zv2UserId && zv1UserId === zv2UserId) {
+    return "ZV1 and ZV2 must be different users."
+  }
   if (assigneeIds.includes(zv1UserId) || assigneeIds.includes(zv2UserId)) {
     return "ZV1 and ZV2 cannot also be assignees."
   }
@@ -3204,13 +3206,17 @@ export function SystemTasksView({
                       </div>
                       <div className="space-y-2">
                         <Label>
-                          ZV2 {replacementsRequired(assigneeIds) ? "*" : "(optional for All/10+)"}
+                          ZV2 (optional)
                         </Label>
-                        <Select value={zv2UserId} onValueChange={setZv2UserId}>
+                        <Select
+                          value={zv2UserId || EMPTY_VALUE}
+                          onValueChange={(value) => setZv2UserId(value === EMPTY_VALUE ? "" : value)}
+                        >
                           <SelectTrigger>
                             <SelectValue placeholder="Select second replacement" />
                           </SelectTrigger>
                           <SelectContent>
+                            <SelectItem value={EMPTY_VALUE}>None</SelectItem>
                             {users.map((person) => (
                               <SelectItem
                                 key={person.id}
@@ -3249,7 +3255,7 @@ export function SystemTasksView({
                           saving ||
                           !title.trim() ||
                           !departmentId ||
-                          (replacementsRequired(assigneeIds) && (!zv1UserId || !zv2UserId))
+                          (replacementsRequired(assigneeIds) && !zv1UserId)
                         }
                         onClick={() => void submit()}
                       >
@@ -3676,13 +3682,17 @@ export function SystemTasksView({
                       </div>
                       <div className="space-y-2">
                         <Label>
-                          ZV2 {replacementsRequired(editAssigneeIds) ? "*" : "(optional for All/10+)"}
+                          ZV2 (optional)
                         </Label>
-                        <Select value={editZv2UserId} onValueChange={setEditZv2UserId}>
+                        <Select
+                          value={editZv2UserId || EMPTY_VALUE}
+                          onValueChange={(value) => setEditZv2UserId(value === EMPTY_VALUE ? "" : value)}
+                        >
                           <SelectTrigger>
                             <SelectValue placeholder="Select second replacement" />
                           </SelectTrigger>
                           <SelectContent>
+                            <SelectItem value={EMPTY_VALUE}>None</SelectItem>
                             {users.map((person) => (
                               <SelectItem
                                 key={person.id}
@@ -3721,7 +3731,7 @@ export function SystemTasksView({
                           editSaving ||
                           !editTitle.trim() ||
                           !editDepartmentId ||
-                          (replacementsRequired(editAssigneeIds) && (!editZv1UserId || !editZv2UserId))
+                          (replacementsRequired(editAssigneeIds) && !editZv1UserId)
                         }
                         onClick={() => void submitEdit()}
                       >
