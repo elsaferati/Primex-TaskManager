@@ -171,6 +171,13 @@ const getReportRowOneHReportSlot = (row: unknown) => {
   if (!row || typeof row !== "object" || !("oneHReportSlot" in row)) return null
   return normalizeOneHReportSlot((row as { oneHReportSlot?: string | null }).oneHReportSlot)
 }
+const getDailyReportSlotDisplay = (row: { typeLabel?: string | null; subtype?: string | null }) => {
+  if (row.typeLabel === "SYS") return "SYS"
+  const subtype = (row.subtype || "").trim().toUpperCase().replace(/:$/, "")
+  if (subtype === "BLL") return "BLL"
+  if (subtype === "P") return "P"
+  return "-"
+}
 const isOneHReportRow = (row: unknown) =>
   Boolean(row && typeof row === "object" && "isOneHReportTask" in row && row.isOneHReportTask)
 const oneHReportSlotRank = (row: unknown) => {
@@ -7848,7 +7855,7 @@ export default function DepartmentKanban() {
                                     ))}
                                   </select>
                                 ) : (
-                                  "-"
+                                  getDailyReportSlotDisplay(row)
                                 )}
                               </td>
                               <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
@@ -11206,7 +11213,7 @@ export default function DepartmentKanban() {
                               {dailyReportStatusDisplay(row.status)}
                             </td>
                             <td className="border border-slate-900 px-2 py-2 align-top">
-                              {row.subtype === "1H" ? getOneHReportSlotLabel(getReportRowOneHReportSlot(row)) : "-"}
+                              {row.subtype === "1H" ? getOneHReportSlotLabel(getReportRowOneHReportSlot(row)) : getDailyReportSlotDisplay(row)}
                             </td>
                             <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
@@ -11327,7 +11334,7 @@ export default function DepartmentKanban() {
                           {dailyReportStatusDisplay(row.status)}
                         </td>
                         <td className="border border-slate-900 px-2 py-2 align-top">
-                          {row.subtype === "1H" ? getOneHReportSlotLabel(getReportRowOneHReportSlot(row)) : "-"}
+                          {row.subtype === "1H" ? getOneHReportSlotLabel(getReportRowOneHReportSlot(row)) : getDailyReportSlotDisplay(row)}
                         </td>
                         <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                         <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
@@ -11435,7 +11442,7 @@ export default function DepartmentKanban() {
                           {dailyReportStatusDisplay(row.status)}
                         </td>
                         <td className="border border-slate-900 px-2 py-2 align-top">
-                          {row.subtype === "1H" ? getOneHReportSlotLabel(getReportRowOneHReportSlot(row)) : "-"}
+                          {row.subtype === "1H" ? getOneHReportSlotLabel(getReportRowOneHReportSlot(row)) : getDailyReportSlotDisplay(row)}
                         </td>
                         <td className="border border-slate-900 px-2 py-2 align-top">-</td>
                         <td className="border border-slate-900 px-2 py-2 align-top">-</td>
