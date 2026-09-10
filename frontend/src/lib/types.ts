@@ -619,6 +619,7 @@ export interface PlanNote {
   created_at: string
   updated_at: string
   attachments?: PlanNoteAttachment[]
+  attachment_count?: number
 }
 
 export interface PlanNoteAttachment {

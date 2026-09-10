@@ -5,9 +5,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -85,7 +85,13 @@ def _attachment_out(attachment: PlanNoteAttachment) -> PlanNoteAttachmentOut:
     )
 
 
-def _note_out(note: PlanNote) -> PlanNoteOut:
+def _note_out(
+    note: PlanNote,
+    *,
+    include_attachments: bool = True,
+    attachment_count: int | None = None,
+) -> PlanNoteOut:
+    attachments = [_attachment_out(a) for a in (note.attachments or [])] if include_attachments else []
     return PlanNoteOut(
         id=note.id,
         content=note.content,
@@ -106,7 +112,8 @@ def _note_out(note: PlanNote) -> PlanNoteOut:
         planning_brief=note.planning_brief,
         created_at=note.created_at,
         updated_at=note.updated_at,
-        attachments=[_attachment_out(a) for a in (note.attachments or [])],
+        attachments=attachments,
+        attachment_count=len(attachments) if attachment_count is None else attachment_count,
     )
 
 
@@ -207,12 +214,17 @@ async def _save_plan_note_attachments(
 async def list_plan_notes(
     project_id: uuid.UUID | None = None,
     department_id: uuid.UUID | None = None,
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    include_attachments: bool = True,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[PlanNoteOut]:
     closed_cutoff = datetime.utcnow() - timedelta(days=30)
 
-    stmt = select(PlanNote).options(selectinload(PlanNote.attachments)).order_by(PlanNote.created_at.desc())
+    stmt = select(PlanNote).order_by(PlanNote.created_at.desc(), PlanNote.id.desc())
+    if include_attachments:
+        stmt = stmt.options(selectinload(PlanNote.attachments))
 
     stmt = stmt.where(
         or_(
@@ -230,8 +242,32 @@ async def list_plan_notes(
     elif department_id is not None:
         stmt = stmt.where(PlanNote.department_id == department_id)
 
+    if offset:
+        stmt = stmt.offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+
     notes = (await db.execute(stmt)).scalars().all()
-    return [_note_out(n) for n in notes]
+    if include_attachments or not notes:
+        return [_note_out(note) for note in notes]
+
+    attachment_counts = dict(
+        (
+            await db.execute(
+                select(PlanNoteAttachment.note_id, func.count(PlanNoteAttachment.id))
+                .where(PlanNoteAttachment.note_id.in_([note.id for note in notes]))
+                .group_by(PlanNoteAttachment.note_id)
+            )
+        ).all()
+    )
+    return [
+        _note_out(
+            note,
+            include_attachments=False,
+            attachment_count=int(attachment_counts.get(note.id, 0)),
+        )
+        for note in notes
+    ]
 
 
 @router.post("", response_model=PlanNoteOut, status_code=status.HTTP_201_CREATED)

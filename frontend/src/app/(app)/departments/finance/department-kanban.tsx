@@ -190,6 +190,13 @@ function getOneHReportSlotLabel(value?: string | null) {
   return normalizeOneHReportSlot(value) || "No slot"
 }
 
+function getFinanceSlotDisplay(task: Task) {
+  if (task.system_template_origin_id || task.task_type === "system") return "SYS"
+  if (task.is_bllok) return "BLL"
+  if (task.is_personal) return "P"
+  return "-"
+}
+
 function isoOrEmpty(value?: string | null) {
   return toDateInputValue(value || null)
 }
@@ -828,7 +835,7 @@ export default function DepartmentKanban() {
                               </span>
                             )
                           ) : (
-                            "-"
+                            getFinanceSlotDisplay(row.task)
                           )}
                         </TableCell>
                         <TableCell className="w-12 min-w-12 px-1 text-center" title={row.assigneeLabel}>

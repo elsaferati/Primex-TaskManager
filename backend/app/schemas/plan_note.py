@@ -72,6 +72,7 @@ class PlanNoteOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     attachments: list[PlanNoteAttachmentOut] = []
+    attachment_count: int = 0
 
 
 class PlanNoteCreate(BaseModel):
