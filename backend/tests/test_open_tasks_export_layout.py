@@ -22,6 +22,7 @@ from app.api.routers.exports import (
     _open_task_wrapped_line_count,
     export_open_tasks_xlsx,
     import_open_tasks_baseline,
+    reset_open_tasks_baseline,
 )
 from app.models.enums import UserRole
 
@@ -148,6 +149,7 @@ class _FakeSession:
     def __init__(self, results):
         self.results = iter(results)
         self.added = []
+        self.deleted = []
         self.committed = False
 
     async def execute(self, _statement):
@@ -156,11 +158,33 @@ class _FakeSession:
     def add(self, value):
         self.added.append(value)
 
+    async def delete(self, value):
+        self.deleted.append(value)
+
     async def commit(self):
         self.committed = True
 
 
 class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
+    async def test_reset_deletes_only_the_requested_week_rows_returned_by_the_query(self) -> None:
+        baselines = [SimpleNamespace(id=uuid.uuid4()), SimpleNamespace(id=uuid.uuid4())]
+        db = _FakeSession([baselines])
+        user = SimpleNamespace(
+            id=uuid.uuid4(),
+            role=UserRole.ADMIN,
+            department_id=None,
+        )
+
+        result = await reset_open_tasks_baseline(
+            planning_week_start=date(2026, 9, 14),
+            db=db,
+            user=user,
+        )
+
+        self.assertEqual(result, {"planning_week_start": "2026-09-14", "deleted": 2})
+        self.assertEqual(db.deleted, baselines)
+        self.assertTrue(db.committed)
+
     async def test_import_saves_manual_values_for_the_planning_week(self) -> None:
         task_id = uuid.uuid4()
         workbook = Workbook()

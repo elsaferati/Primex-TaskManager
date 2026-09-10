@@ -2693,6 +2693,40 @@ async def import_open_tasks_baseline(
     }
 
 
+@router.delete("/open-tasks/baseline")
+async def reset_open_tasks_baseline(
+    planning_week_start: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Delete only this user's saved Open Tasks pre-plan for the requested week."""
+    ensure_reports_access(user)
+
+    baseline_stmt = select(OpenTaskPlanningBaseline).where(
+        OpenTaskPlanningBaseline.planning_week_start == planning_week_start,
+        OpenTaskPlanningBaseline.uploaded_by == user.id,
+    )
+    role_value = getattr(user.role, "value", str(user.role)).upper()
+    if role_value == UserRole.STAFF.value:
+        if not user.department_id:
+            rows: list[OpenTaskPlanningBaseline] = []
+        else:
+            baseline_stmt = baseline_stmt.join(Task, OpenTaskPlanningBaseline.task_id == Task.id).where(
+                Task.department_id == user.department_id
+            )
+            rows = (await db.execute(baseline_stmt)).scalars().all()
+    else:
+        rows = (await db.execute(baseline_stmt)).scalars().all()
+
+    for row in rows:
+        await db.delete(row)
+    await db.commit()
+    return {
+        "planning_week_start": planning_week_start.isoformat(),
+        "deleted": len(rows),
+    }
+
+
 @router.get("/open-tasks.xlsx")
 async def export_open_tasks_xlsx(
     department_id: uuid.UUID | None = Query(default=None),
