@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.services.meeting_palette import meeting_report_color
 from app.services.meetings_report import common_view_item_sort_key, next_working_day
-from app.services.primeflow_report import GmailService, PrimeFlowClient
+from app.services.primeflow_report import GmailService, PrimeFlowClient, REPORT_SENDER_EMAIL
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
 from app.services.tomorrow_closing_sections import (
     ClosingSection,
@@ -2506,10 +2506,9 @@ async def build_today_print_report(
 
 async def send_tomorrow_print_report(report: dict[str, Any], recipients: dict[str, list[str]]) -> dict[str, Any]:
     recipients = ensure_required_shtypi_recipient(recipients)
-    sender = "130primex.eu@gmail.com"
     password = os.getenv("EMAIL_PASSWORD") or settings.EMAIL_PASSWORD
     if not password:
         raise ValueError("Missing email configuration: EMAIL_PASSWORD")
-    return await GmailService(sender=sender, password=password).send_verified(
+    return await GmailService(sender=REPORT_SENDER_EMAIL, password=password).send_verified(
         report["subject"], recipients, report["plain_text"], report["html"], attachments=report.get("attachments")
     )

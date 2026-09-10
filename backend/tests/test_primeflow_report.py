@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from app.services.primeflow_report_access import can_manage_reports
 from app.services.primeflow_report import (
-    GmailService, STATUS_MARKERS, build_report, clean_description, clean_title, employee_initials,
+    GmailService, REPORT_SENDER_EMAIL, STATUS_MARKERS, build_report, clean_description, clean_title, employee_initials,
     exact_subject, filter_tasks,
     build_report_document, predecessor, previous_working_day, render_docx, render_html,
     render_plain_text, render_png, report_subject, ReportReminderQuestion, BOARD_REMINDER_SECTION_TITLE,
@@ -288,6 +288,7 @@ class PrimeFlowReportTests(unittest.TestCase):
 
     def test_smtp_message_contains_word_and_png_attachments(self) -> None:
         sent_messages = []
+        smtp_calls = {}
 
         class FakeSmtp:
             def __init__(self, *args, **kwargs):
@@ -306,12 +307,13 @@ class PrimeFlowReportTests(unittest.TestCase):
                 pass
 
             def login(self, *args):
-                pass
+                smtp_calls["login"] = args
 
             def send_message(self, message, **kwargs):
                 sent_messages.append(message)
+                smtp_calls["send"] = kwargs
 
-        with patch.dict(os.environ, {"EMAIL_USER": "sender@example.com", "EMAIL_PASSWORD": "app-password"}):
+        with patch.dict(os.environ, {"EMAIL_USER": REPORT_SENDER_EMAIL, "EMAIL_PASSWORD": "app-password"}):
             with patch("app.services.primeflow_report.smtplib.SMTP", FakeSmtp):
                 asyncio.run(GmailService().send_verified(
                     "Report", ["recipient@example.com"], "Plain", "<strong>HTML</strong>",
@@ -322,12 +324,23 @@ class PrimeFlowReportTests(unittest.TestCase):
                 ))
 
         self.assertEqual(len(sent_messages), 1)
+        self.assertEqual(sent_messages[0]["From"], REPORT_SENDER_EMAIL)
+        self.assertEqual(smtp_calls["login"], (REPORT_SENDER_EMAIL, "app-password"))
+        self.assertEqual(smtp_calls["send"]["from_addr"], REPORT_SENDER_EMAIL)
         attachments = list(sent_messages[0].iter_attachments())
         self.assertEqual([item.get_filename() for item in attachments], ["report.docx", "report.png"])
         self.assertEqual(
             [item.get_content_type() for item in attachments],
             ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/png"],
         )
+
+    def test_report_sender_rejects_non_130_mailbox(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"EMAIL_USER": "315primex.eu@gmail.com", "EMAIL_PASSWORD": "app-password"},
+        ):
+            with self.assertRaisesRegex(ValueError, "must be sent from 130primex"):
+                GmailService()
 
     def test_previous_working_day_and_subject(self) -> None:
         self.assertEqual(previous_working_day(date(2026, 7, 27)), date(2026, 7, 24))

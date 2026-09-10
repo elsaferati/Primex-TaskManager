@@ -25,6 +25,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 REPORT_TYPE = "primeflow_1h"
+REPORT_SENDER_EMAIL = "130primex.eu@gmail.com"
 SLOTS = ("10:00", "11:00", "11:50", "14:10", "14:20", "16:00")
 STATUS_ORDER = {"IN_PROGRESS": 0, "TODO": 1, "WAITING_CLIENT": 2, "DONE": 3}
 STATUS_MARKERS = {
@@ -1340,15 +1341,18 @@ class PrimeFlowClient:
 
 class GmailService:
     def __init__(self, *, sender: str | None = None, password: str | None = None) -> None:
-        sender = sender or os.getenv("EMAIL_USER") or settings.EMAIL_USER
+        configured_sender = (
+            sender or os.getenv("EMAIL_USER") or settings.EMAIL_USER or REPORT_SENDER_EMAIL
+        ).strip()
+        if configured_sender.casefold() != REPORT_SENDER_EMAIL.casefold():
+            raise ValueError(
+                f"PrimeFlow reports must be sent from {REPORT_SENDER_EMAIL}; "
+                f"configured sender is {configured_sender}"
+            )
         password = password or os.getenv("EMAIL_PASSWORD") or settings.EMAIL_PASSWORD
-        if not sender or not password:
-            missing = [
-                name for name, value in (("EMAIL_USER", sender), ("EMAIL_PASSWORD", password))
-                if not value
-            ]
-            raise ValueError(f"Missing email configuration: {', '.join(missing)}")
-        self.sender = sender.strip()
+        if not password:
+            raise ValueError("Missing email configuration: EMAIL_PASSWORD")
+        self.sender = REPORT_SENDER_EMAIL
         self.password = password.replace(" ", "")
         self.host = (os.getenv("EMAIL_HOST") or settings.EMAIL_HOST).strip()
         self.port = int(os.getenv("EMAIL_PORT") or settings.EMAIL_PORT)
