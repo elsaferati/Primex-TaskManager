@@ -62,6 +62,9 @@ const TASK_STATUS_STYLES: Record<string, { label: string; dot: string; pill: str
 const MAX_ATTACHMENT_FILES = 20
 const MAX_ATTACHMENT_MB = 25
 const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MB * 1024 * 1024
+const INITIAL_NOTES_RENDER_LIMIT = 80
+const NOTES_RENDER_BATCH_SIZE = 80
+const PLAN_NOTES_PAGE_SIZE = 200
 const EMAIL_MARKER_RE = /(^|\s)em:/i
 const DONE_MARK_START = "[[done]]"
 const DONE_MARK_END = "[[/done]]"
@@ -841,9 +844,20 @@ export default function NextWeekPlanPage() {
   const confirm = useConfirm()
   const searchParams = useSearchParams()
   const [notes, setNotes] = React.useState<PlanNote[]>([])
+  const notesRef = React.useRef<PlanNote[]>([])
+  notesRef.current = notes
+  const notesFetchVersionRef = React.useRef(0)
+  const noteTaskRequestVersionRef = React.useRef(0)
+  const loadedNoteTaskIdsRef = React.useRef<Set<string>>(new Set())
+  const noteOriginsKey = React.useMemo(
+    () => notes.map((note) => note.id).join("|"),
+    [notes]
+  )
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
+  const usersRef = React.useRef<UserLookup[]>([])
+  usersRef.current = users
 
   // Initialize from URL parameters if present
   const urlDepartmentId = searchParams.get("department_id")
@@ -869,6 +883,7 @@ export default function NextWeekPlanPage() {
   const [nextWeekFilter, setNextWeekFilter] = React.useState<NextWeekFilter>("all")
   const [searchQuery, setSearchQuery] = React.useState("")
   const deferredSearchQuery = React.useDeferredValue(searchQuery)
+  const [notesRenderLimit, setNotesRenderLimit] = React.useState(INITIAL_NOTES_RENDER_LIMIT)
   const [showLegend, setShowLegend] = React.useState(false)
   const [taskTitle, setTaskTitle] = React.useState("")
   const [taskDescription, setTaskDescription] = React.useState("")
@@ -904,6 +919,7 @@ export default function NextWeekPlanPage() {
   const editTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
   const [attachmentsDialogOpen, setAttachmentsDialogOpen] = React.useState(false)
   const [attachmentsDialogNoteId, setAttachmentsDialogNoteId] = React.useState<string | null>(null)
+  const [loadingAttachmentsNoteId, setLoadingAttachmentsNoteId] = React.useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
   const [previewTitle, setPreviewTitle] = React.useState<string | null>(null)
 
@@ -1049,24 +1065,42 @@ export default function NextWeekPlanPage() {
 
   const fetchNotes = React.useCallback(async () => {
     if (!user) return
+    const fetchVersion = ++notesFetchVersionRef.current
+    noteTaskRequestVersionRef.current += 1
+    loadedNoteTaskIdsRef.current.clear()
+    setNoteTaskInfo(new Map())
+    setNotes([])
     setLoading(true)
     try {
-      let url = "/plan-notes"
-      const params = new URLSearchParams()
+      const baseParams = new URLSearchParams()
       if (projectId !== "NONE") {
-        params.set("project_id", projectId)
+        baseParams.set("project_id", projectId)
       } else if (departmentId !== "ALL") {
-        params.set("department_id", departmentId)
+        baseParams.set("department_id", departmentId)
       }
-      url += params.toString() ? `?${params}` : ""
-      const res = await apiFetch(url)
-      if (res?.ok) {
-        setNotes((await res.json()) as PlanNote[])
-      } else {
-        toast.error("Could not load plan notes")
+      baseParams.set("limit", String(PLAN_NOTES_PAGE_SIZE))
+      baseParams.set("include_attachments", "false")
+
+      let offset = 0
+      let accumulatedNotes: PlanNote[] = []
+      while (true) {
+        const params = new URLSearchParams(baseParams)
+        params.set("offset", String(offset))
+        const res = await apiFetch(`/plan-notes?${params.toString()}`)
+        if (!res?.ok) {
+          if (notesFetchVersionRef.current === fetchVersion) toast.error("Could not load plan notes")
+          return
+        }
+        const page = (await res.json()) as PlanNote[]
+        if (notesFetchVersionRef.current !== fetchVersion) return
+        accumulatedNotes = [...accumulatedNotes, ...page]
+        setNotes(accumulatedNotes)
+        if (offset === 0) setLoading(false)
+        if (page.length < PLAN_NOTES_PAGE_SIZE) break
+        offset += PLAN_NOTES_PAGE_SIZE
       }
     } finally {
-      setLoading(false)
+      if (notesFetchVersionRef.current === fetchVersion) setLoading(false)
     }
   }, [apiFetch, departmentId, projectId, user])
 
@@ -1099,31 +1133,28 @@ export default function NextWeekPlanPage() {
   }, [fetchNotes])
 
   const loadNoteTasks = React.useCallback(async (noteIdsOverride?: string[]) => {
-    const noteIds = noteIdsOverride ?? notes.map((note) => note.id).filter(Boolean)
+    const noteIds = noteIdsOverride ?? notesRef.current.map((note) => note.id).filter(Boolean)
     if (!noteIds.length) {
       if (!noteIdsOverride) {
         setNoteTaskInfo(new Map())
       }
       return
     }
-    const chunkSize = 50
-    const chunks: string[][] = []
-    for (let i = 0; i < noteIds.length; i += chunkSize) {
-      chunks.push(noteIds.slice(i, i + chunkSize))
-    }
-
-    const data: Task[] = []
-    for (const chunk of chunks) {
-      const params = new URLSearchParams()
-      params.set("include_done", "true")
-      params.set("include_all_departments", "true")
-      chunk.forEach((id) => params.append("plan_note_origin_ids", id))
-      const res = await apiFetch(`/tasks?${params.toString()}`)
-      if (!res?.ok) return
-      const chunkData = (await res.json()) as Task[]
-      data.push(...chunkData)
-    }
-    const userMapById = new Map(users.map((u) => [u.id, u]))
+    const requestVersion = noteTaskRequestVersionRef.current
+    const res = await apiFetch("/tasks/by-ga-notes/summary", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ga_note_origin_ids: [],
+        plan_note_origin_ids: noteIds,
+        include_done: true,
+        include_all_done: false,
+      }),
+    })
+    if (!res?.ok || noteTaskRequestVersionRef.current !== requestVersion) return false
+    const data = (await res.json()) as Task[]
+    if (noteTaskRequestVersionRef.current !== requestVersion) return false
+    const userMapById = new Map(usersRef.current.map((u) => [u.id, u]))
 
     const map = new Map<string, NoteTaskInfo>()
     const mergeAssignees = (base: TaskAssignee[], incoming: TaskAssignee[]) => {
@@ -1182,13 +1213,31 @@ export default function NextWeekPlanPage() {
           existing?.isDeadlineImportant ?? (t.is_deadline_important ?? null),
       })
     }
-    setNoteTaskInfo(map)
-  }, [apiFetch, notes, users])
+    if (noteIdsOverride) {
+      setNoteTaskInfo((current) => {
+        const next = new Map(current)
+        noteIds.forEach((noteId) => next.delete(noteId))
+        map.forEach((value, noteId) => next.set(noteId, value))
+        return next
+      })
+    } else {
+      setNoteTaskInfo(map)
+    }
+    return true
+  }, [apiFetch])
 
   // Load tasks linked to notes to show assignees/descriptions
   React.useEffect(() => {
-    void loadNoteTasks()
-  }, [loadNoteTasks])
+    const missingNoteIds = notesRef.current
+      .map((note) => note.id)
+      .filter((noteId) => !loadedNoteTaskIdsRef.current.has(noteId))
+    if (!missingNoteIds.length) return
+    missingNoteIds.forEach((noteId) => loadedNoteTaskIdsRef.current.add(noteId))
+    void loadNoteTasks(missingNoteIds).then((loaded) => {
+      if (loaded) return
+      missingNoteIds.forEach((noteId) => loadedNoteTaskIdsRef.current.delete(noteId))
+    })
+  }, [loadNoteTasks, noteOriginsKey])
 
   const updateNoteCommentDraft = React.useCallback((noteId: string, comment: string) => {
     setNotes((prev) => prev.map((note) => (note.id === noteId ? { ...note, comment } : note)))
@@ -1433,7 +1482,7 @@ export default function NextWeekPlanPage() {
             merged.push(attachment)
           }
         })
-        return { ...note, attachments: merged }
+        return { ...note, attachments: merged, attachment_count: merged.length }
       })
     )
   }, [])
@@ -1442,7 +1491,10 @@ export default function NextWeekPlanPage() {
     setNotes((prev) =>
       prev.map((note) =>
         note.id === noteId
-          ? { ...note, attachments: (note.attachments ?? []).filter((attachment) => attachment.id !== attachmentId) }
+          ? (() => {
+              const attachments = (note.attachments ?? []).filter((attachment) => attachment.id !== attachmentId)
+              return { ...note, attachments, attachment_count: attachments.length }
+            })()
           : note
       )
     )
@@ -2387,6 +2439,15 @@ export default function NextWeekPlanPage() {
     return sorted
   }, [notes, taskStatusFilter, contentFilter, nextWeekFilter, deferredSearchQuery, noteTaskInfo, users, departments, projects])
 
+  React.useEffect(() => {
+    setNotesRenderLimit(INITIAL_NOTES_RENDER_LIMIT)
+  }, [contentFilter, deferredSearchQuery, departmentId, nextWeekFilter, projectId, taskStatusFilter])
+
+  const renderedNotes = React.useMemo(
+    () => visibleNotes.slice(0, notesRenderLimit),
+    [notesRenderLimit, visibleNotes]
+  )
+
   const attachmentDialogItems = React.useMemo(() => {
     if (!attachmentsDialogNoteId) return []
     const note = visibleNotes.find((item) => item.id === attachmentsDialogNoteId)
@@ -2419,10 +2480,32 @@ export default function NextWeekPlanPage() {
     return !isClosed && aggregatedStatus !== "DONE"
   }, [attachmentsDialogNote, noteTaskInfo])
 
-  const openAttachmentsForNote = (noteId: string) => {
+  const openAttachmentsForNote = async (noteId: string) => {
     resetManageAttachmentsState()
     setAttachmentsDialogNoteId(noteId)
     setAttachmentsDialogOpen(true)
+    setLoadingAttachmentsNoteId(noteId)
+    try {
+      const res = await apiFetch(`/plan-notes/${encodeURIComponent(noteId)}`)
+      if (!res?.ok) {
+        toast.error("Failed to load attachments")
+        return
+      }
+      const loadedNote = (await res.json()) as PlanNote
+      setNotes((current) => current.map((note) => (
+        note.id === noteId
+          ? {
+              ...note,
+              attachments: loadedNote.attachments ?? [],
+              attachment_count: loadedNote.attachment_count ?? loadedNote.attachments?.length ?? 0,
+            }
+          : note
+      )))
+    } catch {
+      toast.error("Failed to load attachments")
+    } finally {
+      setLoadingAttachmentsNoteId((current) => (current === noteId ? null : current))
+    }
   }
 
   const uploadAttachmentsFromDialog = async () => {
@@ -3053,7 +3136,15 @@ export default function NextWeekPlanPage() {
           ) : notes.length === 0 ? (
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           ) : (
-            <div className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full">
+            <div
+              className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full"
+              onScroll={(event) => {
+                const container = event.currentTarget
+                const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+                if (distanceFromBottom > 800 || notesRenderLimit >= visibleNotes.length) return
+                setNotesRenderLimit((current) => Math.min(current + NOTES_RENDER_BATCH_SIZE, visibleNotes.length))
+              }}
+            >
               <div className="w-full min-w-[1480px] sm:min-w-[1560px]">
                 <table className="w-full table-fixed caption-bottom text-sm min-w-[1480px] sm:min-w-[1560px]">
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
@@ -3075,7 +3166,7 @@ export default function NextWeekPlanPage() {
                     </tr>
                   </thead>
                   <tbody>
-                  {visibleNotes.map((note, idx) => {
+                  {renderedNotes.map((note, idx) => {
                     const creator = note.created_by ? userMap.get(note.created_by) : null
                     const creatorLabel = creator?.full_name || creator?.username || "Unknown user"
                     const creatorInitials = getInitials(creatorLabel)
@@ -3102,6 +3193,7 @@ export default function NextWeekPlanPage() {
                     const hasProject = Boolean(projectId)
                     const assignees = taskInfo?.assignees ?? []
                     const attachments = note.attachments ?? []
+                    const attachmentCount = note.attachment_count ?? attachments.length
                     const isClosed =
                       note.status === "CLOSED" ||
                       (note as { isClosed?: boolean }).isClosed === true ||
@@ -3218,30 +3310,28 @@ export default function NextWeekPlanPage() {
                                     <Check className="h-3 w-3" />
                                   </Button>
                                 ) : null}
-                                {canAddAttachments || attachments.length > 0 ? (
+                                {canAddAttachments || attachmentCount > 0 ? (
                                   <Button
                                     variant="outline"
                                     size="icon"
-                                    disabled={!canAddAttachments}
-                                    aria-disabled={!canAddAttachments}
-                                    className={`h-7 w-7 shrink-0 ${!canAddAttachments ? "opacity-50 cursor-not-allowed" : ""}`}
+                                    className="h-7 w-7 shrink-0"
                                     title={
                                       canAddAttachments
-                                        ? attachments.length > 0
+                                        ? attachmentCount > 0
                                           ? "Manage attachments"
                                           : "Add attachments"
-                                        : "Attachments disabled for done tasks and closed notes"
+                                        : "View attachments"
                                     }
                                     aria-label={
                                       canAddAttachments
-                                        ? attachments.length > 0
+                                        ? attachmentCount > 0
                                           ? "Manage attachments"
                                           : "Add attachments"
-                                        : "Attachments disabled"
+                                        : "View attachments"
                                     }
-                                    onClick={() => canAddAttachments && openAttachmentsForNote(note.id)}
+                                    onClick={() => void openAttachmentsForNote(note.id)}
                                   >
-                                    {attachments.length > 0 ? <ImageIcon className="h-4 w-4" /> : <Paperclip className="h-4 w-4" />}
+                                    {attachmentCount > 0 ? <ImageIcon className="h-4 w-4" /> : <Paperclip className="h-4 w-4" />}
                                   </Button>
                                 ) : null}
                                 <Button
@@ -3714,7 +3804,9 @@ export default function NextWeekPlanPage() {
               ) : null}
             </div>
           ) : null}
-          {attachmentDialogItems.length === 0 ? (
+          {loadingAttachmentsNoteId === attachmentsDialogNoteId ? (
+            <div className="text-sm text-slate-500">Loading attachments...</div>
+          ) : attachmentDialogItems.length === 0 ? (
             <div className="text-sm text-slate-500">No attachments yet.</div>
           ) : (
             <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
