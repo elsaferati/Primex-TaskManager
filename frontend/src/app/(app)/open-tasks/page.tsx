@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import Link from "next/link"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -252,6 +251,7 @@ export default function OpenTasksPage() {
   const [saving, setSaving] = React.useState(false)
   const [exportingExcel, setExportingExcel] = React.useState(false)
   const [importingBaseline, setImportingBaseline] = React.useState(false)
+  const [resettingBaseline, setResettingBaseline] = React.useState(false)
   const baselineFileInputRef = React.useRef<HTMLInputElement>(null)
 
   const thisWeekStart = React.useMemo(() => mondayISO(), [])
@@ -545,6 +545,42 @@ export default function OpenTasksPage() {
     }
   }
 
+  const resetOpenTasksBaseline = async () => {
+    if (resettingBaseline) return
+    const confirmed = window.confirm(
+      `Reset your imported pre-plan for ${formatDate(nextWeekStart)} - ${formatDate(nextWeekEnd)}? This will not change any tasks. To restore the comparison, you must import the Excel again.`
+    )
+    if (!confirmed) return
+
+    setResettingBaseline(true)
+    try {
+      const qs = new URLSearchParams({ planning_week_start: nextWeekStart })
+      const res = await apiFetch(`/exports/open-tasks/baseline?${qs.toString()}`, { method: "DELETE" })
+      if (!res.ok) {
+        const raw = await res.text().catch(() => "")
+        let detail = raw
+        try {
+          detail = (JSON.parse(raw) as { detail?: string }).detail || raw
+        } catch {
+          // Keep the plain response when it is not JSON.
+        }
+        toast.error(detail || "Failed to reset the pre-plan import.")
+        return
+      }
+      const result = (await res.json()) as { deleted: number; planning_week_start: string }
+      toast.success(
+        result.deleted
+          ? `Reset ${result.deleted} imported pre-plan task values.`
+          : "No imported pre-plan values were found for this planning week."
+      )
+    } catch (error) {
+      console.error("Failed to reset open task baseline", error)
+      toast.error("Failed to reset the pre-plan import.")
+    } finally {
+      setResettingBaseline(false)
+    }
+  }
+
   const saveTask = async () => {
     if (!selectedTask) return
     const isNoteOriginTask = Boolean(selectedTask.ga_note_origin_id || selectedTask.plan_note_origin_id)
@@ -642,18 +678,22 @@ export default function OpenTasksPage() {
             className="hidden"
             onChange={(event) => void importOpenTasksBaseline(event)}
           />
-          <Button variant="outline" disabled={loading || exportingExcel} onClick={() => void exportOpenTasksExcel()}>
+          <Button variant="outline" disabled={loading || exportingExcel || resettingBaseline} onClick={() => void exportOpenTasksExcel()}>
             {exportingExcel ? "Exporting..." : "Export Excel"}
           </Button>
           <Button
             variant="outline"
-            disabled={loading || importingBaseline}
+            disabled={loading || exportingExcel || importingBaseline || resettingBaseline}
             onClick={() => baselineFileInputRef.current?.click()}
           >
             {importingBaseline ? "Importing..." : "Import Pre-Plan Excel"}
           </Button>
-          <Button asChild variant="outline">
-            <Link href="/weekly-planner">Open Weekly Planner</Link>
+          <Button
+            variant="destructive"
+            disabled={loading || exportingExcel || importingBaseline || resettingBaseline}
+            onClick={() => void resetOpenTasksBaseline()}
+          >
+            {resettingBaseline ? "Resetting..." : "Reset Pre-Plan Import"}
           </Button>
         </div>
       </div>

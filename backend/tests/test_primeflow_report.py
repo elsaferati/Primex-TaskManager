@@ -28,6 +28,7 @@ from app.services.task_strike_events import (
     split_strike_timestamp,
 )
 from app.services.primeflow_report_delivery import (
+    _text_overrides_for_1h_interval,
     _undiscussed_px_notes_statement,
     _optional_attachment,
     load_1h_reminder_questions,
@@ -37,6 +38,65 @@ from app.services.primeflow_report_delivery import (
 
 
 class PrimeFlowReportTests(unittest.TestCase):
+    def test_report_uses_atomic_current_text_when_common_view_text_is_stale(self) -> None:
+        task_id = uuid.uuid4()
+        report_day = date(2026, 8, 10)
+        interval_end = strike_interval_end(report_day, "11:00")
+        current_title = "Task heading\n[[done]]1. Newly completed[[/done]]\n2. Still open"
+        event = SimpleNamespace(
+            id=uuid.uuid4(),
+            task_id=task_id,
+            field_name="TITLE",
+            point_key="event-key",
+            point_text="1. Newly completed",
+            action="STRUCK",
+            occurred_at=datetime(2026, 8, 10, 10, 30, tzinfo=interval_end.tzinfo),
+        )
+
+        class FakeResult:
+            def all(self):
+                return [(task_id, current_title, None, None, None, event)]
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def execute(self, _statement):
+                return FakeResult()
+
+        stale_common_view = {
+            "items": {
+                "oneH": [{
+                    "id": f"task:{task_id}:{report_day.isoformat()}",
+                    "task_id": str(task_id),
+                    "date": report_day.isoformat(),
+                    "one_h_report_slot": "11:00",
+                    "person": "Tester",
+                    "status": "TODO",
+                    "title": "Task heading\n1. Newly completed\n2. Still open",
+                    "description": None,
+                }]
+            }
+        }
+
+        with patch(
+            "app.services.primeflow_report_delivery.SessionLocal",
+            return_value=FakeSession(),
+        ):
+            title_overrides, _ = asyncio.run(_text_overrides_for_1h_interval(
+                stale_common_view,
+                report_day,
+                "11:00",
+                interval_end=interval_end,
+            ))
+
+        plain, marked = title_overrides[str(task_id)]
+        self.assertIn("1. Newly completed", plain)
+        self.assertIn("[[done:blue]]1. Newly completed[[/done]]", marked)
+
     def test_optional_png_failure_does_not_abort_report_delivery(self) -> None:
         warnings: list[str] = []
 
