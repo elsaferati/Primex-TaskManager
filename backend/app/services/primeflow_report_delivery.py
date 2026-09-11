@@ -379,6 +379,8 @@ async def generate_fresh(
         undiscussed_notes=undiscussed_notes,
         title_overrides=title_overrides,
         description_overrides=description_overrides,
+        completion_window_start=strike_interval_start(day, slot),
+        completion_window_end=strike_interval_end(day, slot),
     )
 
 

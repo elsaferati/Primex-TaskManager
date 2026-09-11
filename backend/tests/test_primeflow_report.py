@@ -38,6 +38,41 @@ from app.services.primeflow_report_delivery import (
 
 
 class PrimeFlowReportTests(unittest.TestCase):
+    def test_done_task_appears_only_in_its_completion_report_window(self) -> None:
+        report_day = date(2026, 8, 10)
+        completed_task = {
+            "id": "done-at-0940",
+            "task_id": str(uuid.uuid4()),
+            "date": report_day.isoformat(),
+            "one_h_report_slot": "10:00",
+            "person": "Tester",
+            "status": "DONE",
+            "title": "Completed task",
+            "description": "Finished",
+            "completed_at": "2026-08-10T09:40:00+02:00",
+        }
+        data = {"guardrails": {"truncated": {}}, "items": {"oneH": [completed_task]}}
+
+        ten_document = build_report_document(
+            data,
+            report_day,
+            "10:00",
+            completion_window_start=strike_interval_start(report_day, "10:00"),
+            completion_window_end=strike_interval_end(report_day, "10:00"),
+        )
+        eleven_document = build_report_document(
+            data,
+            report_day,
+            "11:00",
+            completion_window_start=strike_interval_start(report_day, "11:00"),
+            completion_window_end=strike_interval_end(report_day, "11:00"),
+        )
+
+        self.assertEqual(ten_document.task_count, 1)
+        self.assertIn("Completed task", render_plain_text(ten_document))
+        self.assertEqual(eleven_document.task_count, 0)
+        self.assertNotIn("Completed task", render_plain_text(eleven_document))
+
     def test_report_uses_atomic_current_text_when_common_view_text_is_stale(self) -> None:
         task_id = uuid.uuid4()
         report_day = date(2026, 8, 10)

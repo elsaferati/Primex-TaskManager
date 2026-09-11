@@ -242,6 +242,31 @@ def _slot(item: dict[str, Any]) -> str | None:
     return item.get("one_h_report_slot") or item.get("slot") or item.get("time_slot")
 
 
+def _completed_in_report_window(
+    item: dict[str, Any],
+    *,
+    window_start: datetime | None,
+    window_end: datetime | None,
+) -> bool:
+    """Keep DONE tasks only in the 1H window in which they were completed."""
+
+    status = str(item.get("status") or "").upper()
+    if status not in {"DONE", "COMPLETED"} or window_start is None or window_end is None:
+        return True
+    raw_completed_at = item.get("completed_at") or item.get("completedAt")
+    if not raw_completed_at:
+        # Legacy rows can be DONE without a completion timestamp. Retaining
+        # them is safer than silently dropping work whose interval is unknown.
+        return True
+    try:
+        completed_at = datetime.fromisoformat(str(raw_completed_at).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if completed_at.tzinfo is None:
+        completed_at = completed_at.replace(tzinfo=window_end.tzinfo)
+    return window_start < completed_at <= window_end
+
+
 def _source_slot_for_report_slot(slot: str) -> str:
     """The internal 14:10 report remains distinct from the 14:20 Today digest."""
     return "14:20" if slot == "14:10" else slot
@@ -395,18 +420,42 @@ def build_report_document(
     title_overrides: dict[str, tuple[str, str]] | None = None,
     description_overrides: dict[str, tuple[str, str]] | None = None,
     undiscussed_notes: list[ReportUndiscussedNote] | None = None,
+    completion_window_start: datetime | None = None,
+    completion_window_end: datetime | None = None,
 ) -> ReportDocument:
     guardrails = data.get("guardrails") or {}
     truncated = any((guardrails.get("truncated") or {}).values())
     if truncated:
         raise ValueError("Common View contains truncated buckets")
-    items = data.get("items") or {}
+    source_items = data.get("items") or {}
+    items = {
+        bucket: (
+            [
+                item for item in values
+                if _completed_in_report_window(
+                    item,
+                    window_start=completion_window_start,
+                    window_end=completion_window_end,
+                )
+            ]
+            if isinstance(values, list) else values
+        )
+        for bucket, values in source_items.items()
+    }
     department_codes = {
         str(department.get("id")): str(department.get("code") or "").strip()
         for department in (data.get("departments") or [])
         if isinstance(department, dict) and department.get("id")
     }
-    one_h = items.get("oneH") or data.get("tasks") or []
+    fallback_tasks = [
+        item for item in (data.get("tasks") or [])
+        if _completed_in_report_window(
+            item,
+            window_start=completion_window_start,
+            window_end=completion_window_end,
+        )
+    ]
+    one_h = items.get("oneH") or fallback_tasks
     definitions: list[tuple[str, list[dict[str, Any]]]] = []
     if slot in {"10:00", "14:20"}:
         # The morning report is the full-day baseline. The new 14:20 report
