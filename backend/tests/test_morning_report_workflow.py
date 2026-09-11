@@ -326,6 +326,12 @@ def make_draft() -> MorningReportDraft:
 
 
 class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    def test_personal_and_wfc_sections_are_labeled_as_auto_filled(self) -> None:
+        self.assertEqual(SECTION_TITLES[7], "TASKS PERSONALISHT ME KA/GENTIN?")
+        self.assertEqual(SECTION_TITLES[8], "WFC ME KA/GENTIN?")
+        self.assertEqual(section_group_label("morning", SECTION_TITLES[7]), "AUTO-FILLED FROM PRIMEFLOW")
+        self.assertEqual(section_group_label("morning", SECTION_TITLES[8]), "AUTO-FILLED FROM PRIMEFLOW")
+
     def test_edited_auto_title_keeps_m1_identity_position_and_group(self) -> None:
         sections = normalize_morning_report_sections(
             with_section_keys("morning", [{"title": title, "body": str(i)} for i, title in enumerate(SECTION_TITLES)])
@@ -561,7 +567,7 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["sections"][2]["body"], "Plan changes after 10:00")
 
-    async def test_m1_personal_section_includes_only_ga_tasks(self) -> None:
+    async def test_existing_m1_personal_section_remains_ga_only(self) -> None:
         assignee_id = uuid.uuid4()
         ka_task = Task(
             id=uuid.uuid4(),
@@ -585,13 +591,24 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             start_date=datetime(2026, 8, 5, 8, 0, tzinfo=ZoneInfo("Europe/Tirane")),
             due_date=datetime(2026, 8, 5, 10, 0, tzinfo=ZoneInfo("Europe/Tirane")),
         )
+        gent_task = Task(
+            id=uuid.uuid4(),
+            title="AT/GENTI: DET PERSONALISHT",
+            status="TODO",
+            phase="MEETINGS",
+            is_personal=True,
+            is_active=True,
+            assigned_to=assignee_id,
+            start_date=datetime(2026, 8, 5, 8, 0, tzinfo=ZoneInfo("Europe/Tirane")),
+            due_date=datetime(2026, 8, 5, 10, 0, tzinfo=ZoneInfo("Europe/Tirane")),
+        )
 
         with patch("app.services.after_break_report._all_participant_user_ids", new=AsyncMock(return_value=set())):
             lines = await _personal_section(
                 SimpleNamespace(),
-                [ka_task, ga_task],
+                [ka_task, ga_task, gent_task],
                 {assignee_id: "Arta Test"},
-                {ka_task.id: {assignee_id}, ga_task.id: {assignee_id}},
+                {ka_task.id: {assignee_id}, ga_task.id: {assignee_id}, gent_task.id: {assignee_id}},
                 date(2026, 8, 5),
                 title_pattern=PERSONAL_GA,
             )
@@ -599,6 +616,7 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("DM/GA: BZ GA - P/P PARA PF", body)
         self.assertNotIn("AT/KA: DET PERSONALISHT", body)
+        self.assertNotIn("AT/GENTI: DET PERSONALISHT", body)
 
     async def test_scheduler_regenerates_sections_before_sending(self) -> None:
         timezone = ZoneInfo("Europe/Tirane")

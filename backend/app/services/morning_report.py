@@ -33,11 +33,14 @@ from app.services.meetings_report import (
     _effective_task_assignee_ids,
     _initials,
     _is_open,
+    _is_report_wfc_task,
+    _ka_genti_owner,
     _leave_lines,
     _local_date,
     _m3_am_pm_label,
     _m3_department_code_label,
     _m3_department_label,
+    _m3_status_table,
     _m3_task_type_label,
     _meeting_lines,
     _meeting_occurs_on_date,
@@ -70,8 +73,12 @@ SECTION_TITLES = [
     "PV/FESTA EXT/TAK EXT/ TAK INT/ BZ ME GA/BLLOK:",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
     GA_HV_DV_TASKS_TITLE,
+    "TASKS PERSONALISHT ME KA/GENTIN?",
+    "WFC ME KA/GENTIN?",
 ]
-DISPLAY_SECTION_TITLES = [SECTION_TITLES[0], SECTION_TITLES[6], *SECTION_TITLES[1:6]]
+DISPLAY_SECTION_TITLES = [
+    SECTION_TITLES[0], SECTION_TITLES[6], *SECTION_TITLES[1:6], SECTION_TITLES[7], SECTION_TITLES[8]
+]
 MANUAL_SECTION_TITLES = {SECTION_TITLES[0]}
 GA_HV_DV_TASK_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7),
@@ -89,6 +96,8 @@ LEGACY_NOTES_TITLE = (
     "VENDOS DET: STATUS (1H: EM(08:00),08:00,DL,AM,AM&PM,PM/P/R1)"
 )
 SECTION_TITLE_ALIASES = {
+    "(GA/KA/GENTI) KUSH KA DET PERSONALISHT?": SECTION_TITLES[7],
+    "WFC TASKS (KA/GENTI)": SECTION_TITLES[8],
     "(GA) NOTES TE REJA?": SECTION_TITLES[3],
     "(GA) NOTES TE REJA?- SELEKTO NOTES TE KALTRA DHE DISKUTO (ADM & DSG) SECILEN A KRIJOHET DETYRE?": SECTION_TITLES[3],
     LEGACY_NOTES_TITLE: SECTION_TITLES[3],
@@ -133,6 +142,10 @@ def _default_body(title: str) -> str:
         )
     if title == GA_HV_DV_TASKS_TITLE:
         return "\n\n".join(f"{task_title}: 0" for task_title in (GA_TASKS_TITLE, HV_TASKS_TITLE, DV_TASKS_TITLE))
+    if title == SECTION_TITLES[7]:
+        return "PERSONAL KA: 0\n\nPERSONAL GENTI: 0"
+    if title == SECTION_TITLES[8]:
+        return "WFC KA: 0\n\nWFC GENTI: 0"
     return "\n\n".join(["TODO: 0", "IN PROGRESS: 0", "WFE: 0", "WAITING CONFIRMATION: 0", "DONE: 0"])
 
 
@@ -203,6 +216,8 @@ def _canonical_section_title(raw_title: str) -> str | None:
         return GA_HV_DV_TASKS_TITLE
     if "KUSHKADETPERSONALISHT" in compact:
         return SECTION_TITLES[5]
+    if "WFCTASKS" in compact:
+        return SECTION_TITLES[8]
     return None
 
 
@@ -702,6 +717,66 @@ async def build_morning_report_sections(
         title_pattern=PERSONAL_GA,
         department_codes=department_codes,
     )
+    personal_ka_genti = [
+        task for task in tasks
+        if task.is_personal
+        and _belongs_to_day(task, report_day)
+        and _ka_genti_owner(task) is not None
+    ]
+    personal_ka_genti_tables = [
+        *_m3_status_table(
+            "PERSONAL KA",
+            [task for task in personal_ka_genti if _ka_genti_owner(task) == "KA"],
+            names,
+            with_status=True,
+            include_department=True,
+            include_am_pm=True,
+            department_codes=department_codes,
+            assignee_ids_by_task=assignee_ids_by_task,
+            all_participant_ids=all_participant_ids,
+        ),
+        "",
+        *_m3_status_table(
+            "PERSONAL GENTI",
+            [task for task in personal_ka_genti if _ka_genti_owner(task) == "GENTI"],
+            names,
+            with_status=True,
+            include_department=True,
+            include_am_pm=True,
+            department_codes=department_codes,
+            assignee_ids_by_task=assignee_ids_by_task,
+            all_participant_ids=all_participant_ids,
+        ),
+    ]
+    wfc_report_tasks = [
+        task for task in tasks
+        if _belongs_to_day(task, report_day) and _is_report_wfc_task(task)
+    ]
+    wfc = [
+        *_m3_status_table(
+            "WFC KA",
+            [task for task in wfc_report_tasks if _ka_genti_owner(task) == "KA"],
+            names,
+            with_status=True,
+            include_department=True,
+            include_am_pm=True,
+            department_codes=department_codes,
+            assignee_ids_by_task=assignee_ids_by_task,
+            all_participant_ids=all_participant_ids,
+        ),
+        "",
+        *_m3_status_table(
+            "WFC GENTI",
+            [task for task in wfc_report_tasks if _ka_genti_owner(task) == "GENTI"],
+            names,
+            with_status=True,
+            include_department=True,
+            include_am_pm=True,
+            department_codes=department_codes,
+            assignee_ids_by_task=assignee_ids_by_task,
+            all_participant_ids=all_participant_ids,
+        ),
+    ]
 
     attendance = _attendance_section(entries, names, report_day)
     sections = [
@@ -712,6 +787,8 @@ async def build_morning_report_sections(
         {"title": SECTION_TITLES[3], "body": _notes_section(note_rows)},
         {"title": SECTION_TITLES[4], "body": day_context},
         {"title": SECTION_TITLES[5], "body": _normalize_section(personal)},
+        {"title": SECTION_TITLES[7], "body": _normalize_section(personal_ka_genti_tables)},
+        {"title": SECTION_TITLES[8], "body": _normalize_section(wfc)},
     ]
     snapshot = {
         "report_day": report_day.isoformat(),
@@ -728,6 +805,8 @@ async def build_morning_report_sections(
             SECTION_TITLES[3]: len(note_rows),
             SECTION_TITLES[4]: day_context_count,
             SECTION_TITLES[5]: sum(1 for line in personal if re.match(r"^\|\s+\d+\s+\|", line)),
+            SECTION_TITLES[7]: len(personal_ka_genti),
+            SECTION_TITLES[8]: len(wfc_report_tasks),
         },
     }
     return sections, snapshot

@@ -66,6 +66,8 @@ function sectionGroupLabel(section: Section) {
     "(GA) NOTES TE REJA ( NOT DISSCUSED)?",
     "PV/FESTA EXT/TAK EXT/ TAK INT/ BZ ME GA/BLLOK:",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
+    "TASKS PERSONALISHT ME KA/GENTIN?",
+    "WFC ME KA/GENTIN?",
   ]
   const compact = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]+/g, "")
   const key = compact(section.section_key || section.title)
