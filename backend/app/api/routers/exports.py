@@ -15,7 +15,6 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
 from openpyxl.worksheet.datavalidation import DataValidation
-from openpyxl.worksheet.filters import FilterColumn, Filters
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
@@ -2487,6 +2486,15 @@ def _open_task_baseline_column_numbers(ws) -> tuple[int, int, int]:
     return when_column, status_column, comment_column
 
 
+def _open_task_id_column_number(ws) -> int | None:
+    """Return the visible TASK ID column for current exports, if present."""
+    for column, cell in enumerate(ws[4], start=1):
+        value = str(cell.value).strip().upper() if cell.value is not None else ""
+        if value == "TASK ID":
+            return column
+    return None
+
+
 def _open_task_planning_when(value: datetime | date | None, current_week_start: date) -> str:
     """Map a due date to PrimeFlow's Friday planning vocabulary.
 
@@ -2539,6 +2547,11 @@ def _open_task_values_match(manual_value: str | None, planned_value: str | None)
     manual = (manual_value or "").strip().upper()
     planned = (planned_value or "").strip().upper()
     return manual == planned
+
+
+def _open_task_should_compare_status(manual_when: str | None) -> bool:
+    """Future tasks have no required manual status to compare with PrimeFlow."""
+    return (manual_when or "").strip().upper() != "FUTURE"
 
 
 def _open_task_wrapped_line_count(value: object, column_width: float) -> int:
@@ -2615,21 +2628,56 @@ async def import_open_tasks_baseline(
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing planning week metadata.") from exc
 
-    row_task_pairs: list[tuple[int, uuid.UUID]] = []
+    metadata_row_task_pairs: list[tuple[int, uuid.UUID]] = []
     for row_idx in range(3, metadata.max_row + 1):
         excel_row = metadata.cell(row=row_idx, column=1).value
         task_id_value = metadata.cell(row=row_idx, column=2).value
         if excel_row is None or task_id_value is None:
             continue
         try:
-            row_task_pairs.append((int(excel_row), uuid.UUID(str(task_id_value))))
+            metadata_row_task_pairs.append((int(excel_row), uuid.UUID(str(task_id_value))))
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid task metadata in workbook.") from exc
 
-    if not row_task_pairs:
+    if not metadata_row_task_pairs:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The workbook contains no task rows.")
 
     when_column, planning_status_column, comment_column = _open_task_baseline_column_numbers(ws)
+    task_id_column = _open_task_id_column_number(ws)
+    if task_id_column is None:
+        # Legacy exports did not expose TASK ID, so their hidden row mapping is
+        # still the only available identity source.
+        row_task_pairs = metadata_row_task_pairs
+    else:
+        # Current exports carry the immutable task UUID on the same visible row
+        # as the editable values. This remains correct after Excel sorting or
+        # row moves, unlike the old hidden row-number mapping.
+        row_task_pairs = []
+        seen_task_ids: set[uuid.UUID] = set()
+        for excel_row in range(5, ws.max_row + 1):
+            task_id_value = ws.cell(row=excel_row, column=task_id_column).value
+            if task_id_value is None or not str(task_id_value).strip():
+                continue
+            try:
+                task_id = uuid.UUID(str(task_id_value).strip())
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid TASK ID in Open Tasks row {excel_row}.",
+                ) from exc
+            if task_id in seen_task_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Duplicate TASK ID in Open Tasks row {excel_row}.",
+                )
+            seen_task_ids.add(task_id)
+            row_task_pairs.append((excel_row, task_id))
+
+        if not row_task_pairs:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The workbook contains no visible task IDs.",
+            )
 
     task_ids = {task_id for _, task_id in row_task_pairs}
     accessible_tasks = (
@@ -2751,6 +2799,7 @@ async def export_open_tasks_xlsx(
         .outerjoin(Project, Task.project_id == Project.id)
         .where(Task.is_active.is_(True))
         .where(func.upper(Task.status) != TaskStatusEnum.DONE.value)
+        .where(Task.system_template_origin_id.is_(None))
         .where(or_(Task.project_id.is_(None), Project.is_template.is_(False)))
         .options(selectinload(Task.assignees))
         .order_by(Task.due_date.asc().nulls_last(), Task.created_at.desc())
@@ -2770,6 +2819,10 @@ async def export_open_tasks_xlsx(
             ensure_department_access(user, department_id)
             task_stmt = task_stmt.where(Task.department_id == department_id)
         tasks = (await db.execute(task_stmt)).scalars().unique().all()
+
+    # Keep this defensive filter in addition to the SQL condition so exported
+    # rows and their hidden task-ID mapping can never contain system tasks.
+    tasks = [task for task in tasks if not task.system_template_origin_id]
 
     project_ids = {task.project_id for task in tasks if task.project_id}
     department_ids = {task.department_id for task in tasks if task.department_id}
@@ -2889,9 +2942,6 @@ async def export_open_tasks_xlsx(
     for task in tasks:
         due_bucket = _open_task_due_bucket(task, monday, this_week_end, next_week_start, next_week_end)
         source = _open_task_source_label(task)
-        # System tasks are always included in the export; source-based filters
-        # (project / GA-KA / plan / fast) only narrow down the other task types.
-        is_system_task = bool(task.system_template_origin_id)
         if user_id and user_id not in assignee_ids_for(task):
             continue
         if normalized_filter == "overdue" and due_bucket != "OVERDUE":
@@ -2913,19 +2963,18 @@ async def export_open_tasks_xlsx(
             continue
         if normalized_status_filter == "in_progress" and task_status != TaskStatusEnum.IN_PROGRESS.value:
             continue
-        if not is_system_task:
-            if normalized_filter == "ga" and not (task.ga_note_origin_id or task.plan_note_origin_id):
-                continue
-            if normalized_filter == "plan" and not task.plan_note_origin_id:
-                continue
-            if normalized_filter == "project" and not task.project_id:
-                continue
-            if normalized_filter == "fast" and not _open_task_is_fast(task):
-                continue
-            if normalized_type_filters and not any(
-                _open_task_matches_type_filter(task, value) for value in normalized_type_filters
-            ):
-                continue
+        if normalized_filter == "ga" and not (task.ga_note_origin_id or task.plan_note_origin_id):
+            continue
+        if normalized_filter == "plan" and not task.plan_note_origin_id:
+            continue
+        if normalized_filter == "project" and not task.project_id:
+            continue
+        if normalized_filter == "fast" and not _open_task_is_fast(task):
+            continue
+        if normalized_type_filters and not any(
+            _open_task_matches_type_filter(task, value) for value in normalized_type_filters
+        ):
+            continue
         if normalized_search:
             project = project_map.get(task.project_id) if task.project_id else None
             note = ga_note_map.get(task.ga_note_origin_id) if task.ga_note_origin_id else None
@@ -2987,17 +3036,12 @@ async def export_open_tasks_xlsx(
         cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
         cell.number_format = "@"
 
-    source_values_present: set[str] = set()
-    system_data_rows: list[int] = []
     mismatch_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
     mismatch_font = Font(color="FFFFFF", bold=True)
     for idx, (group, task) in enumerate(export_rows, start=1):
         project = project_map.get(task.project_id) if task.project_id else None
         department = department_map.get(task.department_id) if task.department_id else None
         source_label = _open_task_source_label(task)
-        source_values_present.add(source_label)
-        if task.system_template_origin_id:
-            system_data_rows.append(data_row)
         baseline = baseline_map.get(task.id)
         planned_when = _open_task_planning_when(task.due_date, monday) if baseline else ""
         planned_status = _open_task_planned_status(task) if baseline else ""
@@ -3033,7 +3077,10 @@ async def export_open_tasks_xlsx(
             if not _open_task_values_match(baseline.when_value, planned_when):
                 ws.cell(row=data_row, column=19).fill = mismatch_fill
                 ws.cell(row=data_row, column=19).font = mismatch_font
-            if not _open_task_values_match(baseline.status_value, planned_status):
+            if (
+                _open_task_should_compare_status(baseline.when_value)
+                and not _open_task_values_match(baseline.status_value, planned_status)
+            ):
                 ws.cell(row=data_row, column=20).fill = mismatch_fill
                 ws.cell(row=data_row, column=20).font = mismatch_font
         data_row += 1
@@ -3084,16 +3131,6 @@ async def export_open_tasks_xlsx(
         metadata.cell(row=excel_row - 2, column=2, value=str(task.id))
 
     ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
-    # Pre-filter the SOURCE column so SYSTEM tasks are deselected (hidden) by
-    # default. They stay in the file, so users can re-check SYSTEM in the filter
-    # dropdown to reveal them again.
-    visible_sources = sorted(source_values_present - {"SYSTEM"})
-    if system_data_rows and visible_sources:
-        source_filter = FilterColumn(colId=3)
-        source_filter.filters = Filters(filter=visible_sources)
-        ws.auto_filter.filterColumn.append(source_filter)
-        for r_idx in system_data_rows:
-            ws.row_dimensions[r_idx].hidden = True
     ws.freeze_panes = "C5"
     ws.print_title_rows = f"{header_row}:{header_row}"
     ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"

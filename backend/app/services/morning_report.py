@@ -34,6 +34,7 @@ from app.services.meetings_report import (
     _initials,
     _is_open,
     _is_report_wfc_task,
+    _ka_genti_confirmer,
     _ka_genti_owner,
     _leave_lines,
     _local_date,
@@ -750,12 +751,14 @@ async def build_morning_report_sections(
     ]
     wfc_report_tasks = [
         task for task in tasks
-        if _belongs_to_day(task, report_day) and _is_report_wfc_task(task)
+        if _belongs_to_day(task, report_day)
+        and _is_report_wfc_task(task)
+        and _ka_genti_confirmer(task, names) is not None
     ]
     wfc = [
         *_m3_status_table(
             "WFC KA",
-            [task for task in wfc_report_tasks if _ka_genti_owner(task) == "KA"],
+            [task for task in wfc_report_tasks if _ka_genti_confirmer(task, names) == "KA"],
             names,
             with_status=True,
             include_department=True,
@@ -767,7 +770,7 @@ async def build_morning_report_sections(
         "",
         *_m3_status_table(
             "WFC GENTI",
-            [task for task in wfc_report_tasks if _ka_genti_owner(task) == "GENTI"],
+            [task for task in wfc_report_tasks if _ka_genti_confirmer(task, names) == "GENTI"],
             names,
             with_status=True,
             include_department=True,
