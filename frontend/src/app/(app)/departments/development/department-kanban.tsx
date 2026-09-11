@@ -25,7 +25,7 @@ import { PxJavPlanningBriefView } from "@/components/px-jav-planning-brief-view"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
-import { formatDepartmentName } from "@/lib/department-name"
+import { departmentTableTag, formatDepartmentName } from "@/lib/department-name"
 import { loadGaNoteTaskAssigneeIds, replaceGaNoteTaskAssignees } from "@/lib/ga-note-task-membership"
 import { buildMarkedAppendOnlyText, getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
@@ -467,6 +467,29 @@ function systemTaskDepartmentLabel(
   if (template.scope === "GA") return "GA"
   if (template.scope === "ALL") return "ALL"
   return "-"
+}
+
+function MeetingDepartmentTag({
+  meeting,
+  departmentMap,
+}: {
+  meeting: Meeting
+  departmentMap: Map<string, Department>
+}) {
+  const meetingDepartment = departmentMap.get(meeting.department_id)
+  const tag = meetingDepartment ? departmentTableTag(meetingDepartment).toUpperCase() : "-"
+  return (
+    <span
+      className={cn(
+        "inline-flex min-w-[42px] items-center justify-center rounded-full border px-2 py-0.5 text-[10px] font-bold tracking-wide",
+        tag === "DEV"
+          ? "border-blue-700 bg-blue-600 text-white shadow-sm"
+          : "border-slate-300 bg-slate-100 text-slate-700"
+      )}
+    >
+      {tag}
+    </span>
+  )
 }
 
 const PRIORITY_BADGE: Record<"NORMAL" | "HIGH", string> = {
@@ -1298,6 +1321,7 @@ export default function DepartmentKanban() {
   const [internalNotes, setInternalNotes] = React.useState<InternalNote[]>([])
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
   const [myMeetings, setMyMeetings] = React.useState<Meeting[]>([])
+  const [allDepartmentMeetings, setAllDepartmentMeetings] = React.useState<Meeting[]>([])
   const [msConnected, setMsConnected] = React.useState(false)
   const [msCanManage, setMsCanManage] = React.useState(false)
   const [msEvents, setMsEvents] = React.useState<MicrosoftEvent[]>([])
@@ -1386,6 +1410,7 @@ export default function DepartmentKanban() {
     systemCreatedTasks: Task[]
     internalNotes: InternalNote[]
     meetings: Meeting[]
+    allDepartmentMeetings?: Meeting[]
     systemDepartmentId: string
     systemTasksKey: string
     internalNoteDepartmentId: string | null
@@ -1403,6 +1428,7 @@ export default function DepartmentKanban() {
     setSystemCreatedTasks(payload.systemCreatedTasks)
     setInternalNotes(payload.internalNotes)
     setMeetings(payload.meetings)
+    setAllDepartmentMeetings(payload.allDepartmentMeetings || [])
     setSystemDepartmentId(payload.systemDepartmentId)
     setInternalNoteProjects(payload.internalNoteProjects)
     bootstrapSystemTasksKeyRef.current = payload.systemTasksKey
@@ -1557,13 +1583,14 @@ export default function DepartmentKanban() {
         }
 
         if (!silent) setLoadingExtras(true)
-        const [projRes, sysRes, allSysRes, tasksRes, internalRes, meetingsRes] = await Promise.all([
+        const [projRes, sysRes, allSysRes, tasksRes, internalRes, meetingsRes, allDepartmentMeetingsRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}`),
           apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${systemDateKey}&include_overdue=true`),
           apiFetch(`/system-tasks?department_id=${dep.id}`),
           apiFetch(`/tasks?include_done=true&department_id=${dep.id}`),
           apiFetch(`/internal-notes?department_id=${dep.id}`),
           apiFetch(`/meetings?department_id=${dep.id}`),
+          apiFetch("/meetings?include_all_departments=true"),
         ])
         const projects = projRes.ok ? ((await projRes.json()) as Project[]) : []
         const systemTasks = sysRes.ok ? ((await sysRes.json()) as SystemTaskTemplate[]) : []
@@ -1571,6 +1598,9 @@ export default function DepartmentKanban() {
         const taskRows = tasksRes.ok ? ((await tasksRes.json()) as Task[]) : []
         const internalNotes = internalRes.ok ? ((await internalRes.json()) as InternalNote[]) : []
         const meetings = meetingsRes.ok ? ((await meetingsRes.json()) as Meeting[]) : []
+        const allDepartmentMeetings = allDepartmentMeetingsRes.ok
+          ? ((await allDepartmentMeetingsRes.json()) as Meeting[])
+          : meetings
         const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
         const systemTaskRows = taskRows.filter((t) => Boolean(t.system_template_origin_id))
         setDepartments(deps)
@@ -1590,6 +1620,7 @@ export default function DepartmentKanban() {
         if (!silent) setLoading(false)
         setInternalNotes(internalNotes)
         setMeetings(meetings)
+        setAllDepartmentMeetings(allDepartmentMeetings)
         const payload: DepartmentBootstrapPayload = {
           departments: deps,
           department: dep,
@@ -1602,6 +1633,7 @@ export default function DepartmentKanban() {
           systemCreatedTasks: systemTaskRows,
           internalNotes,
           meetings,
+          allDepartmentMeetings,
           systemDepartmentId: dep.id,
           systemTasksKey: `${dep.id}|${systemDateKey}`,
           internalNoteDepartmentId: dep.id,
@@ -2659,7 +2691,13 @@ export default function DepartmentKanban() {
       return meetings.filter((meeting) => meeting.department_id === department.id)
     }
     return meetings
-  }, [department?.id, meetings, myMeetings, isMineView, user?.id])
+  }, [department?.id, isMineView, meetings, myMeetings, user?.id])
+  const meetingTabMeetings = React.useMemo(() => {
+    const meetingById = new Map<string, Meeting>()
+    for (const meeting of visibleMeetings) meetingById.set(meeting.id, meeting)
+    for (const meeting of allDepartmentMeetings) meetingById.set(meeting.id, meeting)
+    return Array.from(meetingById.values())
+  }, [allDepartmentMeetings, visibleMeetings])
   const visibleExternalMeetings = React.useMemo(
     () => visibleMeetings.filter((m) => (m.meeting_type || "external") === "external"),
     [visibleMeetings]
@@ -3017,7 +3055,7 @@ export default function DepartmentKanban() {
     const startOfFuture = new Date(startOfNextWeek)
     startOfFuture.setDate(startOfFuture.getDate() + 7)
 
-    return visibleMeetings
+    return meetingTabMeetings
       .filter((meeting) => {
         const meetingDate = resolveMeetingDisplayDate(meeting)
         if (!meetingDate || Number.isNaN(meetingDate.getTime())) return false
@@ -3042,7 +3080,7 @@ export default function DepartmentKanban() {
         const bTime = resolveMeetingDisplayDate(b)?.getTime() ?? 0
         return aTime - bTime
       })
-  }, [meetingTimeFilter, todayDate, visibleMeetings])
+  }, [meetingTabMeetings, meetingTimeFilter, todayDate])
   const filteredExternalMeetings = React.useMemo(
     () => filteredMeetings.filter((meeting) => (meeting.meeting_type || "external") === "external"),
     [filteredMeetings]
@@ -4496,14 +4534,14 @@ export default function DepartmentKanban() {
       system: visibleSystemTemplates.length,
       "no-project": selectedDateNoProjectTasks.length,
       "internal-notes": groupedInternalNotes.length,
-      meetings: visibleMeetings.length,
+      meetings: meetingTabMeetings.length,
     }),
     [
       filteredProjects.length,
       visibleSystemTemplates.length,
       selectedDateNoProjectTasks.length,
       visibleInternalNotes.length,
-      visibleMeetings,
+      meetingTabMeetings,
       projectTasks.length,
       todayProjectTasks.length,
       todayNoProjectTasks.length,
@@ -6319,6 +6357,7 @@ export default function DepartmentKanban() {
       }
       const created = (await res.json()) as Meeting
       setMeetings((prev) => [created, ...prev])
+      setAllDepartmentMeetings((prev) => [created, ...prev.filter((meeting) => meeting.id !== created.id)])
       setMeetingTitle("")
       setMeetingPlatform("")
       setMeetingStartsAt("")
@@ -6496,6 +6535,7 @@ export default function DepartmentKanban() {
         return
       }
       const updated = (await res.json()) as Meeting
+      setAllDepartmentMeetings((prev) => prev.map((meeting) => (meeting.id === updated.id ? updated : meeting)))
       console.log("Updated meeting from API:", updated)
       // Reload meetings to ensure we have the latest data including participants and recurrence
       const meetingsRes = await apiFetch(`/meetings?department_id=${department.id}`)
@@ -6531,6 +6571,7 @@ export default function DepartmentKanban() {
       return
     }
     setMeetings((prev) => prev.filter((m) => m.id !== meetingId))
+    setAllDepartmentMeetings((prev) => prev.filter((meeting) => meeting.id !== meetingId))
     toast.success("Meeting deleted")
   }
 
@@ -10159,6 +10200,7 @@ export default function DepartmentKanban() {
                       <TableHeader>
                         <TableRow className="bg-slate-100 hover:bg-slate-100">
                           <TableHead className="uppercase">Title</TableHead>
+                          <TableHead className="w-[80px] uppercase">DEP</TableHead>
                           <TableHead className="w-[150px] uppercase">Date</TableHead>
                           <TableHead className="w-[110px] uppercase">Time</TableHead>
                           {!isReadOnly ? <TableHead className="w-[90px] text-right uppercase">Actions</TableHead> : null}
@@ -10171,7 +10213,7 @@ export default function DepartmentKanban() {
                             <TableRow key={meeting.id}>
                               {isEditing ? (
                                 <>
-                                  <TableCell colSpan={!isReadOnly ? 4 : 3}>
+                                  <TableCell colSpan={!isReadOnly ? 5 : 4}>
                                     <div className="space-y-3">
                                       <Input
                                         value={editMeetingTitle}
@@ -10342,6 +10384,9 @@ export default function DepartmentKanban() {
                               ) : (
                                 <>
                                   <TableCell className="font-medium">{meeting.title}</TableCell>
+                                  <TableCell>
+                                    <MeetingDepartmentTag meeting={meeting} departmentMap={departmentMap} />
+                                  </TableCell>
                                   <TableCell>{formatMeetingDate(meeting)}</TableCell>
                                   <TableCell>{formatMeetingTime(meeting)}</TableCell>
                                   {!isReadOnly ? (
@@ -10391,6 +10436,7 @@ export default function DepartmentKanban() {
                         <TableHeader>
                           <TableRow className="bg-slate-100 hover:bg-slate-100">
                             <TableHead className="uppercase">Title</TableHead>
+                            <TableHead className="w-[80px] uppercase">DEP</TableHead>
                             <TableHead className="w-[150px] uppercase">Date</TableHead>
                             <TableHead className="w-[110px] uppercase">Time</TableHead>
                             {!isReadOnly ? <TableHead className="w-[90px] text-right uppercase">Actions</TableHead> : null}
@@ -10402,7 +10448,7 @@ export default function DepartmentKanban() {
                             return (
                               <TableRow key={meeting.id}>
                                 {isEditing ? (
-                                  <TableCell colSpan={!isReadOnly ? 4 : 3}>
+                                  <TableCell colSpan={!isReadOnly ? 5 : 4}>
                                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto]">
                                       <Input
                                         value={editMeetingTitle}
@@ -10444,6 +10490,9 @@ export default function DepartmentKanban() {
                                 ) : (
                                   <>
                                     <TableCell className="font-medium">{meeting.title || "Internal meeting"}</TableCell>
+                                    <TableCell>
+                                      <MeetingDepartmentTag meeting={meeting} departmentMap={departmentMap} />
+                                    </TableCell>
                                     <TableCell>{formatMeetingDate(meeting)}</TableCell>
                                     <TableCell>{formatMeetingTime(meeting)}</TableCell>
                                     {!isReadOnly ? (
