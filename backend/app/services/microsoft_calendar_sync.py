@@ -32,6 +32,8 @@ CALENDAR_PREPARATION_DELAY = timedelta(hours=2)
 CALENDAR_PREPARATION_INTERVAL = timedelta(minutes=15)
 SAME_DAY_PREPARATION_FIRST_TIME = time(8, 15)
 ADVANCE_PREPARATION_FIRST_TIME = time(8, 20)
+EARLY_EXTERNAL_MEETING_TIME = time(8, 0)
+PREVIOUS_WORKDAY_PREPARATION_TIME = time(16, 0)
 WORKDAY_END_TIME = time(16, 30)
 BREAK_START_TIME = time(12, 0)
 BREAK_END_TIME = time(13, 15)
@@ -255,6 +257,13 @@ def _next_working_day(day: datetime) -> datetime:
     return candidate
 
 
+def _previous_working_day(day: datetime) -> datetime:
+    candidate = day - timedelta(days=1)
+    while candidate.weekday() >= 5:
+        candidate -= timedelta(days=1)
+    return candidate
+
+
 def calendar_follow_up_start(
     external_starts_at: datetime,
     external_ends_at: datetime | None,
@@ -306,7 +315,17 @@ def calendar_preparation_start(
         event_created_at = event_created_at.replace(tzinfo=timezone.utc)
     external_local = external_starts_at.astimezone(app_timezone)
     created_local = event_created_at.astimezone(app_timezone)
-    if created_local.date() == external_local.date():
+    if external_local.time().replace(tzinfo=None) == EARLY_EXTERNAL_MEETING_TIME:
+        previous_workday = _previous_working_day(external_local)
+        candidate = previous_workday.replace(
+            hour=PREVIOUS_WORKDAY_PREPARATION_TIME.hour,
+            minute=PREVIOUS_WORKDAY_PREPARATION_TIME.minute,
+            second=0,
+            microsecond=0,
+        )
+        if created_local > candidate:
+            candidate = external_local.replace(second=0, microsecond=0)
+    elif created_local.date() == external_local.date():
         earliest = external_local.replace(
             hour=SAME_DAY_PREPARATION_FIRST_TIME.hour,
             minute=SAME_DAY_PREPARATION_FIRST_TIME.minute,

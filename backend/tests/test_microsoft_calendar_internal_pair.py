@@ -326,6 +326,24 @@ class TestCalendarPreparationSchedule(unittest.TestCase):
 
         self.assertEqual(result.time(), time(8, 15))
 
+    def test_0800_meeting_uses_previous_workday_at_1600(self) -> None:
+        result = calendar_preparation_start(
+            self.local_datetime(14, 8),
+            self.local_datetime(10, 9),
+        ).astimezone(self.timezone)
+
+        self.assertEqual(result.date(), self.local_datetime(11, 16).date())
+        self.assertEqual(result.time(), time(16, 0))
+
+    def test_0800_meeting_uses_0800_when_previous_workday_slot_has_passed(self) -> None:
+        result = calendar_preparation_start(
+            self.local_datetime(14, 8),
+            self.local_datetime(11, 17),
+        ).astimezone(self.timezone)
+
+        self.assertEqual(result.date(), self.local_datetime(14, 8).date())
+        self.assertEqual(result.time(), time(8, 0))
+
     def test_advance_meetings_start_at_0820_and_continue_every_15_minutes(self) -> None:
         external_start = self.local_datetime(10, 12)
         created_at = self.local_datetime(8, 9)

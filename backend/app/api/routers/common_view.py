@@ -1111,6 +1111,7 @@ async def get_common_view(
         if department_id:
             meeting_stmt = meeting_stmt.where(Meeting.department_id == department_id)
         meetings = (await db.execute(meeting_stmt.order_by(Meeting.starts_at, Meeting.created_at.desc()))).scalars().all()
+        meetings_by_id = {meeting.id: meeting for meeting in meetings}
         week_days = [week_start_date + timedelta(days=i) for i in range(7)]
 
         for meeting in meetings:
@@ -1123,6 +1124,33 @@ async def get_common_view(
                 departments_map.get(meeting.department_id).name
                 if meeting.department_id in departments_map
                 else "Department TBD"
+            )
+            linked_external_id = meeting.paired_external_meeting_id or meeting.pre_external_meeting_id
+            linked_external = (
+                meetings_by_id.get(linked_external_id)
+                if meeting.meeting_type == "internal" and linked_external_id
+                else None
+            )
+            link_payload = (
+                {
+                    "pairedExternalMeetingId": (
+                        str(meeting.paired_external_meeting_id)
+                        if meeting.paired_external_meeting_id
+                        else None
+                    ),
+                    "preExternalMeetingId": (
+                        str(meeting.pre_external_meeting_id)
+                        if meeting.pre_external_meeting_id
+                        else None
+                    ),
+                    "linkedExternalCalendarCategories": linked_external.calendar_categories or [],
+                    "linkedExternalCalendarImported": bool(
+                        linked_external.calendar_imported or linked_external.microsoft_event_id
+                    ),
+                    "linkedExternalRecurrenceType": linked_external.recurrence_type or "none",
+                }
+                if linked_external is not None
+                else {}
             )
             if meeting.recurrence_type and meeting.recurrence_type != "none":
                 time_label = _format_time(meeting.starts_at)
@@ -1141,6 +1169,7 @@ async def get_common_view(
                                 "recurrence_type": meeting.recurrence_type or "none",
                                 "calendarImported": is_calendar_meeting,
                                 "calendarCategories": meeting.calendar_categories or [],
+                                **link_payload,
                             }
                         )
             else:
@@ -1164,6 +1193,7 @@ async def get_common_view(
                         "recurrence_type": meeting.recurrence_type or "none",
                         "calendarImported": is_calendar_meeting,
                         "calendarCategories": meeting.calendar_categories or [],
+                        **link_payload,
                     }
                 )
 

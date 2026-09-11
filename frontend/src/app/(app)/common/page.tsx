@@ -376,6 +376,16 @@ type InternalItem = {
   department?: string
   recurrenceType?: string | null
   recurrence_type?: string | null
+  pairedExternalMeetingId?: string | null
+  paired_external_meeting_id?: string | null
+  preExternalMeetingId?: string | null
+  pre_external_meeting_id?: string | null
+  linkedExternalCalendarCategories?: string[]
+  linked_external_calendar_categories?: string[]
+  linkedExternalCalendarImported?: boolean
+  linked_external_calendar_imported?: boolean
+  linkedExternalRecurrenceType?: string | null
+  linked_external_recurrence_type?: string | null
 }
 
 const meetingLegendTone = ({
@@ -419,10 +429,31 @@ const meetingLegendTone = ({
   // Uncategorized Outlook/Teams events are TAK EXT online meetings in Common
   // View, so show them with the red external-online tone instead of purple.
   if (calendarImported) return "outlook-red"
-  if (meetingType === "internal") return "outlook-yellow"
+  // Standalone TAK INT meetings use light blue. A linked TAK INT is resolved
+  // with its TAK EXT metadata by the caller and inherits that meeting's tone.
+  if (meetingType === "internal") return "outlook-blue"
   if (["weekly", "daily"].includes(normalizedRecurrence))
     return "outlook-brown"
   return "outlook-blue"
+}
+
+const internalMeetingLegendTone = (meeting: InternalItem) => {
+  const isLinked = Boolean(
+    meeting.pairedExternalMeetingId ??
+      meeting.paired_external_meeting_id ??
+      meeting.preExternalMeetingId ??
+      meeting.pre_external_meeting_id
+  )
+  return meetingLegendTone({
+    categories: meeting.linkedExternalCalendarCategories ?? meeting.linked_external_calendar_categories,
+    recurrenceType: isLinked
+      ? meeting.linkedExternalRecurrenceType ?? meeting.linked_external_recurrence_type
+      : meeting.recurrenceType ?? meeting.recurrence_type,
+    meetingType: isLinked ? "external" : "internal",
+    calendarImported: Boolean(
+      meeting.linkedExternalCalendarImported ?? meeting.linked_external_calendar_imported
+    ),
+  })
 }
 
 const isCalendarAnnualLeave = (title?: string, categories?: string[]) =>
@@ -1495,7 +1526,12 @@ export default function CommonViewPage() {
     return `${dateLabel} ${timeLabel}`
   }
   const mapMeetingToCommonItem = React.useCallback(
-    (meeting: Meeting, meetingType: "external" | "internal", fallbackOwnerName?: string): ExternalItem | InternalItem | null => {
+    (
+      meeting: Meeting,
+      meetingType: "external" | "internal",
+      fallbackOwnerName?: string,
+      linkedExternalMeeting?: Meeting | null
+    ): ExternalItem | InternalItem | null => {
       const resolvedDate = resolveExternalMeetingDate(meeting)
       const createdAt = new Date(meeting.created_at)
       const validCreatedAt = Number.isNaN(createdAt.getTime()) ? null : createdAt
@@ -1511,6 +1547,17 @@ export default function CommonViewPage() {
         recurrenceType: meeting.recurrence_type || "none",
         calendarCategories: meeting.calendar_categories || [],
         calendarImported: Boolean(meeting.calendar_imported || meeting.microsoft_event_id),
+        ...(meetingType === "internal"
+          ? {
+              pairedExternalMeetingId: meeting.paired_external_meeting_id || null,
+              preExternalMeetingId: meeting.pre_external_meeting_id || null,
+              linkedExternalCalendarCategories: linkedExternalMeeting?.calendar_categories || [],
+              linkedExternalCalendarImported: Boolean(
+                linkedExternalMeeting?.calendar_imported || linkedExternalMeeting?.microsoft_event_id
+              ),
+              linkedExternalRecurrenceType: linkedExternalMeeting?.recurrence_type || "none",
+            }
+          : {}),
       }
     },
     [formatTime, toISODate]
@@ -1670,12 +1717,25 @@ export default function CommonViewPage() {
   const [meetingOccurrenceStatuses, setMeetingOccurrenceStatuses] = React.useState<Map<string, MeetingOccurrenceStatus>>(new Map())
   const [savingMeetingStatusKey, setSavingMeetingStatusKey] = React.useState<string | null>(null)
   const syncCommonMeetingBucket = React.useCallback(
-    (meetingType: "external" | "internal", meetings: Meeting[]) => {
+    (
+      meetingType: "external" | "internal",
+      meetings: Meeting[],
+      linkedExternalMeetings: Meeting[] = externalMeetings
+    ) => {
       const meetingItems = meetings
         .map((meeting) => {
           const owner = meeting.created_by ? users.find((u) => u.id === meeting.created_by) : null
           const ownerName = owner?.full_name || owner?.username || "Unknown"
-          const item = mapMeetingToCommonItem(meeting, meetingType, ownerName)
+          const linkedExternalMeeting =
+            meetingType === "internal" &&
+            (meeting.paired_external_meeting_id || meeting.pre_external_meeting_id)
+              ? linkedExternalMeetings.find(
+                  (candidate) =>
+                    candidate.id ===
+                    (meeting.paired_external_meeting_id || meeting.pre_external_meeting_id)
+                ) || null
+              : null
+          const item = mapMeetingToCommonItem(meeting, meetingType, ownerName, linkedExternalMeeting)
           if (!item) return null
           const assignees = (meeting.participant_ids || [])
             .map((participantId) => users.find((candidate) => candidate.id === participantId))
@@ -1683,14 +1743,14 @@ export default function CommonViewPage() {
             .filter(Boolean)
           return { ...item, assignees }
         })
-        .filter((item): item is ExternalItem | InternalItem => item !== null)
+        .filter((item) => item !== null)
 
       setCommonData((prev) => ({
         ...prev,
         [meetingType]: meetingItems,
       }))
     },
-    [mapMeetingToCommonItem, users]
+    [externalMeetings, mapMeetingToCommonItem, users]
   )
   const commonViewAggregateEnabled = COMMON_VIEW_AGGREGATE_ENABLED
   const commonViewIncludeStages = React.useMemo(
@@ -2958,6 +3018,17 @@ export default function CommonViewPage() {
       const normalizedInternal = payload.items.internal.map((item) => ({
         ...item,
         recurrenceType: item.recurrenceType ?? item.recurrence_type ?? "none",
+        pairedExternalMeetingId:
+          item.pairedExternalMeetingId ?? item.paired_external_meeting_id ?? null,
+        preExternalMeetingId:
+          item.preExternalMeetingId ?? item.pre_external_meeting_id ?? null,
+        linkedExternalCalendarCategories:
+          item.linkedExternalCalendarCategories ?? item.linked_external_calendar_categories ?? [],
+        linkedExternalCalendarImported: Boolean(
+          item.linkedExternalCalendarImported ?? item.linked_external_calendar_imported
+        ),
+        linkedExternalRecurrenceType:
+          item.linkedExternalRecurrenceType ?? item.linked_external_recurrence_type ?? "none",
       })) as InternalItem[]
       setCommonData((prev) => {
         let next = { ...prev }
@@ -3759,8 +3830,10 @@ export default function CommonViewPage() {
 
         allData.personal = mergePersonalItems(allData.personal)
 
+        let loadedExternalMeetings: Meeting[] = []
         if (externalMeetingsRes?.ok) {
           const meetings = (await externalMeetingsRes.json()) as Meeting[]
+          loadedExternalMeetings = meetings
           if (mounted) setExternalMeetings(meetings)
           for (const meeting of meetings) {
             const resolvedDate = resolveExternalMeetingDate(meeting)
@@ -3796,6 +3869,11 @@ export default function CommonViewPage() {
           const meetings = (await internalMeetingsRes.json()) as Meeting[]
           if (mounted) setInternalMeetings(meetings)
           for (const meeting of meetings) {
+            const linkedExternalMeeting = loadedExternalMeetings.find(
+              (candidate) =>
+                candidate.id ===
+                (meeting.paired_external_meeting_id || meeting.pre_external_meeting_id)
+            )
             const resolvedDate = resolveExternalMeetingDate(meeting)
             const createdAt = new Date(meeting.created_at)
             const validCreatedAt = Number.isNaN(createdAt.getTime()) ? null : createdAt
@@ -3815,6 +3893,13 @@ export default function CommonViewPage() {
               platform: meeting.platform?.trim() || "TBD",
               owner: ownerName,
               recurrenceType: meeting.recurrence_type || "none",
+              pairedExternalMeetingId: meeting.paired_external_meeting_id || null,
+              preExternalMeetingId: meeting.pre_external_meeting_id || null,
+              linkedExternalCalendarCategories: linkedExternalMeeting?.calendar_categories || [],
+              linkedExternalCalendarImported: Boolean(
+                linkedExternalMeeting?.calendar_imported || linkedExternalMeeting?.microsoft_event_id
+              ),
+              linkedExternalRecurrenceType: linkedExternalMeeting?.recurrence_type || "none",
             })
           }
         }
@@ -3915,8 +4000,10 @@ export default function CommonViewPage() {
       apiFetch(`${meetingsBase}&meeting_type=external`),
       apiFetch(`${meetingsBase}&meeting_type=internal`),
     ])
+    let refreshedExternalMeetings = externalMeetings
     if (externalRes?.ok) {
       const meetings = (await externalRes.json()) as Meeting[]
+      refreshedExternalMeetings = meetings
       setExternalMeetings(meetings)
       syncCommonMeetingBucket(
         "external",
@@ -3926,10 +4013,10 @@ export default function CommonViewPage() {
     if (internalRes?.ok) {
       const meetings = (await internalRes.json()) as Meeting[]
       setInternalMeetings(meetings)
-      syncCommonMeetingBucket("internal", meetings)
+      syncCommonMeetingBucket("internal", meetings, refreshedExternalMeetings)
     }
     COMMON_VIEW_CACHE.clear()
-  }, [apiFetch, commonDepartmentId, syncCommonMeetingBucket])
+  }, [apiFetch, commonDepartmentId, externalMeetings, syncCommonMeetingBucket])
 
   React.useEffect(() => {
     reloadMeetingListsRef.current = reloadMeetingLists
@@ -5968,7 +6055,7 @@ export default function CommonViewPage() {
       const ownerName = user?.full_name || user?.username || user?.email || "Unknown"
       const mappedExternal = mapMeetingToCommonItem(meetingForList, "external", ownerName)
       const mappedInternal = pairedInternalMeeting
-        ? mapMeetingToCommonItem(pairedInternalMeeting, "internal", ownerName)
+        ? mapMeetingToCommonItem(pairedInternalMeeting, "internal", ownerName, meetingForList)
         : null
       if (mappedExternal || mappedInternal) {
         setCommonData((prev) => ({
@@ -6425,7 +6512,10 @@ export default function CommonViewPage() {
       setInternalMeetings((prev) => [created, ...prev])
       COMMON_VIEW_CACHE.clear()
       const ownerName = user?.full_name || user?.username || user?.email || "Unknown"
-      const mapped = mapMeetingToCommonItem(created, "internal", ownerName)
+      const linkedExternalMeeting = internalMeetingPairExternalId
+        ? externalMeetings.find((meeting) => meeting.id === internalMeetingPairExternalId) || null
+        : null
+      const mapped = mapMeetingToCommonItem(created, "internal", ownerName, linkedExternalMeeting)
       if (mapped) {
         setCommonData((prev) => ({
           ...prev,
@@ -6463,6 +6553,7 @@ export default function CommonViewPage() {
     internalMeetingDepartmentId,
     internalMeetingParticipantIds,
     internalMeetingPairExternalId,
+    externalMeetings,
     user?.department_id,
     user?.email,
     user?.full_name,
@@ -7139,10 +7230,7 @@ export default function CommonViewPage() {
       dateLabel: formatDateHuman(x.date),
       accentClass: [
         "swimlane-accent internal",
-        meetingLegendTone({
-          recurrenceType: x.recurrenceType ?? x.recurrence_type,
-          meetingType: "internal",
-        }),
+        internalMeetingLegendTone(x),
         isOneTimeMeeting(x.recurrenceType ?? x.recurrence_type) ? "one-time-meeting" : "",
       ]
         .filter(Boolean)
@@ -14811,10 +14899,7 @@ export default function CommonViewPage() {
                             key={idx}
                             className={[
                               "week-table-entry",
-                              meetingLegendTone({
-                                recurrenceType: e.recurrenceType ?? e.recurrence_type,
-                                meetingType: "internal",
-                              }),
+                              internalMeetingLegendTone(e),
                               isOneTimeMeeting(e.recurrenceType ?? e.recurrence_type) ? "one-time-meeting" : "",
                             ]
                               .filter(Boolean)
