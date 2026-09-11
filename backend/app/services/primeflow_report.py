@@ -342,6 +342,19 @@ def filter_tasks(
     return result
 
 
+def _merge_unique_tasks(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group:
+            key = str(item.get("task_id") or item.get("id") or id(item))
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(item)
+    return result
+
+
 def _render_section(title: str, tasks: list[dict[str, Any]]) -> str:
     lines = [title]
     employee_groups = _group_tasks_by_employee(tasks)
@@ -456,6 +469,11 @@ def build_report_document(
         )
     ]
     one_h = items.get("oneH") or fallback_tasks
+    done_this_window = [
+        task for task in filter_tasks(one_h, report_day)
+        if str(task.get("status") or "").upper() in {"DONE", "COMPLETED"}
+        and bool(task.get("completed_at") or task.get("completedAt"))
+    ]
     definitions: list[tuple[str, list[dict[str, Any]]]] = []
     if slot in {"10:00", "14:20"}:
         # The morning report is the full-day baseline. The new 14:20 report
@@ -464,10 +482,18 @@ def build_report_document(
             "10:00", "11:00", "11:50", "14:20"
         )
         for candidate in candidate_slots:
+            candidate_tasks = filter_tasks(one_h, report_day, candidate)
+            if slot == "14:20" and candidate == "14:20":
+                # A task completed during this interval belongs in this report
+                # even if it had been planned for the later 16:00 slot.
+                candidate_tasks = _merge_unique_tasks(candidate_tasks, [
+                    task for task in done_this_window
+                    if _slot(task) not in {*candidate_slots, None}
+                ])
             definitions.append(
                 (
                     f"{candidate} SLOTI {report_day:%d.%m.%Y}",
-                    filter_tasks(one_h, report_day, candidate),
+                    candidate_tasks,
                 )
             )
         definitions.extend([
@@ -479,10 +505,19 @@ def build_report_document(
         ])
     else:
         previous_slot = SLOTS[SLOTS.index(slot) - 1]
+        source_slot = _source_slot_for_report_slot(slot)
+        previous_source_slot = _source_slot_for_report_slot(previous_slot)
+        current_tasks = _merge_unique_tasks(
+            filter_tasks(one_h, report_day, source_slot),
+            [
+                task for task in done_this_window
+                if _slot(task) not in {source_slot, previous_source_slot}
+            ],
+        )
         definitions.extend([
             (
                 f"{slot} SLOTI {report_day:%d.%m.%Y}",
-                filter_tasks(one_h, report_day, _source_slot_for_report_slot(slot)),
+                current_tasks,
             ),
             (
                 f"{previous_slot} SLOTI PARAPRAK {report_day:%d.%m.%Y}",

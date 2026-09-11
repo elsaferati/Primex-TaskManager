@@ -51,6 +51,8 @@ SECTION_TITLES = [
     "DET E KRYERA SOT (AM/PM)",
     "DET TE SHTYERA",
     "PRODUKTE +/- SOT (PCM)",
+    "TASKS PERSONALISHT ME KA/GENTIN?",
+    "WFC ME KA/GENTIN?",
 ]
 DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[0],  # Manual first
@@ -66,6 +68,8 @@ DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[5],
     SECTION_TITLES[8],
     SECTION_TITLES[9],
+    SECTION_TITLES[13],
+    SECTION_TITLES[14],
 ]
 MANUAL_SECTION_TITLES = {
     SECTION_TITLES[0],
@@ -85,6 +89,8 @@ SECTION_TITLE_ALIASES = {
     "N- A KA DETYRA 1H PA SLOT?": SECTION_TITLES[8],
     "(GA/KA) KUSH KA DET PERSONALISHT?": SECTION_TITLES[9],
     "N- (GA/KA) KUSH KA DET PERSONALISHT?": SECTION_TITLES[9],
+    "N- (GA/KA/GENTI) DET PERSONALISHT?": SECTION_TITLES[13],
+    "WFC TASKS (KA/GENTI)": SECTION_TITLES[14],
 }
 RETIRED_CLOSING_SECTION_TITLES = {
     "GA MBYLLJA E DET",
@@ -100,7 +106,9 @@ RETIRED_CLOSING_SECTION_KEYS = {
 def is_retired_meetings_section_title(title: str | None) -> bool:
     return _compact_section_title(title) in RETIRED_CLOSING_SECTION_KEYS
 DEFAULT_MANUAL_BODY = "(Ploteso manualisht)"
-# Same rule for M1/M2/M3: personal rows only when the title marks GA (not KA).
+# KA/Genti ownership is encoded in task-title markers.
+KA_OWNER_MARKER = re.compile(r"(?:^|[/:])\s*KA\b", re.I)
+GENTI_OWNER_MARKER = re.compile(r"(?:^|[/:])\s*GENTI?\b", re.I)
 PERSONAL_GA = re.compile(r"[/:]\s*GA\b", re.I)
 TECHNICAL_TAG = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.I)
 DUE_SUFFIX = re.compile(r"\s+due\s+\d{1,2}:\d{2}\s*$", re.I)
@@ -437,6 +445,28 @@ def _meeting_occurs_on_date(meeting: Meeting, day: date) -> bool:
 
 def _is_open(task: Task) -> bool:
     return not task.completed_at and str(task.status or "").upper() not in {"DONE", "COMPLETED"}
+
+
+def _matches_owner_marker(task: Task, marker: re.Pattern[str]) -> bool:
+    return bool(marker.search(_clean_task_title(task.title)) or marker.search(task.title or ""))
+
+
+def _ka_genti_owner(task: Task) -> str | None:
+    """Return the report ownership table for a KA/Gent(i) title marker."""
+    if _matches_owner_marker(task, KA_OWNER_MARKER):
+        return "KA"
+    if _matches_owner_marker(task, GENTI_OWNER_MARKER):
+        return "GENTI"
+    return None
+
+
+def _is_wfc_task(task: Task) -> bool:
+    """WFC means waiting for confirmation, not waiting for the client (WFE)."""
+    return _normalize_report_status(task.status) == "WAITING_CONFIRMATION"
+
+
+def _is_report_wfc_task(task: Task) -> bool:
+    return _is_open(task) and _is_wfc_task(task) and _ka_genti_owner(task) is not None
 
 
 def _late_days(task: Task) -> int:
@@ -1230,6 +1260,17 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
             or PERSONAL_GA.search(task.title or "")
         )
     ]
+    personal_ka_genti = [
+        task for task in tasks
+        if task.is_personal
+        and _is_open(task)
+        and _task_day(task) == tomorrow
+        and _ka_genti_owner(task) is not None
+    ]
+    wfc_report_tasks = [
+        task for task in tasks
+        if _task_day(task) == tomorrow and _is_report_wfc_task(task)
+    ]
     blocked = [task for task in tomorrow_tasks if task.is_bllok]
     bz_tasks = [task for task in tomorrow_tasks if re.search(r"\bBZ\b", task.title or "", re.I)]
     bz_alignment_lines = await _bz_alignment_lines(
@@ -1461,6 +1502,56 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 department_codes=department_codes,
                 **table_kwargs,
             )
+        ),
+        SECTION_TITLES[13]: _normalize_section(
+            [
+                *_m3_status_table(
+                    "PERSONAL KA",
+                    [task for task in personal_ka_genti if _ka_genti_owner(task) == "KA"],
+                    names,
+                    with_status=True,
+                    include_department=True,
+                    include_am_pm=True,
+                    department_codes=department_codes,
+                    **table_kwargs,
+                ),
+                "",
+                *_m3_status_table(
+                    "PERSONAL GENTI",
+                    [task for task in personal_ka_genti if _ka_genti_owner(task) == "GENTI"],
+                    names,
+                    with_status=True,
+                    include_department=True,
+                    include_am_pm=True,
+                    department_codes=department_codes,
+                    **table_kwargs,
+                ),
+            ]
+        ),
+        SECTION_TITLES[14]: _normalize_section(
+            [
+                *_m3_status_table(
+                    "WFC KA",
+                    [task for task in wfc_report_tasks if _ka_genti_owner(task) == "KA"],
+                    names,
+                    with_status=True,
+                    include_department=True,
+                    include_am_pm=True,
+                    department_codes=department_codes,
+                    **table_kwargs,
+                ),
+                "",
+                *_m3_status_table(
+                    "WFC GENTI",
+                    [task for task in wfc_report_tasks if _ka_genti_owner(task) == "GENTI"],
+                    names,
+                    with_status=True,
+                    include_department=True,
+                    include_am_pm=True,
+                    department_codes=department_codes,
+                    **table_kwargs,
+                ),
+            ]
         ),
     }
     sections = [{"title": title, "body": by_title[title]} for title in DISPLAY_SECTION_TITLES]

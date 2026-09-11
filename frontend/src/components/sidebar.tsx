@@ -239,7 +239,7 @@ export function Sidebar({ role }: { role: UserRole }) {
   const { apiFetch, prefetchApiFetch, user } = useAuth()
   const currentUserId = user?.id
   const canAccessOneHReports =
-    role === "ADMIN" || user?.full_name?.trim().toLocaleLowerCase() === "laurent hoxha"
+    role === "ADMIN" || role === "MANAGER" || user?.full_name?.trim().toLocaleLowerCase() === "laurent hoxha"
   const { isOpen, isDesktop, setIsOpen } = useSidebar()
   const { count } = useWaitingConfirmationGa()
   const excelStandardsActive = pathname === "/standards/excel" || pathname.startsWith("/standards/excel/")

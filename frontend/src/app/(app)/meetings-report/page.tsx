@@ -97,6 +97,12 @@ function canonicalMeetingsSectionTitle(title: string) {
   if (key === compactSectionTitle("N- (GA/KA) KUSH KA DET PERSONALISHT?")) {
     return "N- (GA) DET PERSONALISHT?"
   }
+  if (key === compactSectionTitle("N- (GA/KA/GENTI) DET PERSONALISHT?")) {
+    return "TASKS PERSONALISHT ME KA/GENTIN?"
+  }
+  if (key === compactSectionTitle("WFC TASKS (KA/GENTI)")) {
+    return "WFC ME KA/GENTIN?"
+  }
   return title
 }
 
@@ -115,6 +121,8 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
     "N- (GA) TAK EXT/TAK INT/BZ ME GA/BLLOK",
     "N- DETYRA 1H PA SLOT?",
     "N- (GA) DET PERSONALISHT?",
+    "TASKS PERSONALISHT ME KA/GENTIN?",
+    "WFC ME KA/GENTIN?",
   ]
   const manuals = new Set(["A JEMI BRENDA MESATARES ME PROJEKTE?"])
   const placeholder = "(Ploteso manualisht)"
@@ -179,6 +187,8 @@ function sectionGroupLabel(section: Section) {
     "TAK STATUSI?",
     "N- DETYRA 1H PA SLOT?",
     "N- (GA) DET PERSONALISHT?",
+    "TASKS PERSONALISHT ME KA/GENTIN?",
+    "WFC ME KA/GENTIN?",
   ]
   if (knownAuto.some((auto) => compactSectionTitle(auto) === key)) return "Auto-filled from PrimeFlow"
   return "Manual questions"

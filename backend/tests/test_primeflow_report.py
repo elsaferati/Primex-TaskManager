@@ -73,6 +73,30 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertEqual(eleven_document.task_count, 0)
         self.assertNotIn("Completed task", render_plain_text(eleven_document))
 
+    def test_done_task_appears_in_completion_window_despite_its_older_slot(self) -> None:
+        report_day = date(2026, 9, 10)
+        task = {
+            "id": "done-old-slot",
+            "task_id": str(uuid.uuid4()),
+            "date": report_day.isoformat(),
+            "one_h_report_slot": "11:00",
+            "person": "Tester",
+            "status": "DONE",
+            "title": "Done shortly before 16:00",
+            "description": "Finished",
+            "completed_at": "2026-09-10T15:46:00+02:00",
+        }
+        document = build_report_document(
+            {"guardrails": {"truncated": {}}, "items": {"oneH": [task]}},
+            report_day,
+            "16:00",
+            completion_window_start=strike_interval_start(report_day, "16:00"),
+            completion_window_end=strike_interval_end(report_day, "16:00"),
+        )
+
+        self.assertEqual(document.task_count, 1)
+        self.assertIn("Done shortly before 16:00", render_plain_text(document))
+
     def test_report_uses_atomic_current_text_when_common_view_text_is_stale(self) -> None:
         task_id = uuid.uuid4()
         report_day = date(2026, 8, 10)
