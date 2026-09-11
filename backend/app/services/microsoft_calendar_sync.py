@@ -31,7 +31,7 @@ _sync_lock = asyncio.Lock()
 CALENDAR_PREPARATION_DELAY = timedelta(hours=2)
 CALENDAR_PREPARATION_INTERVAL = timedelta(minutes=15)
 SAME_DAY_PREPARATION_FIRST_TIME = time(8, 15)
-ADVANCE_PREPARATION_FIRST_TIME = time(8, 20)
+ADVANCE_PREPARATION_FIRST_TIME = time(8, 15)
 EARLY_EXTERNAL_MEETING_TIME = time(8, 0)
 PREVIOUS_WORKDAY_PREPARATION_TIME = time(16, 0)
 WORKDAY_END_TIME = time(16, 30)
@@ -325,6 +325,9 @@ def calendar_preparation_start(
         )
         if created_local > candidate:
             candidate = external_local.replace(second=0, microsecond=0)
+        # Multiple TAK EXT meetings at 08:00 intentionally share the same TAK
+        # INT preparation slot instead of pushing one another past 08:00.
+        return candidate.astimezone(timezone.utc)
     elif created_local.date() == external_local.date():
         earliest = external_local.replace(
             hour=SAME_DAY_PREPARATION_FIRST_TIME.hour,

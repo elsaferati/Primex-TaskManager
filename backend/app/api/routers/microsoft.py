@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -32,6 +33,22 @@ from app.services.microsoft_calendar_sync import get_shared_calendar_token
 
 
 router = APIRouter()
+
+
+async def fetch_calendar_events_with_retry(
+    access_token: str,
+    start: datetime,
+    end: datetime,
+) -> list[dict]:
+    """Retry one transient Graph connection failure before reporting it."""
+    for attempt in range(2):
+        try:
+            return await fetch_calendar_events(access_token, start, end)
+        except httpx.RequestError:
+            if attempt == 1:
+                raise
+            await asyncio.sleep(0.25)
+    return []
 
 
 def ensure_ms_config() -> None:
@@ -241,18 +258,31 @@ async def get_events(
         end = start + timedelta(days=30)
 
     try:
-        raw_events = await fetch_calendar_events(row.access_token, start, end)
+        raw_events = await fetch_calendar_events_with_retry(row.access_token, start, end)
     except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 401:
+        if exc.response.status_code != 401:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Microsoft API error ({exc.response.status_code})",
+            ) from exc
+        try:
             row = await refresh_token_row(db, row, resolve_redirect_uri(request))
-            raw_events = await fetch_calendar_events(row.access_token, start, end)
-        else:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Microsoft API error") from exc
+            raw_events = await fetch_calendar_events_with_retry(row.access_token, start, end)
+        except httpx.HTTPError as retry_exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Microsoft authentication or calendar request failed after retry",
+            ) from retry_exc
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Microsoft Calendar is temporarily unavailable after retry",
+        ) from exc
 
     events: list[MicrosoftEvent] = []
     for event in raw_events:
-        start_raw = event.get("start", {}).get("dateTime")
-        end_raw = event.get("end", {}).get("dateTime")
+        start_raw = (event.get("start") or {}).get("dateTime")
+        end_raw = (event.get("end") or {}).get("dateTime")
         starts_at = None
         ends_at = None
         if start_raw:
@@ -266,10 +296,10 @@ async def get_events(
             except ValueError:
                 ends_at = None
         organizer = None
-        organizer_info = event.get("organizer", {}).get("emailAddress") or {}
+        organizer_info = (event.get("organizer") or {}).get("emailAddress") or {}
         if organizer_info:
             organizer = organizer_info.get("name") or organizer_info.get("address")
-        location = event.get("location", {}).get("displayName")
+        location = (event.get("location") or {}).get("displayName")
 
         events.append(
             MicrosoftEvent(

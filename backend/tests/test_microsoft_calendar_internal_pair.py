@@ -344,7 +344,7 @@ class TestCalendarPreparationSchedule(unittest.TestCase):
         self.assertEqual(result.date(), self.local_datetime(14, 8).date())
         self.assertEqual(result.time(), time(8, 0))
 
-    def test_advance_meetings_start_at_0820_and_continue_every_15_minutes(self) -> None:
+    def test_advance_meetings_start_at_0815_and_continue_every_15_minutes(self) -> None:
         external_start = self.local_datetime(10, 12)
         created_at = self.local_datetime(8, 9)
         first = calendar_preparation_start(external_start, created_at)
@@ -354,8 +354,30 @@ class TestCalendarPreparationSchedule(unittest.TestCase):
             reserved_starts={first},
         )
 
-        self.assertEqual(first.astimezone(self.timezone).time(), time(8, 20))
-        self.assertEqual(second.astimezone(self.timezone).time(), time(8, 35))
+        self.assertEqual(first.astimezone(self.timezone).time(), time(8, 15))
+        self.assertEqual(second.astimezone(self.timezone).time(), time(8, 30))
+
+    def test_multiple_0800_meetings_share_the_0800_fallback_slot(self) -> None:
+        external_start = self.local_datetime(14, 8)
+        created_at = self.local_datetime(11, 17)
+        first = calendar_preparation_start(external_start, created_at)
+        second = calendar_preparation_start(
+            external_start,
+            created_at,
+            reserved_starts={first},
+        )
+
+        self.assertEqual(first.astimezone(self.timezone).time(), time(8, 0))
+        self.assertEqual(second.astimezone(self.timezone).time(), time(8, 0))
+
+    def test_later_meeting_uses_0815_after_an_0800_preparation(self) -> None:
+        result = calendar_preparation_start(
+            self.local_datetime(14, 10),
+            self.local_datetime(11, 17),
+            reserved_starts={self.local_datetime(14, 8).astimezone(timezone.utc)},
+        ).astimezone(self.timezone)
+
+        self.assertEqual(result.time(), time(8, 15))
 
     def test_advance_sequence_skips_an_official_one_h_slot(self) -> None:
         external_start = self.local_datetime(10, 15)
