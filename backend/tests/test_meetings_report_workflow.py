@@ -31,6 +31,7 @@ from app.services.meetings_report import (
     _is_system_task,
     _is_wfc_task,
     _is_without_progress_for_m3_day,
+    _ka_genti_confirmer,
     _ka_genti_owner,
     _meeting_lines,
     _meeting_status_checkbox_table,
@@ -55,8 +56,8 @@ from app.services.meetings_report import (
 
 class ReportOwnerAndWfcTests(unittest.TestCase):
     def test_personal_and_wfc_sections_are_known_auto_sections(self) -> None:
-        self.assertEqual(SECTION_TITLES[13], "TASKS PERSONALISHT ME KA/GENTIN?")
-        self.assertEqual(SECTION_TITLES[14], "WFC ME KA/GENTIN?")
+        self.assertEqual(SECTION_TITLES[13], "N- TASKS PERSONALISHT ME KA/GENTIN?")
+        self.assertEqual(SECTION_TITLES[14], "N- WFC ME KA/GENTIN?")
         self.assertFalse(is_manual_section_title("meetings", SECTION_TITLES[13]))
         self.assertFalse(is_manual_section_title("meetings", SECTION_TITLES[14]))
         self.assertEqual(section_group_label("meetings", SECTION_TITLES[14]), "AUTO-FILLED FROM PRIMEFLOW")
@@ -66,6 +67,8 @@ class ReportOwnerAndWfcTests(unittest.TestCase):
         self.assertEqual(_ka_genti_owner(SimpleNamespace(title="KA: task")), "KA")
         self.assertEqual(_ka_genti_owner(SimpleNamespace(title="ER/GENT: task")), "GENTI")
         self.assertEqual(_ka_genti_owner(SimpleNamespace(title="ER/GENTI: task")), "GENTI")
+        self.assertEqual(_ka_genti_owner(SimpleNamespace(title="ER/GT: task")), "GENTI")
+        self.assertEqual(_ka_genti_owner(SimpleNamespace(title="GT: task")), "GENTI")
         self.assertIsNone(_ka_genti_owner(SimpleNamespace(title="DM/GA: task")))
         self.assertIsNone(_ka_genti_owner(SimpleNamespace(title="ER/PX: unrelated task")))
 
@@ -75,13 +78,35 @@ class ReportOwnerAndWfcTests(unittest.TestCase):
         self.assertFalse(_is_wfc_task(SimpleNamespace(status="WAITING_CLIENT")))
         self.assertFalse(_is_wfc_task(SimpleNamespace(status="TODO")))
 
-    def test_report_wfc_requires_open_status_and_ka_or_gent_marker(self) -> None:
+    def test_report_wfc_requires_open_waiting_confirmation_status(self) -> None:
         base = {"status": "WAITING_CONFIRMATION", "completed_at": None}
         self.assertTrue(_is_report_wfc_task(SimpleNamespace(**base, title="AT/KA: confirm")))
         self.assertTrue(_is_report_wfc_task(SimpleNamespace(**base, title="ER/GENTI: confirm")))
-        self.assertFalse(_is_report_wfc_task(SimpleNamespace(**base, title="DM/GA: confirm")))
-        self.assertFalse(_is_report_wfc_task(SimpleNamespace(**base, title="ER/PX: confirm")))
+        self.assertTrue(_is_report_wfc_task(SimpleNamespace(**base, title="DM/GA: confirm")))
+        self.assertTrue(_is_report_wfc_task(SimpleNamespace(**base, title="ER/PX: confirm")))
         self.assertFalse(_is_report_wfc_task(SimpleNamespace(title="AT/KA: client", status="WAITING_CLIENT", completed_at=None)))
+
+    def test_wfc_table_is_selected_from_confirmation_assignee(self) -> None:
+        gent_id = uuid.uuid4()
+        ka_id = uuid.uuid4()
+        gane_id = uuid.uuid4()
+        names = {
+            gent_id: "Gent Arifaj",
+            ka_id: "Klea Ameti",
+            gane_id: "Gane Arifaj",
+        }
+
+        self.assertEqual(
+            _ka_genti_confirmer(SimpleNamespace(confirmation_assignee_id=gent_id), names),
+            "GENTI",
+        )
+        self.assertEqual(
+            _ka_genti_confirmer(SimpleNamespace(confirmation_assignee_id=ka_id), names),
+            "KA",
+        )
+        self.assertIsNone(
+            _ka_genti_confirmer(SimpleNamespace(confirmation_assignee_id=gane_id), names)
+        )
 
 
 class FakeDraftDb:

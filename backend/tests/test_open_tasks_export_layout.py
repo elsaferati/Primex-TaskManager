@@ -14,10 +14,12 @@ from app.api.routers.exports import (
     OPEN_TASK_WHEN_VALUES,
     _normalize_open_task_baseline_value,
     _open_task_baseline_column_numbers,
+    _open_task_id_column_number,
     _open_task_pf_display_value,
     _open_task_planned_status,
     _open_task_planning_when,
     _open_task_source_label,
+    _open_task_should_compare_status,
     _open_task_values_match,
     _open_task_wrapped_line_count,
     export_open_tasks_xlsx,
@@ -75,6 +77,16 @@ class TestOpenTasksExportLayout(unittest.TestCase):
                 worksheet.cell(4, column, header)
             self.assertEqual(_open_task_baseline_column_numbers(worksheet), expected)
 
+    def test_visible_task_id_column_is_detected_only_in_current_layout(self) -> None:
+        workbook = Workbook()
+        worksheet = workbook.active
+        for column, header in enumerate(OPEN_TASK_EXPORT_HEADERS, start=1):
+            worksheet.cell(4, column, header)
+        self.assertEqual(_open_task_id_column_number(worksheet), 2)
+
+        worksheet.cell(4, 2, "OLD ID")
+        self.assertIsNone(_open_task_id_column_number(worksheet))
+
     def test_planning_when_uses_upcoming_week_as_this_week(self) -> None:
         current_monday = date(2026, 9, 7)
 
@@ -116,6 +128,12 @@ class TestOpenTasksExportLayout(unittest.TestCase):
         self.assertEqual(_open_task_pf_display_value(None, None), "")
         self.assertTrue(_open_task_values_match(" this week ", "THIS WEEK"))
         self.assertFalse(_open_task_values_match("THIS WEEK", "NEXT WEEK"))
+
+    def test_future_manual_tasks_skip_status_comparison(self) -> None:
+        self.assertFalse(_open_task_should_compare_status("FUTURE"))
+        self.assertFalse(_open_task_should_compare_status(" future "))
+        self.assertTrue(_open_task_should_compare_status("THIS WEEK"))
+        self.assertTrue(_open_task_should_compare_status(None))
 
     def test_baseline_import_normalizes_and_validates_values(self) -> None:
         self.assertEqual(
@@ -166,6 +184,58 @@ class _FakeSession:
 
 
 class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
+    async def test_import_uses_visible_task_ids_after_rows_are_reordered(self) -> None:
+        first_task_id = uuid.uuid4()
+        second_task_id = uuid.uuid4()
+        workbook = Workbook()
+        ws = workbook.active
+        ws.title = "OPEN TASKS"
+        for column, header in enumerate(OPEN_TASK_EXPORT_HEADERS, start=1):
+            ws.cell(4, column, header)
+
+        # Visible rows were reordered in Excel. IDs move with their manual
+        # values, while the legacy hidden row map remains in export order.
+        ws.cell(5, 2, str(second_task_id))
+        ws.cell(5, 15, "Second task with an edited title")
+        ws.cell(5, 17, "this week")
+        ws.cell(5, 18, "1h")
+        ws.cell(6, 2, str(first_task_id))
+        ws.cell(6, 15, "First task renamed")
+        ws.cell(6, 17, "next week")
+        ws.cell(6, 18, "personal")
+
+        metadata = workbook.create_sheet("_PRIMEFLOW")
+        metadata.sheet_state = "veryHidden"
+        metadata["A1"] = "OPEN_TASKS_BASELINE_V1"
+        metadata["B1"] = "2026-09-14"
+        metadata["A2"] = "EXCEL ROW"
+        metadata["B2"] = "TASK ID"
+        metadata["A3"] = 5
+        metadata["B3"] = str(first_task_id)
+        metadata["A4"] = 6
+        metadata["B4"] = str(second_task_id)
+        content = io.BytesIO()
+        workbook.save(content)
+        content.seek(0)
+
+        tasks = [
+            SimpleNamespace(id=first_task_id, department_id=None),
+            SimpleNamespace(id=second_task_id, department_id=None),
+        ]
+        db = _FakeSession([tasks, []])
+        user = SimpleNamespace(id=uuid.uuid4(), role=UserRole.ADMIN, department_id=None)
+
+        result = await import_open_tasks_baseline(
+            file=UploadFile(filename="OPEN_TASKS.xlsx", file=content), db=db, user=user
+        )
+
+        self.assertEqual(result["imported"], 2)
+        saved = {baseline.task_id: baseline for baseline in db.added}
+        self.assertEqual(saved[second_task_id].when_value, "THIS WEEK")
+        self.assertEqual(saved[second_task_id].status_value, "1H")
+        self.assertEqual(saved[first_task_id].when_value, "NEXT WEEK")
+        self.assertEqual(saved[first_task_id].status_value, "PERSONAL")
+
     async def test_reset_deletes_only_the_requested_week_rows_returned_by_the_query(self) -> None:
         baselines = [SimpleNamespace(id=uuid.uuid4()), SimpleNamespace(id=uuid.uuid4())]
         db = _FakeSession([baselines])
@@ -230,7 +300,7 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.added[0].status_value, "BLLOK")
         self.assertEqual(db.added[0].comment_value, "Move after customer reply")
 
-    async def test_workbook_contains_manual_and_planned_pairs_with_metadata(self) -> None:
+    async def test_workbook_excludes_system_tasks_and_keeps_non_system_metadata(self) -> None:
         task_id = uuid.uuid4()
         task = SimpleNamespace(
             id=task_id,
@@ -260,7 +330,15 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
             status_value="1H",
             comment_value="Before planning",
         )
-        db = _FakeSession([[task], [], [baseline]])
+        system_task_values = vars(task).copy()
+        system_task_id = uuid.uuid4()
+        system_task_values.update(
+            id=system_task_id,
+            title="System task must not be exported",
+            system_template_origin_id=uuid.uuid4(),
+        )
+        system_task = SimpleNamespace(**system_task_values)
+        db = _FakeSession([[task, system_task], [], [baseline]])
         user = SimpleNamespace(
             id=uuid.uuid4(),
             role=UserRole.ADMIN,
@@ -287,6 +365,8 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([ws.cell(4, column).value for column in range(17, 22)], OPEN_TASK_EXPORT_HEADERS[16:21])
         self.assertEqual(ws.cell(4, 2).value, "TASK ID")
         self.assertEqual(ws.cell(5, 2).value, str(task_id))
+        self.assertEqual(ws.max_row, 5)
+        self.assertNotEqual(ws.cell(5, 4).value, "SYSTEM")
         self.assertEqual(
             [ws.cell(5, column).value for column in range(17, 22)],
             ["THIS WEEK", "1H", "NEXT WEEK", "1H", "Before planning"],
@@ -299,6 +379,7 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(workbook["_PRIMEFLOW"].sheet_state, "veryHidden")
         self.assertEqual(workbook["_PRIMEFLOW"]["B1"].value, "2026-09-14")
         self.assertEqual(workbook["_PRIMEFLOW"]["B3"].value, str(task_id))
+        self.assertNotEqual(workbook["_PRIMEFLOW"]["B3"].value, str(system_task_id))
 
 
 if __name__ == "__main__":

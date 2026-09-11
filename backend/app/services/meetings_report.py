@@ -51,8 +51,8 @@ SECTION_TITLES = [
     "DET E KRYERA SOT (AM/PM)",
     "DET TE SHTYERA",
     "PRODUKTE +/- SOT (PCM)",
-    "TASKS PERSONALISHT ME KA/GENTIN?",
-    "WFC ME KA/GENTIN?",
+    "N- TASKS PERSONALISHT ME KA/GENTIN?",
+    "N- WFC ME KA/GENTIN?",
 ]
 DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[0],  # Manual first
@@ -91,6 +91,8 @@ SECTION_TITLE_ALIASES = {
     "N- (GA/KA) KUSH KA DET PERSONALISHT?": SECTION_TITLES[9],
     "N- (GA/KA/GENTI) DET PERSONALISHT?": SECTION_TITLES[13],
     "WFC TASKS (KA/GENTI)": SECTION_TITLES[14],
+    "TASKS PERSONALISHT ME KA/GENTIN?": SECTION_TITLES[13],
+    "WFC ME KA/GENTIN?": SECTION_TITLES[14],
 }
 RETIRED_CLOSING_SECTION_TITLES = {
     "GA MBYLLJA E DET",
@@ -106,9 +108,10 @@ RETIRED_CLOSING_SECTION_KEYS = {
 def is_retired_meetings_section_title(title: str | None) -> bool:
     return _compact_section_title(title) in RETIRED_CLOSING_SECTION_KEYS
 DEFAULT_MANUAL_BODY = "(Ploteso manualisht)"
-# KA/Genti ownership is encoded in task-title markers.
+# Personal KA/Genti ownership is encoded in task-title markers. WFC grouping
+# uses the linked confirmation assignee instead.
 KA_OWNER_MARKER = re.compile(r"(?:^|[/:])\s*KA\b", re.I)
-GENTI_OWNER_MARKER = re.compile(r"(?:^|[/:])\s*GENTI?\b", re.I)
+GENTI_OWNER_MARKER = re.compile(r"(?:^|[/:])\s*(?:GENTI?|GT)\b", re.I)
 PERSONAL_GA = re.compile(r"[/:]\s*GA\b", re.I)
 TECHNICAL_TAG = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.I)
 DUE_SUFFIX = re.compile(r"\s+due\s+\d{1,2}:\d{2}\s*$", re.I)
@@ -466,7 +469,7 @@ def _is_wfc_task(task: Task) -> bool:
 
 
 def _is_report_wfc_task(task: Task) -> bool:
-    return _is_open(task) and _is_wfc_task(task) and _ka_genti_owner(task) is not None
+    return _is_open(task) and _is_wfc_task(task)
 
 
 def _late_days(task: Task) -> int:
@@ -496,6 +499,17 @@ def _initials(name: str | None) -> str:
     return "".join(part[0] for part in parts).upper() or "-"
 
 
+def _ka_genti_confirmer(task: Task, names: dict[Any, str]) -> str | None:
+    """Return the WFC report table selected by the task's actual confirmer."""
+    confirmer_name = names.get(getattr(task, "confirmation_assignee_id", None))
+    parts = re.findall(r"[^\W\d_]+", confirmer_name or "", flags=re.UNICODE)
+    if parts and parts[0].casefold() in {"gent", "genti"}:
+        return "GENTI"
+    if _initials(confirmer_name) == "KA":
+        return "KA"
+    return None
+
+
 def _is_report_all_participant(user: User) -> bool:
     return user.is_active and _initials(user.full_name) not in {"GA", "KA", "HV"}
 
@@ -507,6 +521,11 @@ async def _all_participant_user_ids(db: AsyncSession) -> set[Any]:
 
 async def _assignee_names(db: AsyncSession, tasks: list[Task]) -> dict[Any, str]:
     user_ids = {task.assigned_to for task in tasks if task.assigned_to}
+    user_ids.update(
+        task.confirmation_assignee_id
+        for task in tasks
+        if getattr(task, "confirmation_assignee_id", None)
+    )
     task_ids = [task.id for task in tasks]
     if task_ids:
         assignee_user_ids = (
@@ -1269,7 +1288,9 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     ]
     wfc_report_tasks = [
         task for task in tasks
-        if _task_day(task) == tomorrow and _is_report_wfc_task(task)
+        if _task_day(task) == tomorrow
+        and _is_report_wfc_task(task)
+        and _ka_genti_confirmer(task, names) is not None
     ]
     blocked = [task for task in tomorrow_tasks if task.is_bllok]
     bz_tasks = [task for task in tomorrow_tasks if re.search(r"\bBZ\b", task.title or "", re.I)]
@@ -1532,7 +1553,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
             [
                 *_m3_status_table(
                     "WFC KA",
-                    [task for task in wfc_report_tasks if _ka_genti_owner(task) == "KA"],
+                    [task for task in wfc_report_tasks if _ka_genti_confirmer(task, names) == "KA"],
                     names,
                     with_status=True,
                     include_department=True,
@@ -1543,7 +1564,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 "",
                 *_m3_status_table(
                     "WFC GENTI",
-                    [task for task in wfc_report_tasks if _ka_genti_owner(task) == "GENTI"],
+                    [task for task in wfc_report_tasks if _ka_genti_confirmer(task, names) == "GENTI"],
                     names,
                     with_status=True,
                     include_department=True,
