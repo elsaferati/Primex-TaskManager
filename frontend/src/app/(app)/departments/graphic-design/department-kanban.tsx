@@ -188,6 +188,19 @@ const getDailyReportSlotDisplay = (row: { typeLabel?: string | null; subtype?: s
   if (subtype === "P") return "P"
   return "-"
 }
+const isWfeDailyReportRow = (row: { status?: string | null }) =>
+  normalizeDailyReportStatusKey(row.status) === "WAITING_CLIENT"
+const getDailyReportOneHSlotDisplay = (row: {
+  typeLabel?: string | null
+  subtype?: string | null
+  status?: string | null
+  oneHReportSlot?: string | null
+}) => {
+  if (row.subtype === "1H") {
+    return isWfeDailyReportRow(row) ? "WFE" : getOneHReportSlotLabel(row.oneHReportSlot)
+  }
+  return getDailyReportSlotDisplay(row)
+}
 const isOneHReportRow = (row: unknown) =>
   Boolean(row && typeof row === "object" && "isOneHReportTask" in row && row.isOneHReportTask)
 const oneHReportSlotRank = (row: unknown) => {
@@ -810,7 +823,7 @@ function normalizeDailyReportStatusKey(status?: string | null) {
   if (normalized === "OPEN") return "TODO"
   if (normalized === "TODO" || normalized === "TO_DO") return "TODO"
   if (normalized === "IN_PROGRESS" || normalized === "INPROGRESS") return "IN_PROGRESS"
-  if (normalized === "WAITING_CLIENT" || normalized === "WAITING_FOR_CLIENT") return "WAITING_CLIENT"
+  if (normalized === "WFE" || normalized === "WAITING_CLIENT" || normalized === "WAITING_FOR_CLIENT") return "WAITING_CLIENT"
   if (normalized === "WAITING_CONFIRMATION") return "WAITING_CONFIRMATION"
   if (normalized === "DONE") return "DONE"
   return normalized
@@ -6637,7 +6650,7 @@ export default function DepartmentKanban() {
                                     {dailyReportStatusDisplay(row.status)}
                                   </td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">
-                                    {(row.subtype === "1H" || row.subtype === "R1") && row.taskId ? (
+                                    {(row.subtype === "1H" || row.subtype === "R1") && row.taskId && !isWfeDailyReportRow(row) ? (
                                       <select
                                         className="h-7 w-full rounded-md border border-amber-300 bg-amber-50 px-2 text-[11px] font-semibold text-amber-900 shadow-sm outline-none focus:border-amber-500"
                                         value={normalizeOneHReportSlot(row.oneHReportSlot) || ONE_H_REPORT_SLOT_NONE_VALUE}
@@ -6663,7 +6676,7 @@ export default function DepartmentKanban() {
                                         ))}
                                       </select>
                                     ) : (
-                                      getDailyReportSlotDisplay(row)
+                                      getDailyReportOneHSlotDisplay(row)
                                     )}
                                   </td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
@@ -9197,7 +9210,7 @@ export default function DepartmentKanban() {
                               {dailyReportStatusDisplay(row.status)}
                             </td>
                             <td className="border border-slate-900 px-2 py-2 align-top">
-                              {row.subtype === "1H" ? getOneHReportSlotLabel(getReportRowOneHReportSlot(row)) : getDailyReportSlotDisplay(row)}
+                              {getDailyReportOneHSlotDisplay(row)}
                             </td>
                             <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
@@ -9315,7 +9328,7 @@ export default function DepartmentKanban() {
                           {dailyReportStatusDisplay(row.status)}
                         </td>
                         <td className="border border-slate-900 px-2 py-2 align-top">
-                          {row.subtype === "1H" ? getOneHReportSlotLabel(getReportRowOneHReportSlot(row)) : getDailyReportSlotDisplay(row)}
+                          {getDailyReportOneHSlotDisplay(row)}
                         </td>
                         <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                         <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
