@@ -154,6 +154,8 @@ async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
         # are stored as meetings but must not be rendered as TAK EXT/TAK INT.
         if not is_common_view_visible_meeting(meeting):
             continue
+        if (meeting.meeting_type or "").lower() == "internal" and not _is_manual_internal_meeting(meeting):
+            continue
         meeting_time = _meeting_time(meeting)
         if meeting_time is None:
             continue
@@ -165,7 +167,7 @@ async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
                 "text": f"{label}: {meeting.title or '-'}",
                 "fill": meeting_report_color(meeting),
                 "color": "#0F3B8F",
-                "bold": _is_manual_internal_meeting(meeting),
+                "bold": False,
             })
 
     margin = 30
@@ -382,6 +384,8 @@ async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
     for meeting in meetings:
         if not is_common_view_visible_meeting(meeting):
             continue
+        if (meeting.meeting_type or "").lower() == "internal" and not _is_manual_internal_meeting(meeting):
+            continue
         meeting_time = _meeting_time(meeting)
         if meeting_time is None:
             continue
@@ -393,7 +397,7 @@ async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
                 "text": f"{label}: {meeting.title or '-'}",
                 "fill": meeting_report_color(meeting),
                 "color": "#0F3B8F",
-                "bold": _is_manual_internal_meeting(meeting),
+                "bold": False,
                 "italic": False,
             })
 

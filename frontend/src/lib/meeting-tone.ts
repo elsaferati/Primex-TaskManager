@@ -37,6 +37,10 @@ export const isManualInternalMeeting = (meeting: InternalMeetingToneInput): bool
     meeting.pre_external_meeting_id
   )
 
+export const isCalendarLinkedInternalMeeting = (meeting: InternalMeetingToneInput): boolean =>
+  !isManualInternalMeeting(meeting) &&
+  Boolean(meeting.linkedExternalCalendarImported ?? meeting.linked_external_calendar_imported)
+
 export const meetingLegendTone = ({
   categories,
   recurrenceType,

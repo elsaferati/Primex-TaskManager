@@ -5703,7 +5703,9 @@ export default function AdminTasksPage() {
       map.set(key, list)
     }
 
-    for (const meeting of commonFiltered.internal) addMeeting({ kind: "internal", meeting })
+    for (const meeting of commonFiltered.internal) {
+      if (isManualInternalMeeting(meeting)) addMeeting({ kind: "internal", meeting })
+    }
     for (const meeting of commonFiltered.external) addMeeting({ kind: "external", meeting })
     for (const meetings of map.values()) {
       meetings.sort((a, b) => {
@@ -7301,9 +7303,7 @@ export default function AdminTasksPage() {
                                     key={`ga-print-meeting-${kind}-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
                                     className={`ga-time-entry ${
                                       kind === "internal"
-                                        ? `${internalMeetingLegendTone(meeting)} ${
-                                            isManualInternalMeeting(meeting) ? "manual-internal-meeting" : ""
-                                          }`
+                                        ? internalMeetingLegendTone(meeting)
                                         : meetingLegendTone({
                                             categories: meeting.calendarCategories ?? meeting.calendar_categories,
                                             recurrenceType: meeting.recurrenceType ?? meeting.recurrence_type,
@@ -7560,9 +7560,7 @@ export default function AdminTasksPage() {
                                 key={`ga-meeting-${kind}-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
                                 className={`ga-time-entry ${
                                   kind === "internal"
-                                    ? `${internalMeetingLegendTone(meeting)} ${
-                                        isManualInternalMeeting(meeting) ? "manual-internal-meeting" : ""
-                                      }`
+                                    ? internalMeetingLegendTone(meeting)
                                     : meetingLegendTone({
                                         categories: meeting.calendarCategories ?? meeting.calendar_categories,
                                         recurrenceType: meeting.recurrenceType ?? meeting.recurrence_type,
@@ -9143,9 +9141,6 @@ export default function AdminTasksPage() {
           line-height: 1;
           white-space: nowrap;
           opacity: 0.72;
-        }
-        .admin-week-table .ga-time-entry.manual-internal-meeting > span:last-child {
-          font-weight: 900;
         }
         .admin-week-table .ga-time-draggable {
           cursor: grab;

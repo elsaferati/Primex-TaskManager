@@ -11,7 +11,12 @@ import { formatDateDMY, formatDateTimeDMY } from "@/lib/dates"
 import { getPlainMarkedText, parseMarkedNoteContent, renderMarkedNoteContent } from "@/lib/note-markup"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import { buildRepeatedTaskFirstDateMap, isRepeatedTaskInstance } from "@/lib/repeated-task-visibility"
-import { internalMeetingLegendTone, isManualInternalMeeting, meetingLegendTone } from "@/lib/meeting-tone"
+import {
+  internalMeetingLegendTone,
+  isCalendarLinkedInternalMeeting,
+  isManualInternalMeeting,
+  meetingLegendTone,
+} from "@/lib/meeting-tone"
 import type {
   User,
   Task,
@@ -746,6 +751,7 @@ type SwimlaneCell = {
   title: string
   meetingTimeLabel?: string
   isManualInternalMeeting?: boolean
+  isCalendarMeeting?: boolean
   subtitle?: string
   dateLabel?: string
   note?: string
@@ -7432,6 +7438,7 @@ export default function CommonViewPage() {
     const externalItems: SwimlaneCell[] = externalSource.map((x) => ({
       title: x.title,
       meetingTimeLabel: formatTimeLabel(x.time) || undefined,
+      isCalendarMeeting: Boolean(x.calendarImported),
       subtitle: x.department || "Department TBD",
       dateLabel: formatDateHuman(x.date),
       accentClass: [
@@ -7457,6 +7464,7 @@ export default function CommonViewPage() {
       title: x.title,
       meetingTimeLabel: formatTimeLabel(x.time) || undefined,
       isManualInternalMeeting: isManualInternalMeeting(x),
+      isCalendarMeeting: isCalendarLinkedInternalMeeting(x),
       subtitle: x.department || "Department TBD",
       dateLabel: formatDateHuman(x.date),
       accentClass: [
@@ -10823,6 +10831,22 @@ export default function CommonViewPage() {
           border: 1px solid #1e3a8a;
           border-radius: 999px;
           background: #1d4ed8;
+          color: #ffffff;
+          font-size: 9px;
+          font-weight: 900;
+          line-height: 1;
+          letter-spacing: 0.06em;
+          white-space: nowrap;
+        }
+        .calendar-meeting-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 20px;
+          padding: 0 7px;
+          border: 1px solid #0f766e;
+          border-radius: 999px;
+          background: #0d9488;
           color: #ffffff;
           font-size: 9px;
           font-weight: 900;
@@ -15259,6 +15283,9 @@ export default function CommonViewPage() {
                               {formatTimeLabel(e.time) ? (
                                 <span className="meeting-time-chip">{formatTimeLabel(e.time)}</span>
                               ) : null}
+                              {e.calendarImported ? (
+                                <span className="calendar-meeting-badge">CAL</span>
+                              ) : null}
                               <span className="week-table-meeting-title">
                                 <span className="week-table-line-number">{idx + 1}.</span>{" "}
                                 {commonPrintTitleLine(e.title)}
@@ -15292,6 +15319,9 @@ export default function CommonViewPage() {
                               ) : null}
                               {isManualInternalMeeting(e) ? (
                                 <span className="manual-meeting-badge">MANUAL</span>
+                              ) : null}
+                              {isCalendarLinkedInternalMeeting(e) ? (
+                                <span className="calendar-meeting-badge">CAL</span>
                               ) : null}
                               <span className="week-table-meeting-title">
                                 <span className="week-table-line-number">{idx + 1}.</span>{" "}
@@ -15798,6 +15828,9 @@ export default function CommonViewPage() {
                                         {row.id === "internal" && cell.isManualInternalMeeting ? (
                                           <span className="manual-meeting-badge">MANUAL</span>
                                         ) : null}
+                                        {(row.id === "external" || row.id === "internal") && cell.isCalendarMeeting ? (
+                                          <span className="calendar-meeting-badge">CAL</span>
+                                        ) : null}
                                         {isFastTaskRowId(row.id) && row.id !== "waitingClient"
                                           ? renderFastTaskReorderControls(row.items, cell)
                                           : null}
@@ -15833,6 +15866,9 @@ export default function CommonViewPage() {
                                         {row.id === "internal" && cell.isManualInternalMeeting ? (
                                           <span className="manual-meeting-badge">MANUAL</span>
                                         ) : null}
+                                        {(row.id === "external" || row.id === "internal") && cell.isCalendarMeeting ? (
+                                          <span className="calendar-meeting-badge">CAL</span>
+                                        ) : null}
                                         {isFastTaskRowId(row.id) && row.id !== "waitingClient"
                                           ? renderFastTaskReorderControls(row.items, cell)
                                           : null}
@@ -15850,6 +15886,9 @@ export default function CommonViewPage() {
                                         ) : null}
                                         {row.id === "internal" && cell.isManualInternalMeeting ? (
                                           <span className="manual-meeting-badge">MANUAL</span>
+                                        ) : null}
+                                        {(row.id === "external" || row.id === "internal") && cell.isCalendarMeeting ? (
+                                          <span className="calendar-meeting-badge">CAL</span>
                                         ) : null}
                                       </div>
                                     ) : null}

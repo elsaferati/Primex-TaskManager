@@ -245,6 +245,7 @@ LATE:
             hour: int,
             *,
             calendar_imported: bool = False,
+            paired_external_meeting_id: str | None = None,
         ):
             return SimpleNamespace(
                 id=title,
@@ -259,11 +260,14 @@ LATE:
                 calendar_imported=calendar_imported,
                 microsoft_event_id=title if calendar_imported else None,
                 calendar_sync_status="active",
+                paired_external_meeting_id=paired_external_meeting_id,
+                pre_external_meeting_id=None,
             )
 
         meetings = [
             meeting("Visible external", "external", 9),
             meeting("Visible internal", "internal", 10),
+            meeting("Linked internal", "internal", 10, paired_external_meeting_id="Visible external"),
             meeting("DV PV 24.08-28.08.2026", "external", 11, calendar_imported=True),
         ]
         db = SimpleNamespace(execute=AsyncMock(side_effect=[
@@ -278,6 +282,7 @@ LATE:
 
         self.assertIn("TAK EXT: Visible external", rendered)
         self.assertIn("TAK INT: Visible internal", rendered)
+        self.assertNotIn("TAK INT: Linked internal", rendered)
         self.assertNotIn("DV PV 24.08-28.08.2026", rendered)
 
     async def test_timetable_email_reloads_latest_saved_content_on_each_render(self) -> None:
