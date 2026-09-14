@@ -411,6 +411,7 @@ async def reconcile_system_task_assignments_for_day(
     *,
     target_day: date | None = None,
     now_utc: datetime | None = None,
+    template_ids: list[uuid.UUID] | set[uuid.UUID] | None = None,
 ) -> dict[str, int]:
     """Apply the latest full-day PV/ZV state to pre-generated tasks for one day."""
     now_utc = now_utc or datetime.now(timezone.utc)
@@ -420,17 +421,20 @@ async def reconcile_system_task_assignments_for_day(
     # Use a wide UTC window, then compare in each template's timezone.
     window_start = datetime.combine(target_day - timedelta(days=1), time.min, tzinfo=timezone.utc)
     window_end = datetime.combine(target_day + timedelta(days=2), time.min, tzinfo=timezone.utc)
-    rows = (
-        await db.execute(
-            select(Task, SystemTaskTemplate, SystemTaskTemplateAssigneeSlot)
+    rows_stmt = (
+        select(Task, SystemTaskTemplate, SystemTaskTemplateAssigneeSlot)
             .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
             .join(SystemTaskTemplateAssigneeSlot, Task.system_task_slot_id == SystemTaskTemplateAssigneeSlot.id)
             .where(Task.origin_run_at.is_not(None))
             .where(Task.origin_run_at >= window_start, Task.origin_run_at < window_end)
             .where(Task.meeting_origin_id.is_(None))
             .where(SystemTaskTemplate.trigger_type.is_(None))
-        )
-    ).all()
+    )
+    if template_ids is not None:
+        if not template_ids:
+            return {"reassigned": 0, "deactivated": 0, "reactivated": 0, "created": 0, "skipped": 0}
+        rows_stmt = rows_stmt.where(SystemTaskTemplate.id.in_(template_ids))
+    rows = (await db.execute(rows_stmt)).all()
     rows = [
         (task, template, slot)
         for task, template, slot in rows
@@ -522,6 +526,7 @@ async def reconcile_system_task_assignments_in_range(
     start: date,
     end: date,
     now_utc: datetime | None = None,
+    template_ids: list[uuid.UUID] | set[uuid.UUID] | None = None,
 ) -> dict[str, int]:
     """Apply PV/ZV assignments to every generated system task in a date range."""
     totals = {"reassigned": 0, "deactivated": 0, "reactivated": 0, "created": 0, "skipped": 0}
@@ -534,6 +539,7 @@ async def reconcile_system_task_assignments_in_range(
             db=db,
             target_day=current,
             now_utc=now_utc,
+            template_ids=template_ids,
         )
         for key in totals:
             totals[key] += counts.get(key, 0)

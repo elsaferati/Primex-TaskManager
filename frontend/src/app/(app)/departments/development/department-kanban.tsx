@@ -10196,13 +10196,13 @@ export default function DepartmentKanban() {
                 </div>
                 {filteredExternalMeetings.length ? (
                   <div className="rounded-md border border-slate-200">
-                    <Table>
+                    <Table className="table-fixed">
                       <TableHeader>
                         <TableRow className="bg-slate-100 hover:bg-slate-100">
-                          <TableHead className="uppercase">Title</TableHead>
+                          <TableHead className="w-[320px] uppercase">Title</TableHead>
                           <TableHead className="w-[80px] uppercase">DEP</TableHead>
-                          <TableHead className="w-[150px] uppercase">Date</TableHead>
-                          <TableHead className="w-[110px] uppercase">Time</TableHead>
+                          <TableHead className="w-[105px] uppercase">Date</TableHead>
+                          <TableHead className="w-[85px] uppercase">Time</TableHead>
                           {!isReadOnly ? <TableHead className="w-[90px] text-right uppercase">Actions</TableHead> : null}
                         </TableRow>
                       </TableHeader>
@@ -10383,7 +10383,9 @@ export default function DepartmentKanban() {
                                 </>
                               ) : (
                                 <>
-                                  <TableCell className="font-medium">{meeting.title}</TableCell>
+                                  <TableCell className="w-[320px] max-w-[320px] font-medium">
+                                    <span className="block whitespace-normal break-words">{meeting.title}</span>
+                                  </TableCell>
                                   <TableCell>
                                     <MeetingDepartmentTag meeting={meeting} departmentMap={departmentMap} />
                                   </TableCell>
@@ -10432,13 +10434,13 @@ export default function DepartmentKanban() {
                   <div className="text-sm font-semibold">Internal Meetings</div>
                   {filteredInternalMeetings.length ? (
                     <div className="rounded-md border border-slate-200">
-                      <Table>
+                      <Table className="table-fixed">
                         <TableHeader>
                           <TableRow className="bg-slate-100 hover:bg-slate-100">
-                            <TableHead className="uppercase">Title</TableHead>
+                            <TableHead className="w-[320px] uppercase">Title</TableHead>
                             <TableHead className="w-[80px] uppercase">DEP</TableHead>
-                            <TableHead className="w-[150px] uppercase">Date</TableHead>
-                            <TableHead className="w-[110px] uppercase">Time</TableHead>
+                            <TableHead className="w-[105px] uppercase">Date</TableHead>
+                            <TableHead className="w-[85px] uppercase">Time</TableHead>
                             {!isReadOnly ? <TableHead className="w-[90px] text-right uppercase">Actions</TableHead> : null}
                           </TableRow>
                         </TableHeader>
@@ -10489,7 +10491,11 @@ export default function DepartmentKanban() {
                                   </TableCell>
                                 ) : (
                                   <>
-                                    <TableCell className="font-medium">{meeting.title || "Internal meeting"}</TableCell>
+                                    <TableCell className="w-[320px] max-w-[320px] font-medium">
+                                      <span className="block whitespace-normal break-words">
+                                        {meeting.title || "Internal meeting"}
+                                      </span>
+                                    </TableCell>
                                     <TableCell>
                                       <MeetingDepartmentTag meeting={meeting} departmentMap={departmentMap} />
                                     </TableCell>

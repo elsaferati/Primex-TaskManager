@@ -340,6 +340,38 @@ async def _reset_template_slots_next_run_at(
     return slots
 
 
+async def _regenerate_template_after_assignment_change(
+    db: AsyncSession,
+    *,
+    template: SystemTaskTemplate,
+    now: datetime | None = None,
+) -> None:
+    """Generate and PV/ZV-reconcile a template immediately after assignees change."""
+    now_utc = now or datetime.now(timezone.utc)
+    tz = template_tz(template)
+    local_today = now_utc.astimezone(tz).date()
+    local_day_start = datetime.combine(local_today, dt_time.min, tzinfo=tz).astimezone(timezone.utc)
+    range_end = local_today + timedelta(days=max(int(settings.SYSTEM_TASK_GENERATE_AHEAD_DAYS), 0))
+
+    # Rewind to the start of today so an assignee added after the configured
+    # due time still receives today's matching occurrence.
+    await _reset_template_slots_next_run_at(db, template=template, now=local_day_start)
+    await generate_system_task_instances(
+        db=db,
+        now_utc=now_utc,
+        start=local_today,
+        end=range_end,
+        template_ids=[template.id],
+    )
+    await reconcile_system_task_assignments_in_range(
+        db=db,
+        start=local_today,
+        end=range_end,
+        now_utc=now_utc,
+        template_ids=[template.id],
+    )
+
+
 def _task_row_to_out(
     task: Task,
     template: SystemTaskTemplate,
@@ -1537,6 +1569,7 @@ async def approve_system_task_template(
         start=approval_day,
         end=approval_day + timedelta(days=max(int(settings.SYSTEM_TASK_GENERATE_AHEAD_DAYS), 0)),
         now_utc=approved_at,
+        template_ids=[template.id],
     )
 
     await db.commit()
@@ -1871,7 +1904,9 @@ async def update_system_task_template(
             assignee_slots=assignee_slots,
             assignee_ids=assignee_ids,
         )
-    if slot_schedule_fields_set or is_reactivating:
+    if assignee_set:
+        await _regenerate_template_after_assignment_change(db, template=template)
+    elif slot_schedule_fields_set or is_reactivating:
         await _reset_template_slots_next_run_at(db, template=template)
     await db.commit()
     await db.refresh(template)
