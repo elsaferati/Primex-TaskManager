@@ -10856,6 +10856,13 @@ export default function CommonViewPage() {
           letter-spacing: 0.06em;
           white-space: nowrap;
         }
+        .meeting-origin-row {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          flex-wrap: nowrap;
+          white-space: nowrap;
+        }
         .week-table-meeting-main {
           display: flex;
           flex: 1;
@@ -15282,24 +15289,28 @@ export default function CommonViewPage() {
                               .join(" ")}
                           >
                             <div className="week-table-meeting-main">
-                              {formatTimeLabel(e.time) ? (
-                                <span className="meeting-time-chip">{formatTimeLabel(e.time)}</span>
-                              ) : null}
-                              {e.calendarImported ? (
-                                <span className="calendar-meeting-badge">CAL</span>
-                              ) : null}
+                              <span className="meeting-origin-row">
+                                {formatTimeLabel(e.time) ? (
+                                  <span className="meeting-time-chip">{formatTimeLabel(e.time)}</span>
+                                ) : null}
+                                {e.calendarImported ? (
+                                  <span className="calendar-meeting-badge">CAL</span>
+                                ) : null}
+                              </span>
                               <span className="week-table-meeting-title">
                                 <span className="week-table-line-number">{idx + 1}.</span>{" "}
                                 {commonPrintTitleLine(e.title)}
                               </span>
                             </div>
-                            <div className="week-table-avatars">
-                              {entryAssignees(e).map((name: string) => (
-                                <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
-                                  {initials(name)}
-                                </span>
-                              ))}
-                            </div>
+                            {!e.calendarImported ? (
+                              <div className="week-table-avatars">
+                                {entryAssignees(e).map((name: string) => (
+                                  <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                                    {initials(name)}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
                           </div>
                         ))
                       } else if (row.id === "internal") {
@@ -15316,27 +15327,31 @@ export default function CommonViewPage() {
                               .join(" ")}
                           >
                             <div className="week-table-meeting-main">
-                              {formatTimeLabel(e.time) ? (
-                                <span className="meeting-time-chip">{formatTimeLabel(e.time)}</span>
-                              ) : null}
-                              {isManualInternalMeeting(e) ? (
-                                <span className="manual-meeting-badge">MANUAL</span>
-                              ) : null}
-                              {isCalendarLinkedInternalMeeting(e) ? (
-                                <span className="calendar-meeting-badge">CAL</span>
-                              ) : null}
+                              <span className="meeting-origin-row">
+                                {formatTimeLabel(e.time) ? (
+                                  <span className="meeting-time-chip">{formatTimeLabel(e.time)}</span>
+                                ) : null}
+                                {isManualInternalMeeting(e) ? (
+                                  <span className="manual-meeting-badge">MANUAL</span>
+                                ) : null}
+                                {isCalendarLinkedInternalMeeting(e) ? (
+                                  <span className="calendar-meeting-badge">CAL</span>
+                                ) : null}
+                              </span>
                               <span className="week-table-meeting-title">
                                 <span className="week-table-line-number">{idx + 1}.</span>{" "}
                                 {commonPrintTitleLine(e.title)}
                               </span>
                             </div>
-                            <div className="week-table-avatars">
-                              {entryAssignees(e).map((name: string) => (
-                                <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
-                                  {initials(name)}
-                                </span>
-                              ))}
-                            </div>
+                            {!isCalendarLinkedInternalMeeting(e) ? (
+                              <div className="week-table-avatars">
+                                {entryAssignees(e).map((name: string) => (
+                                  <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                                    {initials(name)}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
                           </div>
                         ))
                       } else if (row.id === "bz") {
@@ -15824,14 +15839,15 @@ export default function CommonViewPage() {
                                           </span>
                                         ) : null}
                                         {(row.id === "external" || row.id === "internal") ? renderSwimlaneMeetingStatusControl(cell) : null}
-                                        {(row.id === "external" || row.id === "internal") && cell.meetingTimeLabel ? (
-                                          <span className="meeting-time-chip">{cell.meetingTimeLabel}</span>
-                                        ) : null}
-                                        {row.id === "internal" && cell.isManualInternalMeeting ? (
-                                          <span className="manual-meeting-badge">MANUAL</span>
-                                        ) : null}
-                                        {(row.id === "external" || row.id === "internal") && cell.isCalendarMeeting ? (
-                                          <span className="calendar-meeting-badge">CAL</span>
+                                        {(row.id === "external" || row.id === "internal") &&
+                                        (cell.meetingTimeLabel || cell.isManualInternalMeeting || cell.isCalendarMeeting) ? (
+                                          <span className="meeting-origin-row">
+                                            {cell.meetingTimeLabel ? <span className="meeting-time-chip">{cell.meetingTimeLabel}</span> : null}
+                                            {row.id === "internal" && cell.isManualInternalMeeting ? (
+                                              <span className="manual-meeting-badge">MANUAL</span>
+                                            ) : null}
+                                            {cell.isCalendarMeeting ? <span className="calendar-meeting-badge">CAL</span> : null}
+                                          </span>
                                         ) : null}
                                         {isFastTaskRowId(row.id) && row.id !== "waitingClient"
                                           ? renderFastTaskReorderControls(row.items, cell)
@@ -15862,14 +15878,15 @@ export default function CommonViewPage() {
                                           </span>
                                         ) : null}
                                         {(row.id === "external" || row.id === "internal") ? renderSwimlaneMeetingStatusControl(cell) : null}
-                                        {(row.id === "external" || row.id === "internal") && cell.meetingTimeLabel ? (
-                                          <span className="meeting-time-chip">{cell.meetingTimeLabel}</span>
-                                        ) : null}
-                                        {row.id === "internal" && cell.isManualInternalMeeting ? (
-                                          <span className="manual-meeting-badge">MANUAL</span>
-                                        ) : null}
-                                        {(row.id === "external" || row.id === "internal") && cell.isCalendarMeeting ? (
-                                          <span className="calendar-meeting-badge">CAL</span>
+                                        {(row.id === "external" || row.id === "internal") &&
+                                        (cell.meetingTimeLabel || cell.isManualInternalMeeting || cell.isCalendarMeeting) ? (
+                                          <span className="meeting-origin-row">
+                                            {cell.meetingTimeLabel ? <span className="meeting-time-chip">{cell.meetingTimeLabel}</span> : null}
+                                            {row.id === "internal" && cell.isManualInternalMeeting ? (
+                                              <span className="manual-meeting-badge">MANUAL</span>
+                                            ) : null}
+                                            {cell.isCalendarMeeting ? <span className="calendar-meeting-badge">CAL</span> : null}
+                                          </span>
                                         ) : null}
                                         {isFastTaskRowId(row.id) && row.id !== "waitingClient"
                                           ? renderFastTaskReorderControls(row.items, cell)
@@ -15883,14 +15900,14 @@ export default function CommonViewPage() {
                                     ) : (row.id === "external" || row.id === "internal") ? (
                                       <div className="swimlane-assignees">
                                         {renderSwimlaneMeetingStatusControl(cell)}
-                                        {cell.meetingTimeLabel ? (
-                                          <span className="meeting-time-chip">{cell.meetingTimeLabel}</span>
-                                        ) : null}
-                                        {row.id === "internal" && cell.isManualInternalMeeting ? (
-                                          <span className="manual-meeting-badge">MANUAL</span>
-                                        ) : null}
-                                        {(row.id === "external" || row.id === "internal") && cell.isCalendarMeeting ? (
-                                          <span className="calendar-meeting-badge">CAL</span>
+                                        {cell.meetingTimeLabel || cell.isManualInternalMeeting || cell.isCalendarMeeting ? (
+                                          <span className="meeting-origin-row">
+                                            {cell.meetingTimeLabel ? <span className="meeting-time-chip">{cell.meetingTimeLabel}</span> : null}
+                                            {row.id === "internal" && cell.isManualInternalMeeting ? (
+                                              <span className="manual-meeting-badge">MANUAL</span>
+                                            ) : null}
+                                            {cell.isCalendarMeeting ? <span className="calendar-meeting-badge">CAL</span> : null}
+                                          </span>
                                         ) : null}
                                       </div>
                                     ) : null}
