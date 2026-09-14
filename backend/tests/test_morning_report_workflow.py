@@ -327,7 +327,7 @@ def make_draft() -> MorningReportDraft:
 
 class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
     def test_personal_and_wfc_sections_are_labeled_as_auto_filled(self) -> None:
-        self.assertEqual(SECTION_TITLES[7], "TASKS PERSONALISHT ME KA/GENTIN?")
+        self.assertEqual(SECTION_TITLES[7], "DET PERSONALISHT ME KA/GENTIN?")
         self.assertEqual(SECTION_TITLES[8], "WFC ME KA/GENTIN?")
         self.assertEqual(section_group_label("morning", SECTION_TITLES[7]), "AUTO-FILLED FROM PRIMEFLOW")
         self.assertEqual(section_group_label("morning", SECTION_TITLES[8]), "AUTO-FILLED FROM PRIMEFLOW")
