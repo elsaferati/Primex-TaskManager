@@ -217,6 +217,27 @@ LATE:
         self.assertIn("07:30<br>08:00", rendered)
         self.assertNotIn("<img", rendered)
 
+    async def test_timetable_email_includes_synced_reminders(self) -> None:
+        reminder = SimpleNamespace(
+            day_date=date(2026, 8, 24),
+            start_time=DEFAULT_GA_TIME_TABLE_ROWS[2].start_time,
+            content="REMINDER 00:00: Follow up tomorrow",
+            source_type="reminder",
+            created_at=datetime(2026, 8, 24, 6, 0),
+        )
+        db = SimpleNamespace(execute=AsyncMock(side_effect=[
+            _result(list(DEFAULT_GA_TIME_TABLE_ROWS)),
+            _result([SimpleNamespace(id="ga-user")]),
+            _result([]),
+            _result([reminder]),
+            _result([]),
+        ]))
+
+        rendered = await render_ga_time_table_html(db, date(2026, 8, 24))
+
+        self.assertIn("REMINDER 00:00: Follow up tomorrow", rendered)
+        self.assertIn("background-color:#FEF3C7", rendered)
+
     async def test_timetable_email_uses_common_view_meeting_visibility(self) -> None:
         def meeting(
             title: str,

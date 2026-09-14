@@ -10,6 +10,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Callable
 
 from sqlalchemy import and_, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
@@ -384,6 +385,37 @@ async def generate_fresh(
     )
 
 
+async def render_ga_recipient_email_html(
+    db: AsyncSession,
+    document: ReportDocument,
+    day: date,
+    *,
+    today_print_html: str | None = None,
+) -> str:
+    """Render the same GA-only email body for previews and real delivery."""
+    if today_print_html is None:
+        source_data = await _load_common_view(day)
+        try:
+            today_print_report = await build_today_print_report(
+                day,
+                include_attachment=False,
+                payload=source_data,
+            )
+            today_print_html = today_print_report["content_html"]
+        except Exception:
+            logger.exception("primeflow_report_ga_preview_today_print_failed")
+            today_print_html = ""
+    return render_html(
+        document,
+        pre_sections_html=await render_ga_tables_html(
+            db,
+            day,
+            today_print_html=today_print_html,
+        ),
+        content_width=1200,
+    )
+
+
 async def deliver_report(
     day: date, slot: str, *, send: bool = True, scheduled_for: datetime | None = None,
     recipient_map: dict[str, list[str]] | None = None, trigger_type: str = "SCHEDULED",
@@ -539,14 +571,11 @@ async def deliver_report(
                         attachment_warnings,
                     ),
                 ] if attachment is not None] + ga_only_attachments
-                ga_html_body = render_html(
+                ga_html_body = await render_ga_recipient_email_html(
+                    db,
                     document,
-                    pre_sections_html=await render_ga_tables_html(
-                        db,
-                        day,
-                        today_print_html=today_print_report["content_html"],
-                    ),
-                    content_width=1200,
+                    day,
+                    today_print_html=today_print_report["content_html"],
                 )
             messages: list[dict] = []
             if any(regular_recipients.values()):

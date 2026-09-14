@@ -22,6 +22,7 @@ import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmat
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
 import { buildRepeatedTaskFirstDateMap, isRepeatedTaskInstance } from "@/lib/repeated-task-visibility"
+import { internalMeetingLegendTone, isManualInternalMeeting, meetingLegendTone } from "@/lib/meeting-tone"
 import { Plus, Pencil, Trash2 } from "lucide-react"
 import type {
   DailyReportResponse,
@@ -587,6 +588,11 @@ type ExternalItem = {
   department?: string
   recurrenceType?: string | null
   recurrence_type?: string | null
+  calendarCategories?: string[]
+  calendar_categories?: string[]
+  calendarImported?: boolean
+  calendar_imported?: boolean
+  microsoft_event_id?: string | null
 }
 type InternalItem = {
   id?: string
@@ -597,6 +603,18 @@ type InternalItem = {
   owner: string
   assignees?: string[]
   department?: string
+  recurrenceType?: string | null
+  recurrence_type?: string | null
+  pairedExternalMeetingId?: string | null
+  paired_external_meeting_id?: string | null
+  preExternalMeetingId?: string | null
+  pre_external_meeting_id?: string | null
+  linkedExternalCalendarCategories?: string[]
+  linked_external_calendar_categories?: string[]
+  linkedExternalCalendarImported?: boolean
+  linked_external_calendar_imported?: boolean
+  linkedExternalRecurrenceType?: string | null
+  linked_external_recurrence_type?: string | null
 }
 type R1Item = {
   title: string
@@ -7281,7 +7299,22 @@ export default function AdminTasksPage() {
                                 {meetings.map(({ kind, meeting }, index) => (
                                   <div
                                     key={`ga-print-meeting-${kind}-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
-                                    className={`ga-time-entry ${kind === "internal" ? "ga-time-internal-meeting" : "ga-time-external-meeting"}`}
+                                    className={`ga-time-entry ${
+                                      kind === "internal"
+                                        ? `${internalMeetingLegendTone(meeting)} ${
+                                            isManualInternalMeeting(meeting) ? "manual-internal-meeting" : ""
+                                          }`
+                                        : meetingLegendTone({
+                                            categories: meeting.calendarCategories ?? meeting.calendar_categories,
+                                            recurrenceType: meeting.recurrenceType ?? meeting.recurrence_type,
+                                            meetingType: "external",
+                                            calendarImported: Boolean(
+                                              meeting.calendarImported ??
+                                                meeting.calendar_imported ??
+                                                meeting.microsoft_event_id
+                                            ),
+                                          })
+                                    }`}
                                   >
                                     <span className="ga-time-meeting-time">{formatTimeLabel(meeting.time)}</span>
                                     <span><strong>{kind === "internal" ? "TAK INT:" : "TAK EXT:"}</strong> {meeting.title}</span>
@@ -7525,7 +7558,22 @@ export default function AdminTasksPage() {
                             {meetings.map(({ kind, meeting }, index) => (
                               <div
                                 key={`ga-meeting-${kind}-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
-                                className={`ga-time-entry ${kind === "internal" ? "ga-time-internal-meeting" : "ga-time-external-meeting"}`}
+                                className={`ga-time-entry ${
+                                  kind === "internal"
+                                    ? `${internalMeetingLegendTone(meeting)} ${
+                                        isManualInternalMeeting(meeting) ? "manual-internal-meeting" : ""
+                                      }`
+                                    : meetingLegendTone({
+                                        categories: meeting.calendarCategories ?? meeting.calendar_categories,
+                                        recurrenceType: meeting.recurrenceType ?? meeting.recurrence_type,
+                                        meetingType: "external",
+                                        calendarImported: Boolean(
+                                          meeting.calendarImported ??
+                                            meeting.calendar_imported ??
+                                            meeting.microsoft_event_id
+                                        ),
+                                      })
+                                }`}
                                 title={`${formatTimeLabel(meeting.time)} · ${meeting.title}`}
                               >
                                 <span className="ga-time-meeting-time">{formatTimeLabel(meeting.time)}</span>
@@ -9096,6 +9144,9 @@ export default function AdminTasksPage() {
           white-space: nowrap;
           opacity: 0.72;
         }
+        .admin-week-table .ga-time-entry.manual-internal-meeting > span:last-child {
+          font-weight: 900;
+        }
         .admin-week-table .ga-time-draggable {
           cursor: grab;
           transition: opacity 120ms ease, transform 120ms ease, box-shadow 120ms ease;
@@ -9116,16 +9167,15 @@ export default function AdminTasksPage() {
           outline-offset: -1px;
           background: transparent;
         }
-        .admin-week-table .ga-time-internal-meeting {
-          border-color: #e6c45c;
-          background: #ffe699;
-          color: #806000;
-          line-height: 1.35;
-        }
-        .admin-week-table .ga-time-external-meeting {
-          border-color: #f29aa5;
-          background: #ffc7ce;
-          color: #c00000;
+        .admin-week-table .ga-time-entry.outlook-violet { background: #e5e7fb; border-color: #7167d9; }
+        .admin-week-table .ga-time-entry.outlook-blue { background: #dcecff; border-color: #5b9fe8; }
+        .admin-week-table .ga-time-entry.outlook-teal { background: #cceff1; border-color: #35abb4; }
+        .admin-week-table .ga-time-entry.outlook-yellow { background: #ffe38f; border-color: #e6ad00; }
+        .admin-week-table .ga-time-entry.outlook-brown { background: #c9a98a; border-color: #8b623d; }
+        .admin-week-table .ga-time-entry.outlook-orange { background: #ffd7ad; border-color: #e87922; }
+        .admin-week-table .ga-time-entry.outlook-red { background: #ffd5dc; border-color: #e55361; }
+        .admin-week-table .ga-time-entry[class*="outlook-"] {
+          color: #0f172a;
           line-height: 1.35;
         }
         .admin-week-table .ga-time-entry-text {

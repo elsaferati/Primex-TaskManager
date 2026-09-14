@@ -85,6 +85,13 @@ def _meeting_time(meeting: Meeting) -> time | None:
     return local.time().replace(second=0, microsecond=0)
 
 
+def _is_manual_internal_meeting(meeting: Meeting) -> bool:
+    return (meeting.meeting_type or "").lower() == "internal" and not (
+        getattr(meeting, "paired_external_meeting_id", None)
+        or getattr(meeting, "pre_external_meeting_id", None)
+    )
+
+
 async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
     """Render the Admin Tasks GA timetable for the report day's work week."""
     week_start = _week_start(report_day)
@@ -158,7 +165,7 @@ async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
                 "text": f"{label}: {meeting.title or '-'}",
                 "fill": meeting_report_color(meeting),
                 "color": "#0F3B8F",
-                "bold": label == "TAK INT",
+                "bold": _is_manual_internal_meeting(meeting),
             })
 
     margin = 30
@@ -386,7 +393,7 @@ async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
                 "text": f"{label}: {meeting.title or '-'}",
                 "fill": meeting_report_color(meeting),
                 "color": "#0F3B8F",
-                "bold": label == "TAK INT",
+                "bold": _is_manual_internal_meeting(meeting),
                 "italic": False,
             })
 

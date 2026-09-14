@@ -22,8 +22,13 @@ from app.models.user import User
 from app.models.enums import UserRole
 from app.services.audit import add_audit_log
 from app.services.primeflow_report_access import can_manage_reports
-from app.services.primeflow_report import ReportDocument, SLOTS, render_docx, render_html, render_plain_text, render_png
-from app.services.primeflow_report_delivery import configured_recipients, deliver_report, generate_fresh
+from app.services.primeflow_report import ReportDocument, SLOTS, render_docx, render_plain_text, render_png
+from app.services.primeflow_report_delivery import (
+    configured_recipients,
+    deliver_report,
+    generate_fresh,
+    render_ga_recipient_email_html,
+)
 from app.services.daily_rlz_control_delivery import (
     SCHEDULE_TYPE as RLZ_SCHEDULE_TYPE, REPORT_TYPE as RLZ_REPORT_TYPE,
     DEFAULT_VARIANT_TIMES,
@@ -269,7 +274,11 @@ async def overview(db: AsyncSession = Depends(get_db), _: User = Depends(require
 
 
 @router.post("/preview")
-async def preview(payload: PreviewRequest, _: User = Depends(require_report_manager)):
+async def preview(
+    payload: PreviewRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_report_manager),
+):
     recipients = await _recipient_map(payload)
     document = await generate_fresh(payload.report_date, payload.report_slot, recipients)
     filename = f"PrimeFlow_1H_{payload.report_date:%d.%m.%Y}_{payload.report_slot.replace(':', '-')}"
@@ -279,10 +288,11 @@ async def preview(payload: PreviewRequest, _: User = Depends(require_report_mana
         return _file_response(render_png(document), "image/png", filename + ".png")
     if payload.format == "txt":
         return _file_response(render_plain_text(document).encode(), "text/plain; charset=utf-8", filename + ".txt")
+    email_html = await render_ga_recipient_email_html(db, document, payload.report_date)
     if payload.format == "html":
-        return HTMLResponse(render_html(document))
+        return HTMLResponse(email_html)
     return {
-        "document": document.model_dump(mode="json"), "html": render_html(document),
+        "document": document.model_dump(mode="json"), "html": email_html,
         "plain_text": render_plain_text(document), "task_count": document.task_count,
         "warning": "No tasks found" if document.task_count == 0 else None,
     }
