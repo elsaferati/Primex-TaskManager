@@ -136,6 +136,7 @@ function severityClass(value: string) {
 
 export default function WeeklyPlanningAuditPage() {
   const { apiFetch, user } = useAuth()
+  const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
   const [settings, setSettings] = React.useState<Settings | null>(null)
   const [history, setHistory] = React.useState<Run[]>([])
   const [preview, setPreview] = React.useState<Preview | null>(null)
@@ -160,21 +161,21 @@ export default function WeeklyPlanningAuditPage() {
   }
 
   const load = React.useCallback(async () => {
-    const [settingsResponse, historyResponse] = await Promise.all([
-      apiFetch("/reports/weekly-planning-audit/settings"),
-      apiFetch("/reports/weekly-planning-audit/history?limit=100"),
-    ])
-    if (settingsResponse.ok) {
-      const value = (await settingsResponse.json()) as Settings
-      setSettings(value)
-      setRecipientsTo(value.recipients_to.join(", "))
-      setRecipientsCc(value.recipients_cc.join(", "))
-      setRecipientsBcc(value.recipients_bcc.join(", "))
-      setTimezone(value.timezone)
-      setRetentionDays(String(value.retention_days))
-      setEnabled(value.enabled)
-    } else {
-      toast.error(`Settings: ${await readError(settingsResponse)}`)
+    const historyResponse = await apiFetch("/reports/weekly-planning-audit/history?limit=100")
+    if (canManage) {
+      const settingsResponse = await apiFetch("/reports/weekly-planning-audit/settings")
+      if (settingsResponse.ok) {
+        const value = (await settingsResponse.json()) as Settings
+        setSettings(value)
+        setRecipientsTo(value.recipients_to.join(", "))
+        setRecipientsCc(value.recipients_cc.join(", "))
+        setRecipientsBcc(value.recipients_bcc.join(", "))
+        setTimezone(value.timezone)
+        setRetentionDays(String(value.retention_days))
+        setEnabled(value.enabled)
+      } else {
+        toast.error(`Settings: ${await readError(settingsResponse)}`)
+      }
     }
     if (historyResponse.ok) {
       const value = (await historyResponse.json()) as { items: Run[] }
@@ -182,10 +183,10 @@ export default function WeeklyPlanningAuditPage() {
     } else {
       toast.error(`Delivery history: ${await readError(historyResponse)}`)
     }
-  }, [apiFetch])
+  }, [apiFetch, canManage])
 
   React.useEffect(() => {
-    if (!user || (user.role !== "ADMIN" && user.role !== "MANAGER")) return
+    if (!user) return
     const timer = window.setTimeout(() => void load(), 0)
     return () => window.clearTimeout(timer)
   }, [load, user])
@@ -301,8 +302,8 @@ export default function WeeklyPlanningAuditPage() {
     await load()
   }
 
-  if (!user || !["ADMIN", "MANAGER"].includes(user.role)) {
-    return <div className="text-sm text-muted-foreground">Forbidden.</div>
+  if (!user) {
+    return <div className="text-sm text-muted-foreground">Sign in to access this report.</div>
   }
 
   return (
@@ -314,7 +315,7 @@ export default function WeeklyPlanningAuditPage() {
         </p>
       </div>
 
-      <Card>
+      {canManage ? <Card>
         <CardHeader><CardTitle className="flex items-center gap-2 text-sm"><Settings2 className="h-4 w-4" /> Current configuration</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-4">
@@ -326,7 +327,7 @@ export default function WeeklyPlanningAuditPage() {
           <div className="text-xs text-muted-foreground">
             To: {settings?.recipients_to.join(", ") || "No recipients"}
           </div>
-          {["ADMIN", "MANAGER"].includes(user.role) ? (
+          {canManage ? (
             <div className="space-y-3 rounded-lg border p-3">
               <label className="flex items-center gap-2 text-sm">
                 <Checkbox checked={enabled} onCheckedChange={(value) => setEnabled(Boolean(value))} />
@@ -349,7 +350,7 @@ export default function WeeklyPlanningAuditPage() {
             </div>
           ) : null}
         </CardContent>
-      </Card>
+      </Card> : null}
 
       <Card>
         <CardHeader><CardTitle className="text-sm">Manual control</CardTitle></CardHeader>
@@ -365,7 +366,7 @@ export default function WeeklyPlanningAuditPage() {
             </div>
             <Button variant="outline" onClick={() => void previewReport()} disabled={loading}><Search className="mr-2 h-4 w-4" /> Preview</Button>
             <Button variant="outline" onClick={() => void runAction("generate")} disabled={loading}><FileSpreadsheet className="mr-2 h-4 w-4" /> Generate Excel</Button>
-            <Button onClick={() => void runAction("generate-and-send")} disabled={loading}><Send className="mr-2 h-4 w-4" /> Generate and Send</Button>
+            {canManage ? <Button onClick={() => void runAction("generate-and-send")} disabled={loading}><Send className="mr-2 h-4 w-4" /> Generate and Send</Button> : null}
           </div>
           <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
             Java që do të auditohet: <strong>{weekStart} – {reportingFriday(weekStart)}</strong>
@@ -440,7 +441,7 @@ export default function WeeklyPlanningAuditPage() {
                 <TableCell className="max-w-xs text-xs">{Object.values(run.recipients_snapshot).flat().join(", ")}</TableCell><TableCell>{run.error_count}</TableCell>
                 <TableCell><div className="flex gap-1">
                   {run.download_url ? <Button size="sm" variant="outline" onClick={() => void downloadRun(run)}><Download className="h-4 w-4" /></Button> : null}
-                  {run.download_url ? <Button size="sm" variant="outline" onClick={() => void resend(run)} disabled={loading}><Mail className="h-4 w-4" /></Button> : null}
+                  {canManage && run.download_url ? <Button size="sm" variant="outline" onClick={() => void resend(run)} disabled={loading}><Mail className="h-4 w-4" /></Button> : null}
                 </div></TableCell>
               </TableRow>
             ))}</TableBody>

@@ -42,6 +42,7 @@ function canCreatePimImageTestTaskForMeeting(meeting: Meeting): boolean {
 type PersonalTaskGroup = "GA" | "KA" | "PX"
 type PersonalRowId = "personalGA" | "personalKA" | "personalPX"
 type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG"
+type OneHMarkerFilter = "all" | "none" | OneHMarker
 
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "EXCLAMATION", label: "!" },
@@ -268,6 +269,9 @@ const oneHPrintChecklistsHtml = (reportDay: Date) =>
     }
   ).join("")}</section>`
 
+const oneHMarkerLegendHtml = () =>
+  `<div class="one-h-marker-legend"><strong>LEGJENDA:</strong><span><b>?</b> Detyrë që parashihet me problem</span><span><b>!</b> Kërkon monitorim / përcjellje nga dikush tjetër</span><span><b>⚑</b> GA</span></div>`
+
 function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
   return (
     <section className="one-h-print-checklists">
@@ -299,6 +303,17 @@ function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
         </div>
       ))}
     </section>
+  )
+}
+
+function OneHMarkerLegend() {
+  return (
+    <div className="one-h-marker-legend">
+      <strong>LEGJENDA:</strong>
+      <span><b>?</b> Detyrë që parashihet me problem</span>
+      <span><b>!</b> Kërkon monitorim / përcjellje nga dikush tjetër</span>
+      <span><b>⚑</b> GA</span>
+    </div>
   )
 }
 
@@ -1626,6 +1641,7 @@ export default function CommonViewPage() {
   const [typeFilters, setTypeFilters] = React.useState<Set<CommonType>>(new Set())
   const [typeMultiMode, setTypeMultiMode] = React.useState(false)
   const [colorFilter, setColorFilter] = React.useState<CommonColorFilter>("all")
+  const [oneHMarkerFilter, setOneHMarkerFilter] = React.useState<OneHMarkerFilter>("all")
   const [taskFocusFilter, setTaskFocusFilter] = React.useState<CommonTaskFocusFilter>("all")
   const [newTaskCategoryFilters, setNewTaskCategoryFilters] = React.useState<Set<CommonTaskNewCategory>>(
     () => new Set(COMMON_TASK_NEW_CATEGORY_OPTIONS.map((option) => option.value))
@@ -4420,6 +4436,12 @@ export default function CommonViewPage() {
     }
     const matchesColorFilter = (entry: FastTaskEntry) =>
       colorFilter === "all" || getCommonTaskColor(entry) === colorFilter
+    const matchesOneHMarkerFilter = (entry: FastTaskEntry) => {
+      const marker = entry.oneHMarker || null
+      if (oneHMarkerFilter === "all") return true
+      if (oneHMarkerFilter === "none") return marker === null
+      return marker === oneHMarkerFilter
+    }
     const matchesTaskFocusFilter = (entry: FastTaskEntry) => {
       if (taskFocusFilter === "new") {
         const category = getCommonTaskNewCategory(entry)
@@ -4449,6 +4471,7 @@ export default function CommonViewPage() {
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
       .filter(matchesTaskFocusFilter)
       .filter(matchesColorFilter)
+      .filter(matchesOneHMarkerFilter)
       .map(narrowAssigneesForSelectedUser)
     const oneH = commonData.oneH
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -4456,6 +4479,7 @@ export default function CommonViewPage() {
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
       .filter(matchesTaskFocusFilter)
       .filter(matchesColorFilter)
+      .filter(matchesOneHMarkerFilter)
       .map(narrowAssigneesForSelectedUser)
     const personal = commonData.personal
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -4463,6 +4487,7 @@ export default function CommonViewPage() {
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
       .filter(matchesTaskFocusFilter)
       .filter(matchesColorFilter)
+      .filter(matchesOneHMarkerFilter)
       .map(narrowAssigneesForSelectedUser)
     const r1 = commonData.r1
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -4470,6 +4495,7 @@ export default function CommonViewPage() {
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
       .filter(matchesTaskFocusFilter)
       .filter(matchesColorFilter)
+      .filter(matchesOneHMarkerFilter)
       .map(narrowAssigneesForSelectedUser)
     const external = commonData.external
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -4564,7 +4590,7 @@ export default function CommonViewPage() {
       fullyCoveredDates,
       hiddenUsersByDate,
     }
-  }, [colorFilter, commonData, newTaskCategoryFilters, selectedCommonUserId, selectedDates, taskFocusFilter, users, weekISOs])
+  }, [colorFilter, commonData, newTaskCategoryFilters, oneHMarkerFilter, selectedCommonUserId, selectedDates, taskFocusFilter, users, weekISOs])
 
   const allUsersLeaveByDate = React.useMemo(() => {
     const datesToUse = selectedDates.size ? Array.from(selectedDates) : weekISOs
@@ -5090,6 +5116,8 @@ export default function CommonViewPage() {
   .one-h-print-checklist-day-label { grid-column:1 / -1; margin:0 0 4px; font-weight:800; }
   .one-h-print-checklist-separator { font-size:13px; font-weight:900; line-height:8px; }
   .one-h-print-checklist-description { color:#475569; }
+  .one-h-marker-legend { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 10px; padding:6px 9px; border:1px solid #fca5a5; border-radius:5px; background:#fef2f2; color:#7f1d1d; font-size:9px; font-weight:700; }
+  .one-h-marker-legend b { color:#dc2626; font-size:14px; font-weight:900; }
   table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9px; line-height: 1.2; }
   table + table { margin-top: 12px; }
   th, td { border: 1px solid #000; padding: 4px 5px; vertical-align: top; overflow-wrap: anywhere; text-align: left; font-weight: 400; }
@@ -5108,10 +5136,11 @@ export default function CommonViewPage() {
   .print-task-date.due { border:3px solid #b91c1c; padding:0 2px; }
   .print-task-badge { display:inline-block; margin:0 4px 3px 0; padding:2px 5px; border-radius:999px; font-size:8px; font-weight:800; line-height:1; white-space:nowrap; }
   .print-task-badge.period { background:#e0f2fe; border:1px solid #bae6fd; color:#0369a1; }
-  .print-task-badge.marker { background:#fff7ed; border:1px solid #fdba74; color:#9a3412; }
+  .print-task-badge.marker { padding:2px 7px; background:#fef2f2; border:1px solid #fca5a5; color:#dc2626; font-size:13px; font-weight:900; }
 </style></head><body>
   <div class="print-header"><div></div><div class="print-title">1H SHTYPI — ${escapePrintHtml(reportDate)}</div><div class="print-date">${escapePrintHtml(formatDateTimeDMY(new Date()))}</div></div>
   ${oneHPrintChecklistsHtml(deliveryDate)}
+  ${oneHMarkerLegendHtml()}
   <table><colgroup><col class="print-number-column"><col class="print-label-column"><col span="6"></colgroup><thead><tr><th>NR</th><th>LLoji dhe sloti</th><th colspan="6">Tasks</th></tr></thead><tbody>${buildTableRows(sortedTaskRows)}</tbody></table>
   <table><colgroup><col class="print-number-column"><col class="print-label-column"><col span="6"></colgroup><thead><tr><th>NR</th><th>LLoji</th><th colspan="6">Meeting</th></tr></thead><tbody>${buildTableRows(meetingRows, true)}</tbody></table>
 </body></html>`
@@ -8338,7 +8367,8 @@ export default function CommonViewPage() {
         .hide-when-all-days { display: none !important; }
         .swimlane-print-title { display: none; }
         .single-day-print-table { display: none; }
-        .one-h-print-checklists { display: none; }
+        .one-h-print-checklists,
+        .one-h-marker-legend { display: none; }
         .print-header,
         .print-footer {
           display: none;
@@ -8482,6 +8512,28 @@ export default function CommonViewPage() {
             gap: 12px;
             margin: 0 0 12px;
             page-break-inside: avoid;
+          }
+          .one-h-marker-legend {
+            display: flex !important;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin: 0 0 8px;
+            padding: 5px 7px;
+            border: 1px solid #fca5a5 !important;
+            border-radius: 5px;
+            background: #fef2f2 !important;
+            color: #7f1d1d !important;
+            font-size: 8px;
+            font-weight: 700;
+            page-break-inside: avoid;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          .one-h-marker-legend b {
+            color: #dc2626 !important;
+            font-size: 13px;
+            font-weight: 900;
           }
           .one-h-print-checklist-title {
             background: #eef2ff !important;
@@ -10682,16 +10734,16 @@ export default function CommonViewPage() {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          min-width: 42px;
-          max-width: 62px;
-          height: 20px;
-          padding: 0 4px;
+          min-width: 58px;
+          max-width: 64px;
+          height: 22px;
+          padding: 0 2px;
           border-radius: 999px;
-          background: #fff7ed;
-          border: 1px solid #fdba74;
-          color: #9a3412;
-          font-weight: 800;
-          font-size: 10px;
+          background: #fef2f2;
+          border: 1px solid #fca5a5;
+          color: #dc2626;
+          font-weight: 900;
+          font-size: 16px;
           line-height: 1;
           flex: 0 0 auto;
           cursor: pointer;
@@ -10699,6 +10751,11 @@ export default function CommonViewPage() {
         .oneh-marker-select:disabled {
           cursor: wait;
           opacity: 0.65;
+        }
+        .oneh-marker-select option {
+          color: #dc2626;
+          font-weight: 900;
+          font-size: 16px;
         }
         .oneh-slot-indicator {
           display: inline-flex;
@@ -12106,6 +12163,24 @@ export default function CommonViewPage() {
                 </button>
               ))}
             </div>
+          </div>
+          <div className="toolbar-group">
+            <label className="flex items-center gap-2 text-sm font-semibold">
+              Symbol
+              <select
+                className="input"
+                value={oneHMarkerFilter}
+                onChange={(event) => setOneHMarkerFilter(event.target.value as OneHMarkerFilter)}
+                aria-label="Filter tasks by symbol"
+                style={{ width: "125px", color: "#dc2626", fontWeight: 800 }}
+              >
+                <option value="all">All</option>
+                <option value="none">No symbol</option>
+                {ONE_H_MARKER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
           </div>
           <div style={{ position: "relative", display: "inline-flex", alignItems: "center", width: "auto" }}>
             <input
@@ -15263,6 +15338,7 @@ export default function CommonViewPage() {
               </div>
             </div>
             <OneHPrintChecklists reportDay={new Date(`${calendarDateIso}T12:00:00`)} />
+            <OneHMarkerLegend />
             <table className="single-day-print-table">
               <colgroup>
                 <col className="single-day-print-number-column" />

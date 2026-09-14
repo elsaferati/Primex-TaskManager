@@ -583,7 +583,8 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
     marker = _task_marker_label(item)
     if marker:
         marker_style = (
-            f"{badge_base}background-color:#FFF7ED;border:1px solid #FDBA74;color:#9A3412;"
+            f"{badge_base}padding:3px 8px;background-color:#FEF2F2;border:1px solid #FCA5A5;"
+            "color:#DC2626;font-size:14px;font-weight:900;"
         )
         top_badges.append(
             f'<span data-task-badge="one-h-marker" style="{marker_style}">{marker}</span>'
@@ -792,6 +793,28 @@ def _one_h_checklists_html(report_day: date | None = None) -> str:
         f"{checklist('PYETJET PER 1H - BORD', board_questions[:len(ONE_H_BOARD_CHECKLIST)], board=True)}"
         '</td>'
         '</tr></table>'
+    )
+
+
+def _task_marker_legend_html() -> str:
+    """Explain the task markers wherever the generated 1H report is rendered."""
+    items = (
+        ("?", "Detyrë që parashihet me problem"),
+        ("!", "Kërkon monitorim / përcjellje nga dikush tjetër"),
+        ("⚑", "GA"),
+    )
+    content = "".join(
+        '<span style="display:inline-block;margin:2px 16px 2px 0;white-space:nowrap;">'
+        f'<strong style="color:#DC2626;font-size:17px;font-weight:900;">{symbol}</strong> '
+        f'{html.escape(description)}</span>'
+        for symbol, description in items
+    )
+    return (
+        '<div data-task-marker-legend="true" style="margin:0 0 10px;padding:6px 9px;'
+        'border:1px solid #FCA5A5;border-radius:5px;background:#FEF2F2;color:#7F1D1D;'
+        'font-family:Arial,sans-serif;font-size:11px;font-weight:700;line-height:1.3;">'
+        '<strong style="margin-right:12px;">LEGJENDA:</strong>'
+        f'{content}</div>'
     )
 
 
@@ -2072,11 +2095,11 @@ def _core_png_table_attachment(
                     draw.rounded_rectangle(
                         (badge_left, text_y, badge_right, text_y + 23),
                         radius=10,
-                        fill="#FFF7ED",
-                        outline="#FDBA74",
+                        fill="#FEF2F2",
+                        outline="#FCA5A5",
                         width=1,
                     )
-                    draw.text((badge_left + 6, text_y + 3), marker_label, fill="#9A3412", font=small_bold)
+                    draw.text((badge_left + 6, text_y + 3), marker_label, fill="#DC2626", font=small_bold)
                 text_y += 28
                 value = f"{item_index + 1 + chunk_index * 6}. {_task_title(item, personal=personal)}"
                 task_font = bold if fill == DEADLINE_COLOR else regular
@@ -2415,7 +2438,7 @@ async def _build_print_report(
     board_questions, staff_questions = _one_h_checklists_for_day(checklist_date)
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
 <div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">{report_title}</div>
-{_one_h_checklists_html(checklist_date)}{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date, missing_one_h_by_slot=missing_one_h_by_slot)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
+{_one_h_checklists_html(checklist_date)}{_task_marker_legend_html()}{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date, missing_one_h_by_slot=missing_one_h_by_slot)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
     content_html = (
         '<div data-today-print-report="true" style="margin:18px 0 14px">'
         + re.sub(r"^.*?<body[^>]*>|</body>.*$", "", html_body, flags=re.S)
@@ -2452,7 +2475,13 @@ async def _build_print_report(
         "",
     ]
     plain_rows.extend(_closing_sections_plain_text(closing_sections))
-    plain_rows.extend(["", "TASKS"])
+    plain_rows.extend([
+        "",
+        "LEGJENDA: ? - Detyrë që parashihet me problem | "
+        "! - Kërkon monitorim / përcjellje nga dikush tjetër | ⚑ - GA",
+        "",
+        "TASKS",
+    ])
     for label, values, personal in task_rows:
         slot = _one_h_slot_from_label(label)
         missing = missing_one_h_by_slot.get(slot or "", [])

@@ -269,7 +269,7 @@ async def overview(db: AsyncSession = Depends(get_db), _: User = Depends(require
 
 
 @router.post("/preview")
-async def preview(payload: PreviewRequest, _: User = Depends(require_report_manager)):
+async def preview(payload: PreviewRequest, _: User = Depends(get_current_user)):
     recipients = await _recipient_map(payload)
     document = await generate_fresh(payload.report_date, payload.report_slot, recipients)
     filename = f"PrimeFlow_1H_{payload.report_date:%d.%m.%Y}_{payload.report_slot.replace(':', '-')}"

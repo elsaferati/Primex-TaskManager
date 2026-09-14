@@ -117,7 +117,7 @@ async def update_settings(payload: SettingsPayload, db: AsyncSession = Depends(g
 async def preview(
     report_date: date | None = None,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_manager_or_admin),
+    _: User = Depends(get_current_user),
 ) -> dict:
     delivery_date = report_date or datetime.now(report_timezone()).date()
     return await build_tomorrow_print_report(delivery_date, db=db)

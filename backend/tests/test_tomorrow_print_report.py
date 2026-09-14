@@ -17,12 +17,24 @@ from app.services.tomorrow_print_report import (
     _missing_one_h_initials,
     _one_h_checklists_html,
     _png_table_attachment,
+    _task_marker_legend_html,
     _task_rows,
     build_today_print_report,
     build_tomorrow_print_report,
     ensure_required_shtypi_recipient,
     send_tomorrow_print_report,
 )
+
+
+def test_task_marker_legend_explains_the_report_symbols() -> None:
+    legend_html = _task_marker_legend_html()
+
+    assert 'data-task-marker-legend="true"' in legend_html
+    assert "Detyrë që parashihet me problem" in legend_html
+    assert "Kërkon monitorim / përcjellje nga dikush tjetër" in legend_html
+    assert "⚑" in legend_html
+    assert "GA" in legend_html
+    assert "color:#DC2626" in legend_html
 
 
 def test_missing_one_h_users_exclude_leave_admin_and_management_initials() -> None:

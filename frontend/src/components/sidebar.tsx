@@ -180,14 +180,13 @@ const navGroups: NavGroup[] = [
       { href: "/external-tickets", label: "STD Tickets EXT", icon: TicketCheck },
       { href: "/reviews", label: "Reviews", icon: Gem },
       { href: "/reports", label: "Reports & Exports", icon: BarChart3, exact: true },
-      { href: "/reports/rlz-daily-control", label: "Kontrolli ditor RLZ", icon: Activity, roles: ["ADMIN", "MANAGER"] },
-      { href: "/today-print-report", label: "1H SHTYPI Today", icon: MailCheck, roles: ["ADMIN", "MANAGER"] },
-      { href: "/tomorrow-print-report", label: "1H SHTYPI Tomorrow", icon: MailCheck, roles: ["ADMIN", "MANAGER"] },
+      { href: "/reports/rlz-daily-control", label: "Kontrolli ditor RLZ", icon: Activity },
+      { href: "/today-print-report", label: "1H SHTYPI Today", icon: MailCheck },
+      { href: "/tomorrow-print-report", label: "1H SHTYPI Tomorrow", icon: MailCheck },
       {
         href: "/reports/weekly-planning-audit",
         label: "Weekly Planning Check",
         icon: FileSpreadsheet,
-        roles: ["ADMIN", "MANAGER"],
       },
       {
         href: "/reports/px-jav-weekly",
@@ -198,13 +197,11 @@ const navGroups: NavGroup[] = [
         href: "/end-week-bz-report",
         label: "PIKAT E BZ FIN JAV",
         icon: MailCheck,
-        roles: ["ADMIN", "MANAGER"],
       },
       {
         href: "/admin/1h-reports",
-        label: "1H Report Management",
+        label: "1H Reports",
         icon: MailCheck,
-        roles: ["ADMIN", "MANAGER"],
       },
     ],
     subgroups: [
@@ -238,8 +235,6 @@ export function Sidebar({ role }: { role: UserRole }) {
   const router = useRouter()
   const { apiFetch, prefetchApiFetch, user } = useAuth()
   const currentUserId = user?.id
-  const canAccessOneHReports =
-    role === "ADMIN" || role === "MANAGER" || user?.full_name?.trim().toLocaleLowerCase() === "laurent hoxha"
   const { isOpen, isDesktop, setIsOpen } = useSidebar()
   const { count } = useWaitingConfirmationGa()
   const excelStandardsActive = pathname === "/standards/excel" || pathname.startsWith("/standards/excel/")
@@ -344,11 +339,8 @@ export function Sidebar({ role }: { role: UserRole }) {
             : null
 
   const canViewItem = React.useCallback(
-    (item: NavItem) =>
-      item.href === "/admin/1h-reports"
-        ? canAccessOneHReports
-        : !item.roles || item.roles.includes(role),
-    [canAccessOneHReports, role]
+    (item: NavItem) => !item.roles || item.roles.includes(role),
+    [role]
   )
 
   const isItemActive = React.useCallback(
