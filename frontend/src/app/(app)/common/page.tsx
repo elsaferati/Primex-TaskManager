@@ -11,6 +11,12 @@ import { formatDateDMY, formatDateTimeDMY } from "@/lib/dates"
 import { getPlainMarkedText, parseMarkedNoteContent, renderMarkedNoteContent } from "@/lib/note-markup"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import { buildRepeatedTaskFirstDateMap, isRepeatedTaskInstance } from "@/lib/repeated-task-visibility"
+import {
+  internalMeetingLegendTone,
+  isCalendarLinkedInternalMeeting,
+  isManualInternalMeeting,
+  meetingLegendTone,
+} from "@/lib/meeting-tone"
 import type {
   User,
   Task,
@@ -425,74 +431,6 @@ type InternalItem = {
   linked_external_recurrence_type?: string | null
 }
 
-const meetingLegendTone = ({
-  categories,
-  recurrenceType,
-  meetingType,
-  calendarImported,
-}: {
-  categories?: string[]
-  recurrenceType?: string | null
-  meetingType: "external" | "internal"
-  calendarImported?: boolean
-}) => {
-  const values = (categories || []).map((category) => category.trim().toLowerCase())
-  const normalizedRecurrence = (recurrenceType || "").trim().toLowerCase()
-
-  // Mirror the category palette used by the shared Outlook / Teams calendar.
-  if (
-    values.some(
-      (category) =>
-        category.includes("daily") ||
-        category.includes("weekly") ||
-        category.includes("standup") ||
-        category.includes("brown")
-    )
-  )
-    return "outlook-brown"
-  if (values.some((category) => category.includes("red") || category.includes("online"))) return "outlook-red"
-  if (values.some((category) => category === "tak int" || category.includes("yellow"))) return "outlook-yellow"
-  if (values.some((category) => category.includes("orange"))) return "outlook-orange"
-  if (values.some((category) => category.includes("event") || category.includes("evvent") || category.includes("fizik")))
-    return "outlook-teal"
-  if (values.some((category) => category.includes("purple") || category.includes("violet"))) return "outlook-violet"
-  if (
-    values.some(
-      (category) => category.includes("blue")
-    )
-  )
-    return "outlook-blue"
-
-  // Uncategorized Outlook/Teams events are TAK EXT online meetings in Common
-  // View, so show them with the red external-online tone instead of purple.
-  if (calendarImported) return "outlook-red"
-  // Standalone TAK INT meetings use light blue. A linked TAK INT is resolved
-  // with its TAK EXT metadata by the caller and inherits that meeting's tone.
-  if (meetingType === "internal") return "outlook-blue"
-  if (["weekly", "daily"].includes(normalizedRecurrence))
-    return "outlook-brown"
-  return "outlook-blue"
-}
-
-const internalMeetingLegendTone = (meeting: InternalItem) => {
-  const isLinked = Boolean(
-    meeting.pairedExternalMeetingId ??
-      meeting.paired_external_meeting_id ??
-      meeting.preExternalMeetingId ??
-      meeting.pre_external_meeting_id
-  )
-  return meetingLegendTone({
-    categories: meeting.linkedExternalCalendarCategories ?? meeting.linked_external_calendar_categories,
-    recurrenceType: isLinked
-      ? meeting.linkedExternalRecurrenceType ?? meeting.linked_external_recurrence_type
-      : meeting.recurrenceType ?? meeting.recurrence_type,
-    meetingType: isLinked ? "external" : "internal",
-    calendarImported: Boolean(
-      meeting.linkedExternalCalendarImported ?? meeting.linked_external_calendar_imported
-    ),
-  })
-}
-
 const isCalendarAnnualLeave = (title?: string, categories?: string[]) =>
   (categories || []).some((category) => category.trim().toLowerCase() === "pv") ||
   /(^|[^a-z0-9])pv([^a-z0-9]|$)/i.test(title || "")
@@ -812,6 +750,8 @@ const commonTaskSortRank = (status?: string | null, isDone?: boolean) => {
 type SwimlaneCell = {
   title: string
   meetingTimeLabel?: string
+  isManualInternalMeeting?: boolean
+  isCalendarMeeting?: boolean
   subtitle?: string
   dateLabel?: string
   note?: string
@@ -7498,6 +7438,7 @@ export default function CommonViewPage() {
     const externalItems: SwimlaneCell[] = externalSource.map((x) => ({
       title: x.title,
       meetingTimeLabel: formatTimeLabel(x.time) || undefined,
+      isCalendarMeeting: Boolean(x.calendarImported),
       subtitle: x.department || "Department TBD",
       dateLabel: formatDateHuman(x.date),
       accentClass: [
@@ -7522,11 +7463,14 @@ export default function CommonViewPage() {
     const internalItems: SwimlaneCell[] = internalSource.map((x) => ({
       title: x.title,
       meetingTimeLabel: formatTimeLabel(x.time) || undefined,
+      isManualInternalMeeting: isManualInternalMeeting(x),
+      isCalendarMeeting: isCalendarLinkedInternalMeeting(x),
       subtitle: x.department || "Department TBD",
       dateLabel: formatDateHuman(x.date),
       accentClass: [
         "swimlane-accent internal",
         internalMeetingLegendTone(x),
+        isManualInternalMeeting(x) ? "manual-internal-meeting" : "",
         isOneTimeMeeting(x.recurrenceType ?? x.recurrence_type) ? "one-time-meeting" : "",
       ]
         .filter(Boolean)
@@ -10736,6 +10680,12 @@ export default function CommonViewPage() {
         .week-table-entry.one-time-meeting {
           border-color: #dc2626;
         }
+        .week-table-entry.manual-internal-meeting .week-table-meeting-title {
+          font-weight: 900;
+        }
+        .week-table-entry.manual-internal-meeting {
+          box-shadow: inset 0 0 0 2px #1d4ed8;
+        }
         .week-table-entry.one-time-meeting .week-table-avatar {
           border-color: #fca5a5;
         }
@@ -10871,6 +10821,38 @@ export default function CommonViewPage() {
           line-height: 1;
           white-space: nowrap;
           flex: 0 0 auto;
+        }
+        .manual-meeting-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 20px;
+          padding: 0 7px;
+          border: 1px solid #1e3a8a;
+          border-radius: 999px;
+          background: #1d4ed8;
+          color: #ffffff;
+          font-size: 9px;
+          font-weight: 900;
+          line-height: 1;
+          letter-spacing: 0.06em;
+          white-space: nowrap;
+        }
+        .calendar-meeting-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 20px;
+          padding: 0 7px;
+          border: 1px solid #0f766e;
+          border-radius: 999px;
+          background: #0d9488;
+          color: #ffffff;
+          font-size: 9px;
+          font-weight: 900;
+          line-height: 1;
+          letter-spacing: 0.06em;
+          white-space: nowrap;
         }
         .week-table-meeting-main {
           display: flex;
@@ -11337,6 +11319,12 @@ export default function CommonViewPage() {
         .swimlane-accent.personal { border-left: 0; }
         .swimlane-accent.external { border-left: 4px solid var(--external-accent); }
         .swimlane-accent.internal { border-left: 4px solid var(--internal-accent); }
+        .swimlane-cell.manual-internal-meeting .swimlane-title {
+          font-weight: 900;
+        }
+        .swimlane-cell.manual-internal-meeting {
+          box-shadow: inset 0 0 0 2px #1d4ed8;
+        }
         .swimlane-accent.bz { border-left: 4px solid var(--bz-accent); }
         .swimlane-accent.r1 { border-left: 0; }
         .swimlane-accent.problem { border-left: 4px solid var(--problem-accent); }
@@ -15295,6 +15283,9 @@ export default function CommonViewPage() {
                               {formatTimeLabel(e.time) ? (
                                 <span className="meeting-time-chip">{formatTimeLabel(e.time)}</span>
                               ) : null}
+                              {e.calendarImported ? (
+                                <span className="calendar-meeting-badge">CAL</span>
+                              ) : null}
                               <span className="week-table-meeting-title">
                                 <span className="week-table-line-number">{idx + 1}.</span>{" "}
                                 {commonPrintTitleLine(e.title)}
@@ -15316,6 +15307,7 @@ export default function CommonViewPage() {
                             className={[
                               "week-table-entry",
                               internalMeetingLegendTone(e),
+                              isManualInternalMeeting(e) ? "manual-internal-meeting" : "",
                               isOneTimeMeeting(e.recurrenceType ?? e.recurrence_type) ? "one-time-meeting" : "",
                             ]
                               .filter(Boolean)
@@ -15324,6 +15316,12 @@ export default function CommonViewPage() {
                             <div className="week-table-meeting-main">
                               {formatTimeLabel(e.time) ? (
                                 <span className="meeting-time-chip">{formatTimeLabel(e.time)}</span>
+                              ) : null}
+                              {isManualInternalMeeting(e) ? (
+                                <span className="manual-meeting-badge">MANUAL</span>
+                              ) : null}
+                              {isCalendarLinkedInternalMeeting(e) ? (
+                                <span className="calendar-meeting-badge">CAL</span>
                               ) : null}
                               <span className="week-table-meeting-title">
                                 <span className="week-table-line-number">{idx + 1}.</span>{" "}
@@ -15827,6 +15825,12 @@ export default function CommonViewPage() {
                                         {(row.id === "external" || row.id === "internal") && cell.meetingTimeLabel ? (
                                           <span className="meeting-time-chip">{cell.meetingTimeLabel}</span>
                                         ) : null}
+                                        {row.id === "internal" && cell.isManualInternalMeeting ? (
+                                          <span className="manual-meeting-badge">MANUAL</span>
+                                        ) : null}
+                                        {(row.id === "external" || row.id === "internal") && cell.isCalendarMeeting ? (
+                                          <span className="calendar-meeting-badge">CAL</span>
+                                        ) : null}
                                         {isFastTaskRowId(row.id) && row.id !== "waitingClient"
                                           ? renderFastTaskReorderControls(row.items, cell)
                                           : null}
@@ -15859,6 +15863,12 @@ export default function CommonViewPage() {
                                         {(row.id === "external" || row.id === "internal") && cell.meetingTimeLabel ? (
                                           <span className="meeting-time-chip">{cell.meetingTimeLabel}</span>
                                         ) : null}
+                                        {row.id === "internal" && cell.isManualInternalMeeting ? (
+                                          <span className="manual-meeting-badge">MANUAL</span>
+                                        ) : null}
+                                        {(row.id === "external" || row.id === "internal") && cell.isCalendarMeeting ? (
+                                          <span className="calendar-meeting-badge">CAL</span>
+                                        ) : null}
                                         {isFastTaskRowId(row.id) && row.id !== "waitingClient"
                                           ? renderFastTaskReorderControls(row.items, cell)
                                           : null}
@@ -15873,6 +15883,12 @@ export default function CommonViewPage() {
                                         {renderSwimlaneMeetingStatusControl(cell)}
                                         {cell.meetingTimeLabel ? (
                                           <span className="meeting-time-chip">{cell.meetingTimeLabel}</span>
+                                        ) : null}
+                                        {row.id === "internal" && cell.isManualInternalMeeting ? (
+                                          <span className="manual-meeting-badge">MANUAL</span>
+                                        ) : null}
+                                        {(row.id === "external" || row.id === "internal") && cell.isCalendarMeeting ? (
+                                          <span className="calendar-meeting-badge">CAL</span>
                                         ) : null}
                                       </div>
                                     ) : null}

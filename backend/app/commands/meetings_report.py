@@ -51,6 +51,7 @@ async def main() -> None:
                 await configured_recipients(),
                 plain_text,
                 render_html(row.subject, row.report_date, row.tomorrow_date, row.sections),
+                db=db,
                 report_day=row.report_date,
                 tomorrow=row.tomorrow_date,
                 sections=row.sections,

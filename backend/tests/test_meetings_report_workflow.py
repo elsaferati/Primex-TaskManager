@@ -51,6 +51,7 @@ from app.services.meetings_report import (
     render_section_report_docx,
     render_section_report_png,
     section_report_attachments,
+    send_meetings_report,
 )
 
 
@@ -311,6 +312,38 @@ class MeetingsReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(draft.auto_sent_slots, ["16:30"])
         self.assertEqual(build.await_count, 1)
         self.assertEqual(send.await_count, 1)
+
+
+class MeetingsReportAttachmentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_m3_email_includes_ga_time_table_attachment(self) -> None:
+        gmail = SimpleNamespace(send_verified=AsyncMock(return_value={"id": "gmail-id"}))
+        ga_png = AsyncMock(return_value=b"ga-time-table-png")
+        base_attachments = [
+            ("PrimeFlow-M3-2026-08-10.docx", b"docx", "application/docx"),
+            ("PrimeFlow-M3-2026-08-10.png", b"m3-png", "image/png"),
+        ]
+        with (
+            patch("app.services.meetings_report.GmailService", return_value=gmail),
+            patch("app.services.meetings_report.section_report_attachments", return_value=base_attachments),
+            patch("app.services.one_h_ga_attachments.render_ga_time_table_png", ga_png),
+        ):
+            await send_meetings_report(
+                "PrimeFlow M3",
+                {"to": ["report@example.com"], "cc": [], "bcc": []},
+                "plain",
+                "html",
+                db=SimpleNamespace(),
+                report_day=date(2026, 8, 10),
+                tomorrow=date(2026, 8, 11),
+                sections=[{"title": "Section", "body": "Body"}],
+            )
+
+        sent_attachments = gmail.send_verified.await_args.kwargs["attachments"]
+        self.assertEqual(sent_attachments[-1], (
+            "GA-Time-Table-2026-08-10.png",
+            b"ga-time-table-png",
+            "image/png",
+        ))
 
 
 class MeetingsReportAliasDedupTests(unittest.TestCase):
