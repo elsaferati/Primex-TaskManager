@@ -516,9 +516,11 @@ function mergeContinuationTableRows(header: string[], rows: string[][]) {
 export function ReportSectionPreview({
   body,
   filterCreatedWeek = false,
+  projectColumnWidth,
 }: {
   body: string
   filterCreatedWeek?: boolean
+  projectColumnWidth?: string
 }) {
   const [createdWeekFilter, setCreatedWeekFilter] = React.useState<"all" | "this" | "last">("all")
   const lines = reportSectionEditorLines(body)
@@ -723,8 +725,9 @@ export function ReportSectionPreview({
                       const narrow = isNarrowTableHeader(header)
                       const projectColumnStyle = header === "PRJK"
                         ? {
-                            width: "1%",
-                            maxWidth: "140px",
+                            width: projectColumnWidth || "1%",
+                            minWidth: projectColumnWidth,
+                            maxWidth: projectColumnWidth || "140px",
                             whiteSpace: "normal" as const,
                             overflowWrap: "break-word" as const,
                             wordBreak: "normal" as const,
@@ -781,8 +784,9 @@ export function ReportSectionPreview({
                       const narrow = isNarrowTableHeader(header)
                       const projectColumnStyle = header === "PRJK"
                         ? {
-                            width: "1%",
-                            maxWidth: "140px",
+                            width: projectColumnWidth || "1%",
+                            minWidth: projectColumnWidth,
+                            maxWidth: projectColumnWidth || "140px",
                             whiteSpace: "normal" as const,
                             overflowWrap: "break-word" as const,
                             wordBreak: "normal" as const,

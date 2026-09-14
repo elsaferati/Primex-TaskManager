@@ -56,7 +56,7 @@ from app.services.meetings_report import (
 
 class ReportOwnerAndWfcTests(unittest.TestCase):
     def test_personal_and_wfc_sections_are_known_auto_sections(self) -> None:
-        self.assertEqual(SECTION_TITLES[13], "N- TASKS PERSONALISHT ME KA/GENTIN?")
+        self.assertEqual(SECTION_TITLES[13], "N- DET PERSONALISHT ME KA/GENTIN?")
         self.assertEqual(SECTION_TITLES[14], "N- WFC ME KA/GENTIN?")
         self.assertFalse(is_manual_section_title("meetings", SECTION_TITLES[13]))
         self.assertFalse(is_manual_section_title("meetings", SECTION_TITLES[14]))

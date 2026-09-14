@@ -66,6 +66,7 @@ function sectionGroupLabel(section: Section) {
     "(GA) NOTES TE REJA ( NOT DISSCUSED)?",
     "PV/FESTA EXT/TAK EXT/ TAK INT/ BZ ME GA/BLLOK:",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
+    "DET PERSONALISHT ME KA/GENTIN?",
     "TASKS PERSONALISHT ME KA/GENTIN?",
     "WFC ME KA/GENTIN?",
   ]

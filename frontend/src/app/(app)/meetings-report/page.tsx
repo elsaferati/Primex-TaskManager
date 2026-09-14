@@ -98,13 +98,16 @@ function canonicalMeetingsSectionTitle(title: string) {
     return "N- (GA) DET PERSONALISHT?"
   }
   if (key === compactSectionTitle("N- (GA/KA/GENTI) DET PERSONALISHT?")) {
-    return "N- TASKS PERSONALISHT ME KA/GENTIN?"
+    return "N- DET PERSONALISHT ME KA/GENTIN?"
   }
   if (key === compactSectionTitle("WFC TASKS (KA/GENTI)")) {
     return "N- WFC ME KA/GENTIN?"
   }
   if (key === compactSectionTitle("TASKS PERSONALISHT ME KA/GENTIN?")) {
-    return "N- TASKS PERSONALISHT ME KA/GENTIN?"
+    return "N- DET PERSONALISHT ME KA/GENTIN?"
+  }
+  if (key === compactSectionTitle("N- TASKS PERSONALISHT ME KA/GENTIN?")) {
+    return "N- DET PERSONALISHT ME KA/GENTIN?"
   }
   if (key === compactSectionTitle("WFC ME KA/GENTIN?")) {
     return "N- WFC ME KA/GENTIN?"
@@ -127,7 +130,7 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
     "N- (GA) TAK EXT/TAK INT/BZ ME GA/BLLOK",
     "N- DETYRA 1H PA SLOT?",
     "N- (GA) DET PERSONALISHT?",
-    "N- TASKS PERSONALISHT ME KA/GENTIN?",
+    "N- DET PERSONALISHT ME KA/GENTIN?",
     "N- WFC ME KA/GENTIN?",
   ]
   const manuals = new Set(["A JEMI BRENDA MESATARES ME PROJEKTE?"])
@@ -193,7 +196,7 @@ function sectionGroupLabel(section: Section) {
     "TAK STATUSI?",
     "N- DETYRA 1H PA SLOT?",
     "N- (GA) DET PERSONALISHT?",
-    "N- TASKS PERSONALISHT ME KA/GENTIN?",
+    "N- DET PERSONALISHT ME KA/GENTIN?",
     "N- WFC ME KA/GENTIN?",
   ]
   if (knownAuto.some((auto) => compactSectionTitle(auto) === key)) return "Auto-filled from PrimeFlow"
@@ -623,6 +626,12 @@ export default function MeetingsReportPage() {
                         ) : (
                           <ReportSectionPreview
                             body={sectionPreviewText(section.body)}
+                            projectColumnWidth={
+                              canonicalMeetingsSectionTitle(section.section_key || section.title) ===
+                              "DET PA PROGRES PINK (FT DHE PRJK)"
+                                ? "140px"
+                                : undefined
+                            }
                             filterCreatedWeek={
                               canonicalMeetingsSectionTitle(section.title) ===
                               "N- (GA) DET TE REJA LAST WEEK/THIS WEEK/08:00/ME DEADLINE?"
