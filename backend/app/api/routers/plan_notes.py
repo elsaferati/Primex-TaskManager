@@ -105,6 +105,7 @@ def _note_out(
         completed_at=note.completed_at,
         is_converted_to_task=note.is_converted_to_task,
         is_discussed=note.is_discussed,
+        one_h_marker=note.one_h_marker,
         next_week=note.next_week,
         project_id=note.project_id,
         department_id=note.department_id,
@@ -306,6 +307,7 @@ async def create_plan_note(
         completed_at=payload.completed_at,
         is_converted_to_task=payload.is_converted_to_task or False,
         is_discussed=payload.is_discussed or False,
+        one_h_marker=payload.one_h_marker,
         next_week=payload.next_week or False,
         project_id=payload.project_id,
         department_id=department_id,
@@ -349,6 +351,8 @@ async def update_plan_note(
         note.is_converted_to_task = update_data["is_converted_to_task"]
     if "is_discussed" in update_data:
         note.is_discussed = update_data["is_discussed"]
+    if "one_h_marker" in update_data:
+        note.one_h_marker = update_data["one_h_marker"]
     if "next_week" in update_data:
         note.next_week = bool(update_data["next_week"])
     if "planned_for_date" in update_data:
@@ -499,6 +503,8 @@ async def update_plan_note_task_bundle(
         if not cleaned_content:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Note text cannot be empty")
         note.content = cleaned_content
+    if "one_h_marker" in fields_set:
+        note.one_h_marker = payload.one_h_marker
 
     if "project_id" in fields_set:
         project = None
@@ -587,6 +593,8 @@ async def update_plan_note_task_bundle(
                         finish_period=item.finish_period,
                         one_h_report_slot=item.one_h_report_slot,
                         one_h_report_slot_is_set="one_h_report_slot" in item.model_fields_set,
+                        one_h_marker=item.one_h_marker,
+                        one_h_marker_is_set="one_h_marker" in item.model_fields_set,
                         is_deadline_important=item.is_deadline_important,
                         priority=item.priority,
                         is_bllok=item.is_bllok,

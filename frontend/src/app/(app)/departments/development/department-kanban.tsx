@@ -162,6 +162,30 @@ type OneHReportSlot = typeof ONE_H_REPORT_SLOT_OPTIONS[number]
 const ONE_H_REPORT_SLOT_SET = new Set<string>(ONE_H_REPORT_SLOT_OPTIONS)
 const ONE_H_REPORT_SLOT_NONE_VALUE = "__none__"
 
+type OneHMarker = NonNullable<Task["one_h_marker"]>
+const ONE_H_MARKER_SYMBOLS: Record<OneHMarker, string> = {
+  EXCLAMATION: "!",
+  QUESTION: "?",
+  KA: "KA",
+  GENT: "GENT",
+  FLAG: "⚑",
+}
+
+function TaskOneHMarker({ marker }: { marker?: Task["one_h_marker"] }) {
+  if (!marker) return null
+  const symbol = ONE_H_MARKER_SYMBOLS[marker]
+  if (!symbol) return null
+  return (
+    <span
+      className="inline-flex min-h-6 min-w-6 shrink-0 items-center justify-center rounded-md border border-red-300 bg-red-50 px-1.5 text-sm font-black leading-none text-red-600"
+      title={`Task symbol: ${symbol}`}
+      aria-label={`Task symbol ${symbol}`}
+    >
+      {symbol}
+    </span>
+  )
+}
+
 const normalizeOneHReportSlot = (value?: string | null): OneHReportSlot | null => {
   const normalized = (value || "").trim()
   return ONE_H_REPORT_SLOT_SET.has(normalized) ? (normalized as OneHReportSlot) : null
@@ -3366,6 +3390,7 @@ export default function DepartmentKanban() {
       dueDate?: string | null
       oneHReportSlot?: OneHReportSlot | null
       isOneHReportTask?: boolean
+      oneHMarker?: Task["one_h_marker"]
     }> = []
     const systemAmRows: typeof rows = []
     const systemPmRows: typeof rows = []
@@ -3494,6 +3519,7 @@ export default function DepartmentKanban() {
         comment: task.user_comment ?? null,
         userInitials: printInitials,
         taskId: task.id,
+        oneHMarker: task.one_h_marker,
         sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
         startDate: task.start_date || null,
         dueDate: task.due_date || null,
@@ -3533,6 +3559,7 @@ export default function DepartmentKanban() {
         comment: task.user_comment ?? null,
         userInitials: printInitials,
         taskId: task.id,
+        oneHMarker: task.one_h_marker,
         sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
         startDate: task.start_date || null,
         dueDate: task.due_date || null,
@@ -3565,6 +3592,7 @@ export default function DepartmentKanban() {
           comment: task.user_comment ?? null,
           userInitials: printInitials,
           taskId: task.id,
+          oneHMarker: task.one_h_marker,
           sortDate: task.due_date || task.start_date || task.planned_for || task.created_at,
           startDate: task.start_date || null,
           dueDate: task.due_date || null,
@@ -3608,6 +3636,7 @@ export default function DepartmentKanban() {
         comment: task.user_comment ?? null,
         userInitials: printInitials,
         taskId: task.id,
+        oneHMarker: task.one_h_marker,
         sortDate: task.due_date || task.start_date || task.created_at,
         startDate: task.start_date || null,
         dueDate: task.due_date || null,
@@ -3852,6 +3881,7 @@ export default function DepartmentKanban() {
       dueDate?: string | null
       oneHReportSlot?: OneHReportSlot | null
       isOneHReportTask?: boolean
+      oneHMarker?: Task["one_h_marker"]
     }> => {
       const rows: ReturnType<typeof convertDailyReportToRows> = []
       const systemAmRows: typeof rows = []
@@ -3960,6 +3990,7 @@ export default function DepartmentKanban() {
           comment: task.user_comment ?? null,
           userInitials: rowUserInitials,
           taskId: task.id,
+          oneHMarker: task.one_h_marker,
           sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
           startDate: task.start_date || null,
           dueDate: task.due_date || null,
@@ -4002,6 +4033,7 @@ export default function DepartmentKanban() {
             comment: task.user_comment ?? null,
             userInitials: rowUserInitials,
             taskId: task.id,
+            oneHMarker: task.one_h_marker,
             sortDate: task.due_date || task.start_date || task.created_at,
             startDate: task.start_date || null,
             dueDate: task.due_date || null,
@@ -4034,6 +4066,7 @@ export default function DepartmentKanban() {
               comment: task.user_comment ?? null,
               userInitials: rowUserInitials,
               taskId: task.id,
+              oneHMarker: task.one_h_marker,
               sortDate: task.due_date || task.start_date || task.created_at,
               startDate: task.start_date || null,
               dueDate: task.due_date || null,
@@ -7809,6 +7842,7 @@ export default function DepartmentKanban() {
                                       08:00
                                     </span>
                                   ) : null}
+                                  <TaskOneHMarker marker={row.oneHMarker} />
                                   <span className="min-w-0 flex-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                                     {(() => {
                                       const hasMarks = typeof visibleTitle === "string" && visibleTitle.includes("[[")
@@ -8128,8 +8162,9 @@ export default function DepartmentKanban() {
                               )}
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
-                              <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>
-                                {renderAllTodayTaskTitle(task)}
+                              <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
+                                <span>{renderAllTodayTaskTitle(task)}</span>
+                                <TaskOneHMarker marker={task.one_h_marker} />
                               </div>
                             </TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{confirmerLabel}</TableCell>
@@ -8268,6 +8303,7 @@ export default function DepartmentKanban() {
                                 <span>
                                   {renderAllTodayTaskTitle(task)}
                                 </span>
+                                <TaskOneHMarker marker={task.one_h_marker} />
                                 {task.plan_note_origin_id ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>PX JAV</Badge>
                                 ) : isGaTask(task) ? (
@@ -8399,6 +8435,7 @@ export default function DepartmentKanban() {
                                 <span>
                                   {renderAllTodayTaskTitle(task)}
                                 </span>
+                                <TaskOneHMarker marker={task.one_h_marker} />
                                 {task.plan_note_origin_id ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>PX JAV</Badge>
                                 ) : isGaTask(task) ? (
@@ -8505,6 +8542,7 @@ export default function DepartmentKanban() {
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>{task.title || "-"}</span>
+                                <TaskOneHMarker marker={task.one_h_marker} />
                                 <Badge className="text-[10px] px-1.5 py-0 border-slate-200 bg-slate-50 text-slate-700">SYS</Badge>
                               </div>
                             </TableCell>
@@ -9575,6 +9613,7 @@ export default function DepartmentKanban() {
                                             ? renderMarkedNoteContent(t.title, t.title)
                                             : t.title}
                                       </div>
+                                      <TaskOneHMarker marker={t.one_h_marker} />
                                     </div>
                                   </div>
                                 <div className="sm:px-3 flex items-start">
@@ -11091,6 +11130,7 @@ export default function DepartmentKanban() {
                   sortDate?: string | null
                   startDate?: string | null
                   dueDate?: string | null
+                  oneHMarker?: Task["one_h_marker"]
                   userName: string
                   userInitials: string
                 }> = []
@@ -11263,6 +11303,7 @@ export default function DepartmentKanban() {
                                     08:00
                                   </span>
                                 ) : null}
+                                <TaskOneHMarker marker={row.oneHMarker} />
                                 <span className="whitespace-pre-wrap break-words">
                                   {row.typeLabel === "PRJK" && row.projectTitle ? (
                                     <>
@@ -11384,6 +11425,7 @@ export default function DepartmentKanban() {
                                 08:00
                               </span>
                             ) : null}
+                            <TaskOneHMarker marker={row.oneHMarker} />
                             <span className="whitespace-pre-wrap break-words">
                               {row.typeLabel === "PRJK" && row.projectTitle ? (
                                 <>

@@ -591,6 +591,7 @@ export interface GaNote {
   completed_at?: string | null
   is_converted_to_task: boolean
   is_discussed?: boolean
+  one_h_marker?: "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | null
   next_week?: boolean
   project_id?: string | null
   department_id?: string | null
@@ -612,6 +613,7 @@ export interface PlanNote {
   completed_at?: string | null
   is_converted_to_task: boolean
   is_discussed?: boolean
+  one_h_marker?: "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | null
   next_week?: boolean
   project_id?: string | null
   department_id?: string | null
