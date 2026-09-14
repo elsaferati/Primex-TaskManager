@@ -3280,8 +3280,6 @@ async def update_task(
         task.is_1h_report = payload.is_1h_report
         if not payload.is_1h_report and not _payload_has_field(payload, "one_h_report_slot"):
             task.one_h_report_slot = None
-        if not payload.is_1h_report and not one_h_marker_set:
-            task.one_h_marker = None
     if _payload_has_field(payload, "one_h_report_slot"):
         if payload.one_h_report_slot is not None:
             # R1 uses the same report slots without changing the task type to 1H.
@@ -3291,11 +3289,6 @@ async def update_task(
         else:
             task.one_h_report_slot = None
     if one_h_marker_set:
-        if payload.one_h_marker is not None and not task.is_1h_report:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Markers are only available for 1H tasks",
-            )
         task.one_h_marker = payload.one_h_marker
     if payload.is_r1 is not None:
         task.is_r1 = payload.is_r1
@@ -3846,13 +3839,10 @@ async def update_task_one_h_marker(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> TaskOut:
-    """Allow any authenticated user to classify a 1H task."""
+    """Allow any authenticated user to classify a task shown in 1H SHTYPI."""
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    if not task.is_1h_report:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Markers are only available for 1H tasks")
-
     task.one_h_marker = payload.one_h_marker
     if task.fast_task_group_id is not None:
         await db.execute(

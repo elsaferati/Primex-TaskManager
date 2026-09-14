@@ -29,6 +29,15 @@ type Delivery = {
   last_error?: string | null
 }
 type Preview = { subject: string; target_date: string; html: string }
+type TaskMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG"
+
+const taskMarkerOptions: Array<{ value: TaskMarker; label: string }> = [
+  { value: "EXCLAMATION", label: "!" },
+  { value: "QUESTION", label: "?" },
+  { value: "KA", label: "KA" },
+  { value: "GENT", label: "GENT" },
+  { value: "FLAG", label: "⚑" },
+]
 
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
@@ -69,6 +78,7 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
   const [saving, setSaving] = React.useState(false)
   const [sending, setSending] = React.useState(false)
   const previewRef = React.useRef<HTMLDivElement | null>(null)
+  const previewFrameRef = React.useRef<HTMLIFrameElement | null>(null)
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
 
   const applySettings = React.useCallback((next: SettingsState) => {
@@ -141,6 +151,79 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
     }
   }
 
+  const setupPreviewMarkerControls = React.useCallback(() => {
+    const document = previewFrameRef.current?.contentDocument
+    if (!document) return
+
+    document.querySelectorAll<HTMLElement>("td[data-task-id]").forEach((cell) => {
+      if (cell.querySelector("select[data-task-marker-control]")) return
+      const taskId = cell.dataset.taskId
+      if (!taskId) return
+
+      const existingBadge = cell.querySelector<HTMLElement>('[data-task-badge="one-h-marker"]')
+      existingBadge?.remove()
+
+      const select = document.createElement("select")
+      select.dataset.taskMarkerControl = "true"
+      select.setAttribute("aria-label", "Task marker")
+      select.title = "Task marker"
+      select.style.cssText = [
+        "display:inline-block",
+        "float:right",
+        "height:20px",
+        "min-width:42px",
+        "margin:0 0 3px 4px",
+        "padding:1px 4px",
+        "border:1px solid #FDBA74",
+        "border-radius:999px",
+        "background:#FFF7ED",
+        "color:#9A3412",
+        "font:800 10px/1 Arial,sans-serif",
+        "cursor:pointer",
+      ].join(";")
+
+      const emptyOption = document.createElement("option")
+      emptyOption.value = ""
+      emptyOption.textContent = "—"
+      select.appendChild(emptyOption)
+      taskMarkerOptions.forEach((option) => {
+        const element = document.createElement("option")
+        element.value = option.value
+        element.textContent = option.label
+        select.appendChild(element)
+      })
+      select.value = cell.dataset.taskMarker || ""
+
+      select.addEventListener("change", async () => {
+        const previousValue = cell.dataset.taskMarker || ""
+        const nextValue = select.value
+        select.disabled = true
+        try {
+          const response = await apiFetch(`/tasks/${taskId}/one-h-marker`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ one_h_marker: nextValue || null }),
+          })
+          if (!response?.ok) {
+            const detail = await response?.json().catch(() => null)
+            throw new Error(typeof detail?.detail === "string" ? detail.detail : "Could not update task marker")
+          }
+          cell.dataset.taskMarker = nextValue
+          toast.success("Task marker updated")
+        } catch (error) {
+          select.value = previousValue
+          toast.error("Task marker update failed", { description: String(error) })
+        } finally {
+          select.disabled = false
+        }
+      })
+
+      const periodBadge = cell.querySelector('[data-task-badge="finish-period"]')
+      if (periodBadge) periodBadge.insertAdjacentElement("afterend", select)
+      else cell.prepend(select)
+    })
+  }, [apiFetch])
+
   const sendNow = async () => {
     setSending(true)
     try {
@@ -200,7 +283,7 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
       ) : <div className="rounded-lg border bg-white p-8 text-sm text-muted-foreground">{loading ? "Loading settings..." : "No settings available."}</div>}
 
       {preview ? (
-        <div ref={previewRef} className="space-y-3 rounded-lg border bg-white p-4"><div><h2 className="font-semibold">Generated email</h2><p className="text-sm text-muted-foreground">{preview.subject}</p></div><iframe title={`${reportName} generated email`} srcDoc={preview.html} className="h-[620px] w-full rounded border bg-white" /></div>
+        <div ref={previewRef} className="space-y-3 rounded-lg border bg-white p-4"><div><h2 className="font-semibold">Generated email</h2><p className="text-sm text-muted-foreground">{preview.subject}</p></div><iframe ref={previewFrameRef} onLoad={setupPreviewMarkerControls} title={`${reportName} generated email`} srcDoc={preview.html} className="h-[620px] w-full rounded border bg-white" /></div>
       ) : null}
 
       <div className="rounded-lg border bg-white p-4">

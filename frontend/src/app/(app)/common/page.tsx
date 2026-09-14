@@ -1138,6 +1138,8 @@ const isFastTaskRowId = (rowId: CommonType): rowId is FastTaskRowId | OneHSlotRo
   rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || isPersonalRowId(rowId) || rowId === "r1" || rowId === "waitingClient"
 const isPrintDedupeTaskRowId = (rowId: CommonType) =>
   rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || isPersonalRowId(rowId) || rowId === "r1" || rowId === "waitingClient"
+const isShtypiTaskRowId = (rowId: CommonType) =>
+  rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || isPersonalRowId(rowId) || rowId === "r1"
 
 const getFastTaskAssigneeKey = (entry: FastTaskEntry) => {
   const person = "person" in entry ? entry.person : ""
@@ -2935,6 +2937,7 @@ export default function CommonViewPage() {
               : undefined,
           finishPeriod: item.finishPeriod || item.finish_period || null,
           oneHReportSlot: normalizeOneHReportSlot(item.oneHReportSlot || item.one_h_report_slot),
+          oneHMarker: item.oneHMarker || item.one_h_marker || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
@@ -2979,6 +2982,7 @@ export default function CommonViewPage() {
               ? (item.fastTaskOrder ?? item.fast_task_order)
               : undefined,
           finishPeriod: item.finishPeriod || item.finish_period || null,
+          oneHMarker: item.oneHMarker || item.one_h_marker || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
@@ -3001,6 +3005,7 @@ export default function CommonViewPage() {
               : undefined,
           finishPeriod: item.finishPeriod || item.finish_period || null,
           oneHReportSlot: normalizeOneHReportSlot(item.oneHReportSlot || item.one_h_report_slot),
+          oneHMarker: item.oneHMarker || item.one_h_marker || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
@@ -3630,6 +3635,7 @@ export default function CommonViewPage() {
                   fastTaskOrder: t.fast_task_order ?? undefined,
                   finishPeriod: t.finish_period || null,
                   oneHReportSlot: normalizeOneHReportSlot(t.one_h_report_slot),
+                  oneHMarker: t.one_h_marker || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
                   startDate: t.start_date || null,
@@ -3673,6 +3679,7 @@ export default function CommonViewPage() {
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
                   finishPeriod: t.finish_period || null,
+                  oneHMarker: t.one_h_marker || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
                   startDate: t.start_date || null,
@@ -3694,6 +3701,7 @@ export default function CommonViewPage() {
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
                   finishPeriod: t.finish_period || null,
+                  oneHMarker: t.one_h_marker || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
                   startDate: t.start_date || null,
@@ -4242,11 +4250,14 @@ export default function CommonViewPage() {
       if (!entry.taskId || savingOneHMarkerTaskId) return
       const previousMarker = entry.oneHMarker || null
       const applyMarker = (marker: OneHMarker | null) => {
+        const updateItems = <T extends FastTaskItemMeta>(items: T[]) =>
+          items.map((item) => item.taskId === entry.taskId ? { ...item, oneHMarker: marker } : item)
         setCommonData((current) => ({
           ...current,
-          oneH: current.oneH.map((item) =>
-            item.taskId === entry.taskId ? { ...item, oneHMarker: marker } : item
-          ),
+          blocked: updateItems(current.blocked),
+          oneH: updateItems(current.oneH),
+          personal: updateItems(current.personal),
+          r1: updateItems(current.r1),
         }))
       }
 
@@ -7225,6 +7236,7 @@ export default function CommonViewPage() {
       fastTaskOrder: x.fastTaskOrder,
       finishPeriod: x.finishPeriod,
       oneHReportSlot: x.oneHReportSlot,
+      oneHMarker: x.oneHMarker,
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
@@ -7277,6 +7289,7 @@ export default function CommonViewPage() {
         departmentId: x.departmentId,
         fastTaskOrder: x.fastTaskOrder,
         finishPeriod: x.finishPeriod,
+        oneHMarker: x.oneHMarker,
         entryDate: x.date,
         isDeadlineImportant: x.isDeadlineImportant,
         dueDate: x.dueDate,
@@ -7363,6 +7376,7 @@ export default function CommonViewPage() {
       fastTaskOrder: x.fastTaskOrder,
       finishPeriod: x.finishPeriod,
       oneHReportSlot: x.oneHReportSlot,
+      oneHMarker: x.oneHMarker,
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
@@ -14858,7 +14872,7 @@ export default function CommonViewPage() {
                                     <span className="oneh-slot-indicator">{getOneHReportSlotLabel((e as OneHItem | R1Item).oneHReportSlot)}</span>
                                   ) : null}
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
-                                  {isOneHSlotRowId(row.id) ? renderOneHMarkerControl(e as OneHItem) : null}
+                                  {renderOneHMarkerControl(e)}
                                   {e.isDeadlineImportant ? (
                                     <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
                                   ) : null}
@@ -14924,6 +14938,7 @@ export default function CommonViewPage() {
                                     <span className="oneh-slot-indicator">{getOneHReportSlotLabel(e.oneHReportSlot)}</span>
                                   ) : null}
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
+                                  {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(e) : null}
                                   {e.isDeadlineImportant ? (
                                     <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
                                   ) : null}
@@ -14959,6 +14974,7 @@ export default function CommonViewPage() {
                                   <span>
                                   <span className="week-table-line-number">{idx + 1}.</span>
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
+                                  {renderOneHMarkerControl(e)}
                                   {e.isDeadlineImportant ? (
                                     <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
                                   ) : null}
@@ -15518,7 +15534,7 @@ export default function CommonViewPage() {
                                             {getCommonTaskPeriodLabel(cell.finishPeriod)}
                                           </span>
                                         ) : null}
-                                        {isOneHSlotRowId(row.id) ? renderOneHMarkerControl(cell) : null}
+                                        {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(cell) : null}
                                         {isFastTaskRowId(row.id) && cell.isDeadlineImportant ? (
                                           <span className="deadline-indicator" title={cell.dueDate ? `Deadline ${formatDateHuman(cell.dueDate)}` : "Deadline important"}>
                                             {getDeadlineIndicatorLabel(cell.dueDate)}
@@ -15554,7 +15570,7 @@ export default function CommonViewPage() {
                                             {getCommonTaskPeriodLabel(cell.finishPeriod)}
                                           </span>
                                         ) : null}
-                                        {isOneHSlotRowId(row.id) ? renderOneHMarkerControl(cell) : null}
+                                        {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(cell) : null}
                                         {isFastTaskRowId(row.id) && cell.isDeadlineImportant ? (
                                           <span className="deadline-indicator" title={cell.dueDate ? `Deadline ${formatDateHuman(cell.dueDate)}` : "Deadline important"}>
                                             {getDeadlineIndicatorLabel(cell.dueDate)}

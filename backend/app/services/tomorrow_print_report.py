@@ -848,8 +848,16 @@ def _html_table(
                         title = _task_title(item, personal=personal)
                         title_html = _task_title_html(title, red_background=color == DEADLINE_COLOR)
                         task_number = item_index + (chunk_index * 6) + 1
+                        task_id = html.escape(str(item.get("task_id") or item.get("taskId") or ""), quote=True)
+                        marker_value = html.escape(
+                            str(item.get("one_h_marker") or item.get("oneHMarker") or ""), quote=True
+                        )
+                        task_attr = (
+                            f' data-task-id="{task_id}" data-task-marker="{marker_value}"'
+                            if task_id else ""
+                        )
                         title_cells.append(
-                            f'<td{background} style="{title_style}">{badges}{task_number}. {title_html}</td>'
+                            f'<td{task_attr}{background} style="{title_style}">{badges}{task_number}. {title_html}</td>'
                         )
                     if chunk_index == len(chunks) - 1:
                         date_style = f"{date_style};{SLOT_END_DIVIDER_STYLE}"
