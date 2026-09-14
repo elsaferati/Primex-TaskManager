@@ -159,12 +159,26 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
   const applyPreviewMarkerFilter = React.useCallback(() => {
     const document = previewFrameRef.current?.contentDocument
     if (!document) return
-    document.querySelectorAll<HTMLElement>("td[data-task-id]").forEach((cell) => {
-      const content = cell.querySelector<HTMLElement>("[data-task-marker-filter-content]")
-      const marker = cell.dataset.taskMarker || ""
-      const matches = markerFilter === "all" || (markerFilter === "none" ? !marker : marker === markerFilter)
-      if (content) content.style.visibility = matches ? "" : "hidden"
-      cell.dataset.taskMarkerFilterHidden = matches ? "false" : "true"
+    document.querySelectorAll<HTMLTableRowElement>('tr[data-task-card-row="content"]').forEach((contentRow) => {
+      const dateRow = contentRow.nextElementSibling
+      const dateCells = dateRow?.matches('tr[data-task-card-row="dates"]')
+        ? Array.from(dateRow.querySelectorAll<HTMLTableCellElement>("td"))
+        : []
+      const taskCells = Array.from(contentRow.querySelectorAll<HTMLTableCellElement>("td"))
+
+      taskCells.forEach((cell, index) => {
+        const marker = cell.dataset.taskMarker || ""
+        const isTaskCard = Boolean(cell.dataset.taskId)
+        const matches = !isTaskCard || markerFilter === "all" || (markerFilter === "none" ? !marker : marker === markerFilter)
+        cell.style.display = matches ? "" : "none"
+        cell.dataset.taskMarkerFilterHidden = matches ? "false" : "true"
+        if (dateCells[index]) dateCells[index].style.display = matches ? "" : "none"
+
+        // Clear the old content-only filtering style from previews generated
+        // before full-card filtering was introduced.
+        const content = cell.querySelector<HTMLElement>("[data-task-marker-filter-content]")
+        if (content) content.style.visibility = ""
+      })
     })
   }, [markerFilter])
 

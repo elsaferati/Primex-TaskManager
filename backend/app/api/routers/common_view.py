@@ -68,7 +68,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "14"
+COMMON_VIEW_CACHE_VERSION = "15"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -214,6 +214,26 @@ def _initials(name: str) -> str:
     first = parts[0][0] if parts else ""
     last = parts[-1][0] if len(parts) > 1 else ""
     return f"{first}{last}".upper()
+
+
+def _ka_genti_confirmation_owner(user: User | None) -> str | None:
+    """Mirror the M1/M3 WFC ownership rules for Common View consumers."""
+    if user is None:
+        return None
+    full_name = (user.full_name or "").strip()
+    name_parts = re.findall(r"[^\W\d_]+", full_name, flags=re.UNICODE)
+    if name_parts and name_parts[0].casefold() in {"gent", "genti"}:
+        return "GENT"
+    if _initials(full_name) == "KA":
+        return "KA"
+
+    username = (user.username or "").strip().casefold()
+    email = (user.email or "").strip().casefold()
+    if username == "gent.arifaj" or email == "g.arifaj@primexeu.com":
+        return "GENT"
+    if username == "kosove.arifaj" or email == "kosove.arifaj@ht-furniture.de":
+        return "KA"
+    return None
 
 
 def _normalize_multiline_title(value: str | None) -> str:
@@ -835,6 +855,13 @@ async def get_common_view(
             status_value = (t.status or "").lower()
             is_done = bool(t.completed_at) or status_value in {"done", "completed"}
             task_status = (t.status or ("DONE" if is_done else "TODO")).strip() or ("DONE" if is_done else "TODO")
+            confirmation_owner = _ka_genti_confirmation_owner(
+                users_map.get(t.confirmation_assignee_id) if t.confirmation_assignee_id else None
+            )
+            confirmation_fields = {
+                "confirmation_assignee_id": str(t.confirmation_assignee_id) if t.confirmation_assignee_id else None,
+                "confirmation_owner": confirmation_owner,
+            }
             dept_id = None
             if assignees:
                 dept_id = assignees[0].department_id
@@ -876,6 +903,7 @@ async def get_common_view(
                             "start_date": t.start_date.isoformat() if t.start_date else None,
                             "created_at": t.created_at.isoformat() if t.created_at else None,
                             "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+                            **confirmation_fields,
                         }
                     )
                 if t.is_1h_report:
@@ -904,6 +932,7 @@ async def get_common_view(
                             "start_date": t.start_date.isoformat() if t.start_date else None,
                             "created_at": t.created_at.isoformat() if t.created_at else None,
                             "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+                            **confirmation_fields,
                         }
                     )
                 if t.is_personal:
@@ -930,6 +959,8 @@ async def get_common_view(
                             "start_date": t.start_date.isoformat() if t.start_date else None,
                             "created_at": t.created_at.isoformat() if t.created_at else None,
                             "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+                            "is_personal_task": True,
+                            **confirmation_fields,
                         }
                     )
                 if t.is_r1:
@@ -958,6 +989,7 @@ async def get_common_view(
                             "start_date": t.start_date.isoformat() if t.start_date else None,
                             "created_at": t.created_at.isoformat() if t.created_at else None,
                             "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+                            **confirmation_fields,
                         }
                     )
                 if (
@@ -987,6 +1019,43 @@ async def get_common_view(
                             "start_date": t.start_date.isoformat() if t.start_date else None,
                             "created_at": t.created_at.isoformat() if t.created_at else None,
                             "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+                            **confirmation_fields,
+                        }
+                    )
+
+                if (
+                    not t.is_personal
+                    and not is_done
+                    and task_status.strip().upper() in {"WAITING", "PENDING_CONFIRMATION", "WAITING_CONFIRMATION"}
+                    and confirmation_owner in {"KA", "GENT"}
+                ):
+                    items["personal"].append(
+                        {
+                            "id": f"task:{t.id}:{task_date.isoformat()}:wfc",
+                            "task_id": str(t.id),
+                            "title": display_title,
+                            "task_title": t.title,
+                            "person": owner_label,
+                            "assignees": assignee_names or None,
+                            "user_id": str(assignee_id) if assignee_id else None,
+                            "date": task_date.isoformat(),
+                            "note": t.description or None,
+                            "description": t.description,
+                            "department_id": str(dept_id) if dept_id else None,
+                            "status": task_status,
+                            "isDone": False,
+                            "fast_task_order": t.fast_task_order,
+                            "finish_period": t.finish_period,
+                            "one_h_report_slot": one_h_slots_by_task_date.get((t.id, one_h_slot_date))
+                            or t.one_h_report_slot,
+                            "one_h_marker": t.one_h_marker,
+                            "is_deadline_important": bool(t.is_deadline_important),
+                            "due_date": t.due_date.isoformat() if t.due_date else None,
+                            "start_date": t.start_date.isoformat() if t.start_date else None,
+                            "created_at": t.created_at.isoformat() if t.created_at else None,
+                            "completed_at": None,
+                            "is_personal_task": False,
+                            **confirmation_fields,
                         }
                     )
 
