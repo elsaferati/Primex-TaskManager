@@ -622,10 +622,17 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
             f'{start_day:%d.%m.%Y}</span>'
         if start_day else ""
     )
+    due_badge_style = (
+        "height:26px;border:1px solid #991B1B;border-radius:4px;background-color:#DC2626;"
+        "color:#FFFFFF;padding:3px 9px;font-size:14px;line-height:18px;font-weight:900;"
+        "box-shadow:0 1px 3px rgba(127,29,29,0.45);"
+        if due_today else
+        "border:3px solid #B91C1C;padding:0 3px;"
+    )
     due_badge = (
             f'<span data-task-badge="due-date" data-badge-position="bottom-right" '
             f'data-due-today="{str(due_today).lower()}" '
-            f'style="{date_badge_base}border:3px solid #B91C1C;padding:0 3px;">{due_label}</span>'
+            f'style="{date_badge_base}{due_badge_style}">{due_label}</span>'
         if due_day else ""
     )
     date_badges = ""
@@ -2121,19 +2128,19 @@ def _core_png_table_attachment(
                 badge_right = right - 5
                 if due_day:
                     date_label = "SOT" if due_day == target_date else due_day.strftime("%d.%m.%Y")
-                    badge_width = int(measure.textlength(date_label, font=small_bold)) + 12
+                    badge_width = int(measure.textlength(date_label, font=small_bold)) + (18 if due_day == target_date else 12)
                     badge_left = badge_right - badge_width
                     badge_bottom = y + row_height - 5
-                    badge_top = badge_bottom - 23
+                    badge_top = badge_bottom - (26 if due_day == target_date else 23)
                     if due_day == target_date:
                         draw.rounded_rectangle(
                             (badge_left, badge_top, badge_right, badge_bottom),
-                            radius=3,
-                            fill="#EFF6FF",
-                            outline="#93C5FD",
+                            radius=4,
+                            fill="#DC2626",
+                            outline="#991B1B",
                             width=1,
                         )
-                        draw.text((badge_left + 6, badge_top + 3), date_label, fill="#1D4ED8", font=small_bold)
+                        draw.text((badge_left + 6, badge_top + 3), date_label, fill="#FFFFFF", font=small_bold)
                     else:
                         draw.text((badge_left + 6, badge_top + 3), date_label, fill="#FFFFFF", font=small_bold)
                 if _is_eight_am_task(item):

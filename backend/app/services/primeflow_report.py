@@ -100,6 +100,12 @@ def one_h_marker_symbol(value: Any) -> str:
     return ONE_H_MARKER_SYMBOLS.get(str(value or "").strip().upper(), "")
 
 
+def one_h_marker_legend_text() -> str:
+    return "LEGJENDA: " + " / ".join(
+        f"{symbol} - {description}" for symbol, description in ONE_H_MARKER_LEGEND
+    )
+
+
 class ReportEmployee(BaseModel):
     name: str
     tasks: list[ReportTask] = Field(default_factory=list)
@@ -578,9 +584,7 @@ def build_report_document(
 
 
 def render_plain_text(document: ReportDocument) -> str:
-    symbol_legend = "SYMBOL LEGEND\n" + " / ".join(
-        f"{symbol} - {description}" for symbol, description in ONE_H_MARKER_LEGEND
-    )
+    symbol_legend = one_h_marker_legend_text()
     blocks = [document.subject, f"Generated: {document.generated_at.isoformat()}", symbol_legend, ""]
     reminder_groups = (
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
@@ -863,22 +867,18 @@ def render_html(
         )
 
     def symbol_legend_html() -> str:
-        rows = "".join(
-            '<tr>'
-            f'<td width="54" style="width:54px;padding:6px 8px;border:1px solid #fecaca;'
-            f'font-family:Arial,sans-serif;font-size:16px;font-weight:900;text-align:center;color:#dc2626;">{html.escape(symbol)}</td>'
-            f'<td style="padding:6px 9px;border:1px solid #fecaca;font-family:Arial,sans-serif;'
-            f'font-size:11px;color:#7f1d1d;">{html.escape(description)}</td>'
-            '</tr>'
+        items = '<b style="font-size:16px;margin:0 5px;color:#dc2626;">/</b>'.join(
+            f'<span style="white-space:nowrap;"><b style="font-size:15px;font-weight:900;">'
+            f'{html.escape(symbol)}</b> - {html.escape(description)}</span>'
             for symbol, description in ONE_H_MARKER_LEGEND
         )
         return (
             '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
             'data-report-symbol-legend="true" style="width:100%;border-collapse:collapse;margin:0 0 12px;">'
-            '<tr><th colspan="2" bgcolor="#fef2f2" style="background-color:#fef2f2;'
-            'border:1px solid #fecaca;padding:7px 9px;font-family:Arial,sans-serif;'
-            'font-size:12px;text-align:left;color:#991b1b;">SYMBOL LEGEND</th></tr>'
-            f'{rows}</table>'
+            '<tr><td bgcolor="#fef2f2" style="background-color:#fef2f2;border:1px solid #fecaca;'
+            'padding:8px 10px;font-family:Arial,sans-serif;font-size:10px;line-height:1.35;'
+            'text-align:left;color:#991b1b;white-space:nowrap;">'
+            f'<strong style="margin-right:9px;">LEGJENDA:</strong>{items}</td></tr></table>'
         )
 
     body_chunks: list[str] = [report_legend_html(), symbol_legend_html()]
@@ -1068,21 +1068,26 @@ def render_docx(document: ReportDocument) -> bytes:
         description_run = cell.add_paragraph().add_run(description)
         description_run.font.size = Pt(7.5)
         description_run.font.color.rgb = RGBColor.from_string("475569")
-    symbol_legend_header = doc.add_table(rows=1, cols=1).cell(0, 0)
-    shade(symbol_legend_header, "#fef2f2")
-    symbol_legend_title = symbol_legend_header.paragraphs[0].add_run("SYMBOL LEGEND")
-    symbol_legend_title.bold = True
-    symbol_legend_title.font.size = Pt(10)
-    symbol_legend_title.font.color.rgb = RGBColor.from_string("991B1B")
-    symbol_legend_table = doc.add_table(rows=len(ONE_H_MARKER_LEGEND), cols=2)
-    symbol_legend_table.style = "Table Grid"
-    for row, (symbol, description) in zip(symbol_legend_table.rows, ONE_H_MARKER_LEGEND):
-        symbol_run = row.cells[0].paragraphs[0].add_run(symbol)
+    symbol_legend_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+    shade(symbol_legend_cell, "#fef2f2")
+    border(symbol_legend_cell, "#FECACA", size="6")
+    symbol_legend_paragraph = symbol_legend_cell.paragraphs[0]
+    legend_label_run = symbol_legend_paragraph.add_run("LEGJENDA: ")
+    legend_label_run.bold = True
+    legend_label_run.font.size = Pt(8)
+    legend_label_run.font.color.rgb = RGBColor.from_string("991B1B")
+    for index, (symbol, description) in enumerate(ONE_H_MARKER_LEGEND):
+        if index:
+            separator_run = symbol_legend_paragraph.add_run("  /  ")
+            separator_run.bold = True
+            separator_run.font.size = Pt(11)
+            separator_run.font.color.rgb = RGBColor.from_string("DC2626")
+        symbol_run = symbol_legend_paragraph.add_run(symbol)
         symbol_run.bold = True
-        symbol_run.font.size = Pt(11)
+        symbol_run.font.size = Pt(9)
         symbol_run.font.color.rgb = RGBColor.from_string("DC2626")
-        description_run = row.cells[1].paragraphs[0].add_run(description)
-        description_run.font.size = Pt(8)
+        description_run = symbol_legend_paragraph.add_run(f" - {description}")
+        description_run.font.size = Pt(6.5)
         description_run.font.color.rgb = RGBColor.from_string("7F1D1D")
     reminder_groups = (
         (REMINDER_SECTION_TITLE, document.reminders),
@@ -1213,8 +1218,9 @@ def render_png(document: ReportDocument) -> bytes:
         font = ImageFont.truetype(font_path if os.path.exists(font_path) else fallback, 20)
         bold = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 21)
         heading = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 30)
+        legend_font = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 12)
     except OSError:
-        font = bold = heading = ImageFont.load_default()
+        font = bold = heading = legend_font = ImageFont.load_default()
     import textwrap
 
     def draw_line_with_marks(x: int, line_y: int, line: str, marked_source: str, line_font: Any, color: str) -> None:
@@ -1233,7 +1239,7 @@ def render_png(document: ReportDocument) -> bytes:
             draw.line((bounds[0], strike_y, bounds[2], strike_y), fill=mark_colour, width=2)
 
     estimated_lines = (
-        20
+        15
         + len(document.sections) * 3
         + sum(
             2 + len(textwrap.wrap(question.text, 90)) + len(textwrap.wrap(question.guidance or "", 95))
@@ -1280,7 +1286,7 @@ def render_png(document: ReportDocument) -> bytes:
         draw.line((bounds[0], strike_y, bounds[2], strike_y), fill=color, width=2)
         draw.text((text_left, top + 26), description, fill="#64748b", font=font)
     y += legend_height + 18
-    symbol_legend_height = 44 + (len(ONE_H_MARKER_LEGEND) * 32)
+    symbol_legend_height = 46
     draw.rounded_rectangle(
         (margin, y, width - margin, y + symbol_legend_height),
         radius=8,
@@ -1288,12 +1294,12 @@ def render_png(document: ReportDocument) -> bytes:
         outline="#fecaca",
         width=1,
     )
-    draw.text((margin + 10, y + 7), "SYMBOL LEGEND", fill="#991b1b", font=bold)
-    symbol_y = y + 40
-    for symbol, description in ONE_H_MARKER_LEGEND:
-        draw.text((margin + 14, symbol_y), symbol, fill="#dc2626", font=bold)
-        draw.text((margin + 85, symbol_y), f"- {description}", fill="#7f1d1d", font=font)
-        symbol_y += 32
+    draw.text(
+        (margin + 12, y + 14),
+        one_h_marker_legend_text(),
+        fill="#b91c1c",
+        font=legend_font,
+    )
     y += symbol_legend_height + 18
     reminder_groups = (
         (REMINDER_SECTION_TITLE, document.reminders),

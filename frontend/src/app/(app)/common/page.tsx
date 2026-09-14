@@ -5203,7 +5203,7 @@ export default function CommonViewPage() {
   .print-task-dates { position:absolute; left:5px; right:5px; bottom:4px; display:flex; align-items:flex-end; justify-content:space-between; gap:4px; white-space:nowrap; }
   .print-task-date { display:inline-flex; box-sizing:border-box; height:18px; align-items:center; border:1px solid #93c5fd; border-radius:3px; background:#eff6ff; color:#1d4ed8; padding:1px 4px; font-weight:800; line-height:1; }
   .print-task-date.due { border:3px solid #b91c1c; padding:0 2px; }
-  .print-task-date.due.today { height:20px; border:1px solid #991b1b; background:#dc2626; color:#fff; padding:2px 7px; font-size:11px; font-weight:900; }
+  .print-task-date.due.today { height:26px; border:1px solid #991b1b; border-radius:4px; background:#dc2626; color:#fff; padding:3px 9px; font-size:14px; font-weight:900; box-shadow:0 1px 3px rgba(127,29,29,.45); }
   .print-task-badge { display:inline-block; margin:0 4px 3px 0; padding:2px 5px; border-radius:999px; font-size:8px; font-weight:800; line-height:1; white-space:nowrap; }
   .print-task-badge.period { background:#e0f2fe; border:1px solid #bae6fd; color:#0369a1; }
   .print-task-badge.wfc { background:#ffedd5; border:1px solid #fb923c; color:#c2410c; }
@@ -8793,13 +8793,15 @@ export default function CommonViewPage() {
             padding: 0 2px;
           }
           .single-day-print-task-dates span.due.today {
-            height: 20px;
+            height: 26px;
             border: 1px solid #991b1b !important;
+            border-radius: 4px;
             background: #dc2626 !important;
             color: #ffffff !important;
-            padding: 2px 7px;
-            font-size: 11px;
+            padding: 3px 9px;
+            font-size: 14px;
             font-weight: 900;
+            box-shadow: 0 1px 3px rgba(127, 29, 29, 0.45);
           }
           /* A one-day Common View printout is the compact fast-task report. */
           .single-day-print .swimlane-row:not(

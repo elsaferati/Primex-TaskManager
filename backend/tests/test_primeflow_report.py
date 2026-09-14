@@ -931,13 +931,13 @@ class PrimeFlowReportTests(unittest.TestCase):
         word_xml = zipfile.ZipFile(io.BytesIO(render_docx(document))).read(
             "word/document.xml"
         ).decode("utf-8")
-        self.assertIn("SYMBOL LEGEND", plain)
+        self.assertIn("LEGJENDA:", plain)
         self.assertIn("? Task with expected problem", plain)
         self.assertIn("Detyrë që parashihet me problem", plain)
         self.assertIn('data-report-symbol-legend="true"', html)
         self.assertIn('data-task-symbol="true"', html)
         self.assertIn("Detyrë që parashihet me problem", html)
-        self.assertIn("SYMBOL LEGEND", word_xml)
+        self.assertIn("LEGJENDA:", word_xml)
         self.assertIn("Detyrë që parashihet me problem", word_xml)
 
         from PIL import ImageDraw
@@ -960,9 +960,11 @@ class PrimeFlowReportTests(unittest.TestCase):
             png = render_png(document)
 
         self.assertTrue(png.startswith(b"\x89PNG"))
-        self.assertIn("SYMBOL LEGEND", drawn_text)
+        self.assertIn(
+            "LEGJENDA: ? - Detyrë që parashihet me problem / ! - Kërkon monitorim / përcjellje nga dikush tjetër / ⚑ - Monitorim nga GA / KA - Monitorim nga KA / GENT - Monitorim nga Genti",
+            drawn_text,
+        )
         self.assertIn("?", drawn_text)
-        self.assertIn("- Detyrë që parashihet me problem", drawn_text)
 
     def test_checklist_points_keep_their_strike_colour_until_reopened(self) -> None:
         struck_at = datetime(2026, 8, 10, 10, 20, tzinfo=timezone.utc)
