@@ -53,6 +53,8 @@ def test_missing_one_h_users_exclude_leave_admin_and_management_initials() -> No
             {"id": "at", "full_name": "Arta Tafa", "role": "STAFF", "is_active": True,
              "weekly_planner_sort_order": 2},
             {"id": "hs", "full_name": "Haxhere Sopa", "role": "STAFF", "is_active": True},
+            {"id": "hsh", "full_name": "Haris Shaqiri", "username": "haris.shaqiri",
+             "role": "STAFF", "is_active": True, "weekly_planner_sort_order": 3},
             {"id": "ga", "username": "gane.arifaj", "role": "MANAGER", "is_active": True},
             {"id": "admin", "full_name": "Besa Kola", "role": "ADMIN", "is_active": True},
         ],
@@ -70,8 +72,8 @@ def test_missing_one_h_users_exclude_leave_admin_and_management_initials() -> No
 
     missing = _missing_one_h_initials(payload, date(2026, 9, 8))
 
-    assert missing["10:00"] == ["RA"]
-    assert missing["11:00"] == ["EF", "RA"]
+    assert missing["10:00"] == ["RA", "HSH"]
+    assert missing["11:00"] == ["EF", "RA", "HSH"]
 
 
 def test_missing_one_h_users_render_in_red_below_report_slot() -> None:
@@ -1023,11 +1025,12 @@ def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
     assert ">10:00</td>" in report_html
     assert "Today one-off 10:00" not in report_html
     assert "border-left:4px solid #2563EB" in report_html
-    assert report_html.count("border:2px solid #2563EB") == 2
+    assert report_html.count("border:2px solid #2563EB") == 4
     assert report_html.count('data-meeting-row="true"') == 3
     assert report_html.count('rowspan="2"') == 2
     assert 'bgcolor="#DCECFF"' in report_html
-    assert 'bgcolor="#FFE38F"' in report_html
+    assert report_html.count('bgcolor="#DCECFF"') >= 4
+    assert 'data-manual-internal-meeting="true"' in report_html
     assert report_html.count('bgcolor="#C9A98A"') >= 4
     assert report_html.index("Today one-off") < report_html.index("Today early internal")
     assert report_html.index("Tomorrow weekly") < report_html.index("Tomorrow second")
@@ -1040,10 +1043,64 @@ def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
     )
     values = [str(cell.value or "") for row in load_workbook(BytesIO(content)).active.iter_rows() for cell in row]
     assert "KOHA" in values
-    assert "8:15" in values
+    assert "8:15 MANUAL" in values
     assert "10:00" in values
     assert "1. Today one-off" in values
     assert "2. Today early internal" in values
+
+
+def test_calendar_linked_internal_meeting_inherits_external_tone_and_cal_badge() -> None:
+    sections = [(
+        date(2026, 8, 25),
+        "SOT",
+        [
+            ("TAK EXT", [{
+                "title": "Calendar external",
+                "time": "10:00",
+                "calendarImported": True,
+                "calendarCategories": ["Event"],
+            }], False),
+            ("TAK INT", [
+                {
+                    "title": "Linked calendar internal",
+                    "time": "10:30",
+                    # The normalized report payload can carry both naming styles.
+                    # Empty snake-case defaults must not hide the populated API aliases.
+                    "paired_external_meeting_id": None,
+                    "pairedExternalMeetingId": "external-id",
+                    "linked_external_calendar_imported": False,
+                    "linkedExternalCalendarImported": True,
+                    "linked_external_calendar_categories": [],
+                    "linkedExternalCalendarCategories": ["Event"],
+                },
+                {"title": "Manual internal", "time": "11:00"},
+            ], False),
+        ],
+    )]
+
+    report_html = _dated_meetings_html(sections)
+
+    assert report_html.count('data-calendar-meeting="true"') == 2
+    assert report_html.count('bgcolor="#CCEFF1"') == 4
+    assert report_html.count('bgcolor="#DCECFF"') == 2
+    assert report_html.count('data-manual-internal-meeting="true"') == 1
+    assert "10:00" in report_html and "10:30" in report_html
+    assert "11:00" in report_html
+
+    _, content, _ = _excel_table_attachment(
+        [], [], date(2026, 8, 25), meeting_sections=sections
+    )
+    sheet = load_workbook(BytesIO(content)).active
+    time_cells = {
+        str(cell.value): cell
+        for row in sheet.iter_rows()
+        for cell in row
+        if cell.value in {"10:00 CAL", "10:30 CAL", "11:00 MANUAL"}
+    }
+    assert set(time_cells) == {"10:00 CAL", "10:30 CAL", "11:00 MANUAL"}
+    assert time_cells["10:00 CAL"].fill.fgColor.rgb.endswith("CCEFF1")
+    assert time_cells["10:30 CAL"].fill.fgColor.rgb.endswith("CCEFF1")
+    assert time_cells["11:00 MANUAL"].fill.fgColor.rgb.endswith("DCECFF")
 
 
 def test_meetings_are_ordered_chronologically_even_without_leading_zero() -> None:

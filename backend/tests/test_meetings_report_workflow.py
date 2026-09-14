@@ -315,7 +315,7 @@ class MeetingsReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MeetingsReportAttachmentTests(unittest.IsolatedAsyncioTestCase):
-    async def test_m3_email_includes_ga_time_table_attachment(self) -> None:
+    async def test_m3_ga_time_table_attachment_is_sent_only_to_ga(self) -> None:
         gmail = SimpleNamespace(send_verified=AsyncMock(return_value={"id": "gmail-id"}))
         ga_png = AsyncMock(return_value=b"ga-time-table-png")
         base_attachments = [
@@ -324,12 +324,15 @@ class MeetingsReportAttachmentTests(unittest.IsolatedAsyncioTestCase):
         ]
         with (
             patch("app.services.meetings_report.GmailService", return_value=gmail),
-            patch("app.services.meetings_report.section_report_attachments", return_value=base_attachments),
+            patch(
+                "app.services.meetings_report.section_report_attachments",
+                side_effect=[list(base_attachments), list(base_attachments)],
+            ),
             patch("app.services.one_h_ga_attachments.render_ga_time_table_png", ga_png),
         ):
             await send_meetings_report(
                 "PrimeFlow M3",
-                {"to": ["report@example.com"], "cc": [], "bcc": []},
+                {"to": ["report@example.com"], "cc": ["ga@primexeu.com"], "bcc": []},
                 "plain",
                 "html",
                 db=SimpleNamespace(),
@@ -338,8 +341,16 @@ class MeetingsReportAttachmentTests(unittest.IsolatedAsyncioTestCase):
                 sections=[{"title": "Section", "body": "Body"}],
             )
 
-        sent_attachments = gmail.send_verified.await_args.kwargs["attachments"]
-        self.assertEqual(sent_attachments[-1], (
+        self.assertEqual(gmail.send_verified.await_count, 2)
+        regular_call, ga_call = gmail.send_verified.await_args_list
+        self.assertEqual(regular_call.args[1], {
+            "to": ["report@example.com"], "cc": [], "bcc": [],
+        })
+        self.assertEqual(regular_call.kwargs["attachments"], base_attachments)
+        self.assertEqual(ga_call.args[1], {
+            "to": ["ga@primexeu.com"], "cc": [], "bcc": [],
+        })
+        self.assertEqual(ga_call.kwargs["attachments"][-1], (
             "GA-Time-Table-2026-08-10.png",
             b"ga-time-table-png",
             "image/png",

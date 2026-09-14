@@ -50,6 +50,13 @@ def _plain_text(value: str | None) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", value)).strip()
 
 
+def _ga_time_entry_text(entry: Any) -> str:
+    value = _plain_text(entry.content)
+    if getattr(entry, "source_type", None) == "reminder":
+        return re.sub(r"^\s*REMINDER\s*:?\s*", "R: ", value, flags=re.I)
+    return value
+
+
 def _color(value: Any, fallback: str) -> str:
     candidate = str(value or fallback).strip()
     return candidate if re.fullmatch(r"#[0-9a-fA-F]{6}", candidate) else fallback
@@ -117,7 +124,7 @@ async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
     cell_items: dict[tuple[int, time], list[dict[str, Any]]] = {}
     for entry in entries:
         cell_items.setdefault((entry.day_of_week, _row_start(rows, entry.start_time)), []).append({
-            "text": _plain_text(entry.content),
+            "text": _ga_time_entry_text(entry),
             "fill": _color(entry.background_color, "#FFFFFF"),
             "color": _color(entry.text_color, "#0F172A"),
             "bold": bool(entry.is_bold),
@@ -139,7 +146,7 @@ async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
         ).scalars().all()
     for entry in dated_entries:
         cell_items.setdefault((entry.day_date.weekday(), _row_start(rows, entry.start_time)), []).append({
-            "text": _plain_text(entry.content),
+            "text": _ga_time_entry_text(entry),
             "fill": "#E0F2FE" if entry.source_type == "calendar" else "#FEF3C7",
             "color": "#0F172A",
             "bold": False,
@@ -349,7 +356,7 @@ async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
     cell_items: dict[tuple[int, time], list[dict[str, Any]]] = {}
     for entry in entries:
         cell_items.setdefault((entry.day_of_week, _row_start(rows, entry.start_time)), []).append({
-            "text": _plain_text(entry.content),
+            "text": _ga_time_entry_text(entry),
             "fill": _color(entry.background_color, "#FFFFFF"),
             "color": _color(entry.text_color, "#0F172A"),
             "bold": bool(entry.is_bold),
@@ -372,7 +379,7 @@ async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
         ).scalars().all()
     for entry in dated_entries:
         cell_items.setdefault((entry.day_date.weekday(), _row_start(rows, entry.start_time)), []).append({
-            "text": _plain_text(entry.content),
+            "text": _ga_time_entry_text(entry),
             "fill": "#E0F2FE" if entry.source_type == "calendar" else "#FEF3C7",
             "color": "#0F172A",
             "bold": False,

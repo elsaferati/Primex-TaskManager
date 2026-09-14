@@ -26,5 +26,5 @@ def test_uncategorized_imported_meeting_uses_external_online_red() -> None:
 
 
 def test_local_internal_and_weekly_fallbacks_match_common_view() -> None:
-    assert meeting_report_tone({}, meeting_type="internal") == "meeting-yellow"
+    assert meeting_report_tone({}, meeting_type="internal") == "meeting-blue"
     assert meeting_report_tone({"recurrence_type": "weekly"}, meeting_type="external") == "meeting-brown"
