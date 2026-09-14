@@ -900,6 +900,70 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertGreater(document.task_count, 0)
 
+    def test_task_symbols_and_symbol_legend_render_in_every_1h_format(self) -> None:
+        report_day = date(2026, 9, 14)
+        document = build_report_document(
+            {
+                "guardrails": {"truncated": {}},
+                "items": {
+                    "oneH": [{
+                        "id": "marked-task",
+                        "task_id": str(uuid.uuid4()),
+                        "date": report_day.isoformat(),
+                        "one_h_report_slot": "10:00",
+                        "one_h_marker": "QUESTION",
+                        "person": "Elsa Ferati",
+                        "status": "TODO",
+                        "title": "Task with expected problem",
+                        "description": "Check this task",
+                    }],
+                },
+            },
+            report_day,
+            "10:00",
+        )
+
+        task = document.sections[0].employees[0].tasks[0]
+        self.assertEqual(task.one_h_marker, "?")
+
+        plain = render_plain_text(document)
+        html = render_html(document)
+        word_xml = zipfile.ZipFile(io.BytesIO(render_docx(document))).read(
+            "word/document.xml"
+        ).decode("utf-8")
+        self.assertIn("SYMBOL LEGEND", plain)
+        self.assertIn("? Task with expected problem", plain)
+        self.assertIn("Detyrë që parashihet me problem", plain)
+        self.assertIn('data-report-symbol-legend="true"', html)
+        self.assertIn('data-task-symbol="true"', html)
+        self.assertIn("Detyrë që parashihet me problem", html)
+        self.assertIn("SYMBOL LEGEND", word_xml)
+        self.assertIn("Detyrë që parashihet me problem", word_xml)
+
+        from PIL import ImageDraw
+
+        original_draw = ImageDraw.Draw
+        drawn_text: list[str] = []
+
+        class RecordingDraw:
+            def __init__(self, image):
+                self._draw = original_draw(image)
+
+            def text(self, xy, text, *args, **kwargs):
+                drawn_text.append(str(text))
+                return self._draw.text(xy, text, *args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(self._draw, name)
+
+        with patch("PIL.ImageDraw.Draw", RecordingDraw):
+            png = render_png(document)
+
+        self.assertTrue(png.startswith(b"\x89PNG"))
+        self.assertIn("SYMBOL LEGEND", drawn_text)
+        self.assertIn("?", drawn_text)
+        self.assertIn("- Detyrë që parashihet me problem", drawn_text)
+
     def test_checklist_points_keep_their_strike_colour_until_reopened(self) -> None:
         struck_at = datetime(2026, 8, 10, 10, 20, tzinfo=timezone.utc)
         description = "[[done]]1. Finished during this hour[[/done]]\n2. Still open"

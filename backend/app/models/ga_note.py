@@ -31,6 +31,7 @@ class GaNote(Base):
 
     is_converted_to_task: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_discussed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    one_h_marker: Mapped[str | None] = mapped_column(String(16), nullable=True)
     project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"))
     department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("departments.id"))
 

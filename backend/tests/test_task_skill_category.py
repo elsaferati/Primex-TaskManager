@@ -31,6 +31,11 @@ class _FakeAsyncSession:
 
 
 class TestTaskSkillCategorySchemas(unittest.TestCase):
+    def test_create_accepts_one_h_marker(self) -> None:
+        payload = TaskCreate(title="Marked task", one_h_marker="EXCLAMATION")
+
+        self.assertEqual(payload.one_h_marker, "EXCLAMATION")
+
     def test_create_accepts_each_matrix_category(self) -> None:
         for category in TaskSkillCategory:
             payload = TaskCreate(title="Valid task", skill_category=category.value)

@@ -220,6 +220,8 @@ class TestGaNoteTaskInstances(unittest.IsolatedAsyncioTestCase):
                     finish_period=TaskFinishPeriod.PM,
                     one_h_report_slot="11:50",
                     one_h_report_slot_is_set=True,
+                    one_h_marker="QUESTION",
+                    one_h_marker_is_set=True,
                     is_deadline_important=True,
                     priority=TaskPriority.HIGH,
                     is_1h_report=True,
@@ -233,6 +235,7 @@ class TestGaNoteTaskInstances(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task_a.due_date, due)
         self.assertEqual(task_a.finish_period, TaskFinishPeriod.PM.value)
         self.assertEqual(task_a.one_h_report_slot, "11:50")
+        self.assertEqual(task_a.one_h_marker, "QUESTION")
         self.assertTrue(task_a.is_deadline_important)
         self.assertEqual(task_a.priority, TaskPriority.HIGH.value)
         self.assertTrue(task_a.is_1h_report)
@@ -248,6 +251,7 @@ class TestGaNoteTaskInstances(unittest.IsolatedAsyncioTestCase):
         task = _task(note_id, owner_id, TaskStatus.TODO)
         task.is_1h_report = True
         task.one_h_report_slot = "14:20"
+        task.one_h_marker = "FLAG"
 
         updated = apply_ga_note_assignee_execution_states(
             [task],
@@ -262,6 +266,7 @@ class TestGaNoteTaskInstances(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(updated, 1)
         self.assertEqual(task.one_h_report_slot, "14:20")
+        self.assertEqual(task.one_h_marker, "FLAG")
 
     def test_assignee_execution_accepts_waiting_confirmation(self) -> None:
         note_id = uuid.uuid4()
