@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, require_manager_or_admin
+from app.api.deps import get_current_user, get_db, require_manager_or_admin
 from app.models.tomorrow_print_report_delivery import TomorrowPrintReportDelivery
 from app.models.tomorrow_print_report_settings import TomorrowPrintReportSettings
 from app.models.user import User
