@@ -41,6 +41,18 @@ function canCreatePimImageTestTaskForMeeting(meeting: Meeting): boolean {
 
 type PersonalTaskGroup = "GA" | "KA" | "PX"
 type PersonalRowId = "personalGA" | "personalKA" | "personalPX"
+type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG"
+
+const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
+  { value: "EXCLAMATION", label: "!" },
+  { value: "QUESTION", label: "?" },
+  { value: "KA", label: "KA" },
+  { value: "GENT", label: "GENT" },
+  { value: "FLAG", label: "⚑" },
+]
+
+const getOneHMarkerLabel = (value?: OneHMarker | null) =>
+  ONE_H_MARKER_OPTIONS.find((option) => option.value === value)?.label || ""
 
 type CommonType =
   | "late"
@@ -312,6 +324,7 @@ type FastTaskItemMeta = {
   fastTaskOrder?: number | null
   finishPeriod?: "AM" | "PM" | null
   oneHReportSlot?: OneHReportSlot | null
+  oneHMarker?: OneHMarker | null
   isDeadlineImportant?: boolean
   dueDate?: string | null
   startDate?: string | null
@@ -788,6 +801,7 @@ type SwimlaneCell = {
   fastTaskOrder?: number | null
   finishPeriod?: "AM" | "PM" | null
   oneHReportSlot?: OneHReportSlot | null
+  oneHMarker?: OneHMarker | null
   isDeadlineImportant?: boolean
   dueDate?: string | null
   startDate?: string | null
@@ -1141,6 +1155,7 @@ const getPrintTaskDedupeKey = (rowId: CommonType, entry: FastTaskEntry | Swimlan
     getFastTaskEntryDate(entry),
     normalizeOneHReportSlot(entry.oneHReportSlot) || "",
     (entry.finishPeriod || "").trim().toUpperCase(),
+    entry.oneHMarker || "",
     normalizeTitle(entry.note || ""),
   ].join("\0")
 
@@ -1186,6 +1201,7 @@ const mergePrintTaskEntries = <T extends FastTaskEntry | SwimlaneCell>(rowId: Co
       dueDate: existing.dueDate || entry.dueDate,
       startDate: existing.startDate || entry.startDate,
       oneHReportSlot: existing.oneHReportSlot || entry.oneHReportSlot,
+      oneHMarker: existing.oneHMarker || entry.oneHMarker,
     })
   }
 
@@ -1251,6 +1267,7 @@ export default function CommonViewPage() {
   const stickyRef = React.useRef<HTMLDivElement | null>(null)
   const [stickyOffset, setStickyOffset] = React.useState("0px")
   const [reorderingTaskId, setReorderingTaskId] = React.useState<string | null>(null)
+  const [savingOneHMarkerTaskId, setSavingOneHMarkerTaskId] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     const node = stickyRef.current
@@ -2940,6 +2957,7 @@ export default function CommonViewPage() {
               : undefined,
           finishPeriod: item.finishPeriod || item.finish_period || null,
           oneHReportSlot: normalizeOneHReportSlot(item.oneHReportSlot || item.one_h_report_slot),
+          oneHMarker: item.oneHMarker || item.one_h_marker || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
@@ -3633,6 +3651,7 @@ export default function CommonViewPage() {
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
                   finishPeriod: t.finish_period || null,
+                  oneHMarker: t.one_h_marker || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
                   startDate: t.start_date || null,
@@ -4217,6 +4236,62 @@ export default function CommonViewPage() {
       )
     },
     []
+  )
+  const updateOneHMarker = React.useCallback(
+    async (entry: OneHItem | SwimlaneCell, oneHMarker: OneHMarker | null) => {
+      if (!entry.taskId || savingOneHMarkerTaskId) return
+      const previousMarker = entry.oneHMarker || null
+      const applyMarker = (marker: OneHMarker | null) => {
+        setCommonData((current) => ({
+          ...current,
+          oneH: current.oneH.map((item) =>
+            item.taskId === entry.taskId ? { ...item, oneHMarker: marker } : item
+          ),
+        }))
+      }
+
+      setSavingOneHMarkerTaskId(entry.taskId)
+      applyMarker(oneHMarker)
+      try {
+        const response = await apiFetch(`/tasks/${entry.taskId}/one-h-marker`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ one_h_marker: oneHMarker }),
+        })
+        if (!response?.ok) {
+          const detail = await response?.json().catch(() => null)
+          throw new Error(typeof detail?.detail === "string" ? detail.detail : "Failed to update the 1H marker.")
+        }
+        COMMON_VIEW_CACHE.clear()
+        const weekStartIso = `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, "0")}-${String(weekStart.getDate()).padStart(2, "0")}`
+        await fetchCommonViewStage(weekStartIso, ["tasks"])
+      } catch (error) {
+        applyMarker(previousMarker)
+        toast.error(error instanceof Error ? error.message : "Failed to update the 1H marker.")
+      } finally {
+        setSavingOneHMarkerTaskId(null)
+      }
+    },
+    [apiFetch, fetchCommonViewStage, savingOneHMarkerTaskId, weekStart]
+  )
+  const renderOneHMarkerControl = React.useCallback(
+    (entry: OneHItem | SwimlaneCell) => (
+      <select
+        className="oneh-marker-select"
+        value={entry.oneHMarker || ""}
+        disabled={!entry.taskId || savingOneHMarkerTaskId === entry.taskId}
+        aria-label={`Marker for ${entry.title}`}
+        title="1H task marker"
+        onClick={(event) => event.stopPropagation()}
+        onChange={(event) => void updateOneHMarker(entry, (event.target.value || null) as OneHMarker | null)}
+      >
+        <option value="">—</option>
+        {ONE_H_MARKER_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
+    ),
+    [savingOneHMarkerTaskId, updateOneHMarker]
   )
 
   // Filtered data
@@ -4886,6 +4961,12 @@ export default function CommonViewPage() {
                       ? item.one_h_report_slot
                       : undefined
                 ),
+                oneHMarker:
+                  typeof item.oneHMarker === "string"
+                    ? item.oneHMarker as OneHMarker
+                    : typeof item.one_h_marker === "string"
+                      ? item.one_h_marker as OneHMarker
+                      : null,
                 isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
                 startDate:
                   typeof item.startDate === "string" ? item.startDate : typeof item.start_date === "string" ? item.start_date : undefined,
@@ -4961,7 +5042,14 @@ export default function CommonViewPage() {
                   : isPersonalRowId(row.id)
                     ? commonPrintPersonalTaskTitle(item as PrintTask)
                     : commonPrintTaskTitle(item as PrintTask)
-                const content = `${chunkIndex * 6 + cellIndex + 1}. ${isMeetingTable ? escapePrintHtml(title) : commonPrintTitleHtml(title)}`
+                const taskBadges = isMeetingTable
+                  ? ""
+                  : `<span class="print-task-badge period">${escapePrintHtml(getCommonTaskPeriodLabel((item as PrintTask).finishPeriod))}</span>${
+                      (item as PrintTask).oneHMarker
+                        ? `<span class="print-task-badge marker">${escapePrintHtml(getOneHMarkerLabel((item as PrintTask).oneHMarker))}</span>`
+                        : ""
+                    }`
+                const content = `${taskBadges}${chunkIndex * 6 + cellIndex + 1}. ${isMeetingTable ? escapePrintHtml(title) : commonPrintTitleHtml(title)}`
                 return `<td${isMeetingTable ? "" : ' class="print-task-cell"'}><div>${content}</div>${isMeetingTable ? "" : printTaskDatesHtml(item as PrintTask)}</td>`
               }).join("")
               const rowHeaders =
@@ -5007,6 +5095,9 @@ export default function CommonViewPage() {
   .print-task-dates { position:absolute; left:5px; right:5px; bottom:4px; display:flex; align-items:flex-end; justify-content:space-between; gap:4px; white-space:nowrap; }
   .print-task-date { display:inline-flex; box-sizing:border-box; height:18px; align-items:center; border:1px solid #93c5fd; border-radius:3px; background:#eff6ff; color:#1d4ed8; padding:1px 4px; font-weight:800; line-height:1; }
   .print-task-date.due { border:3px solid #b91c1c; padding:0 2px; }
+  .print-task-badge { display:inline-block; margin:0 4px 3px 0; padding:2px 5px; border-radius:999px; font-size:8px; font-weight:800; line-height:1; white-space:nowrap; }
+  .print-task-badge.period { background:#e0f2fe; border:1px solid #bae6fd; color:#0369a1; }
+  .print-task-badge.marker { background:#fff7ed; border:1px solid #fdba74; color:#9a3412; }
 </style></head><body>
   <div class="print-header"><div></div><div class="print-title">1H SHTYPI — ${escapePrintHtml(reportDate)}</div><div class="print-date">${escapePrintHtml(formatDateTimeDMY(new Date()))}</div></div>
   ${oneHPrintChecklistsHtml(deliveryDate)}
@@ -5338,6 +5429,10 @@ export default function CommonViewPage() {
           (e: OneHItem | R1Item) =>
             `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${
               isOneHSlotRowId(rowId) ? `[${getOneHReportSlotLabel((e as OneHItem).oneHReportSlot)}] ` : ""
+            }[${getCommonTaskPeriodLabel(e.finishPeriod)}] ${
+              isOneHSlotRowId(rowId) && (e as OneHItem).oneHMarker
+                ? `[${getOneHMarkerLabel((e as OneHItem).oneHMarker)}] `
+                : ""
             }${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
         )
       }
@@ -7155,6 +7250,7 @@ export default function CommonViewPage() {
       fastTaskOrder: x.fastTaskOrder,
       finishPeriod: x.finishPeriod,
       oneHReportSlot: x.oneHReportSlot,
+      oneHMarker: x.oneHMarker,
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
@@ -10567,6 +10663,28 @@ export default function CommonViewPage() {
           line-height: 1;
           flex: 0 0 auto;
           white-space: nowrap;
+        }
+        .oneh-marker-select {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 42px;
+          max-width: 62px;
+          height: 20px;
+          padding: 0 4px;
+          border-radius: 999px;
+          background: #fff7ed;
+          border: 1px solid #fdba74;
+          color: #9a3412;
+          font-weight: 800;
+          font-size: 10px;
+          line-height: 1;
+          flex: 0 0 auto;
+          cursor: pointer;
+        }
+        .oneh-marker-select:disabled {
+          cursor: wait;
+          opacity: 0.65;
         }
         .oneh-slot-indicator {
           display: inline-flex;
@@ -14740,6 +14858,7 @@ export default function CommonViewPage() {
                                     <span className="oneh-slot-indicator">{getOneHReportSlotLabel((e as OneHItem | R1Item).oneHReportSlot)}</span>
                                   ) : null}
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
+                                  {isOneHSlotRowId(row.id) ? renderOneHMarkerControl(e as OneHItem) : null}
                                   {e.isDeadlineImportant ? (
                                     <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
                                   ) : null}
@@ -15399,6 +15518,7 @@ export default function CommonViewPage() {
                                             {getCommonTaskPeriodLabel(cell.finishPeriod)}
                                           </span>
                                         ) : null}
+                                        {isOneHSlotRowId(row.id) ? renderOneHMarkerControl(cell) : null}
                                         {isFastTaskRowId(row.id) && cell.isDeadlineImportant ? (
                                           <span className="deadline-indicator" title={cell.dueDate ? `Deadline ${formatDateHuman(cell.dueDate)}` : "Deadline important"}>
                                             {getDeadlineIndicatorLabel(cell.dueDate)}
@@ -15434,6 +15554,7 @@ export default function CommonViewPage() {
                                             {getCommonTaskPeriodLabel(cell.finishPeriod)}
                                           </span>
                                         ) : null}
+                                        {isOneHSlotRowId(row.id) ? renderOneHMarkerControl(cell) : null}
                                         {isFastTaskRowId(row.id) && cell.isDeadlineImportant ? (
                                           <span className="deadline-indicator" title={cell.dueDate ? `Deadline ${formatDateHuman(cell.dueDate)}` : "Deadline important"}>
                                             {getDeadlineIndicatorLabel(cell.dueDate)}

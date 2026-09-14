@@ -226,6 +226,17 @@ def _task_period_label(item: dict[str, Any]) -> str:
     return raw if raw in {"AM", "PM"} else "AM/PM"
 
 
+def _task_marker_label(item: dict[str, Any]) -> str:
+    raw = str(item.get("oneHMarker") or item.get("one_h_marker") or "").strip().upper()
+    return {
+        "EXCLAMATION": "!",
+        "QUESTION": "?",
+        "KA": "KA",
+        "GENT": "GENT",
+        "FLAG": "⚑",
+    }.get(raw, "")
+
+
 def _task_cell_style(
     item: dict[str, Any], *, personal: bool, report_date: date | None = None
 ) -> tuple[str, str]:
@@ -569,6 +580,14 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
     top_badges.append(
         f'<span data-task-badge="finish-period" style="{period_style}">{period}</span>'
     )
+    marker = _task_marker_label(item)
+    if marker:
+        marker_style = (
+            f"{badge_base}background-color:#FFF7ED;border:1px solid #FDBA74;color:#9A3412;"
+        )
+        top_badges.append(
+            f'<span data-task-badge="one-h-marker" style="{marker_style}">{marker}</span>'
+        )
     if _is_eight_am_task(item):
         eight_am_style = (
             f"{badge_base}background-color:#DC2626;border:1px solid #B91C1C;color:#FFFFFF;"
@@ -628,13 +647,14 @@ def _is_personal_task_for_ga(item: dict[str, Any]) -> bool:
 
 def _dedupe(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str, str]] = set()
+    seen: set[tuple[str, str, str, str, str]] = set()
     for item in items:
         key = (
             _first_line(item.get("title")).casefold(),
             str(item.get("date") or ""),
             _slot(item),
             str(item.get("finishPeriod") or item.get("finish_period") or "").upper(),
+            str(item.get("oneHMarker") or item.get("one_h_marker") or "").upper(),
         )
         if key not in seen:
             seen.add(key)
@@ -1410,6 +1430,9 @@ def _excel_table_attachment(
                     )
                     if not meeting:
                         labels: list[str] = [f"[{_task_period_label(item)}]"]
+                        marker_label = _task_marker_label(item)
+                        if marker_label:
+                            labels.append(f"[{marker_label}]")
                         if _is_eight_am_task(item):
                             labels.append("[08:00]")
                         if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
@@ -1759,7 +1782,9 @@ def _docx_table_attachment(
                 shade(row.cells[item_index + 2], background)
                 set_cell(
                     row.cells[item_index + 2],
-                    f"{item_index + 1 + chunk_index * 6}. [{_task_period_label(item)}] {_task_title(item, personal=personal)}",
+                    f"{item_index + 1 + chunk_index * 6}. [{_task_period_label(item)}]"
+                    f"{f' [{_task_marker_label(item)}]' if _task_marker_label(item) else ''} "
+                    f"{_task_title(item, personal=personal)}",
                     bold=background == DEADLINE_COLOR,
                     color=foreground,
                 )
@@ -2031,6 +2056,19 @@ def _core_png_table_attachment(
                     width=1,
                 )
                 draw.text((badge_left + 6, text_y + 3), period_label, fill="#0369A1", font=small_bold)
+                badge_right = badge_left - 5
+                marker_label = _task_marker_label(item)
+                if marker_label:
+                    badge_width = int(measure.textlength(marker_label, font=small_bold)) + 12
+                    badge_left = badge_right - badge_width
+                    draw.rounded_rectangle(
+                        (badge_left, text_y, badge_right, text_y + 23),
+                        radius=10,
+                        fill="#FFF7ED",
+                        outline="#FDBA74",
+                        width=1,
+                    )
+                    draw.text((badge_left + 6, text_y + 3), marker_label, fill="#9A3412", font=small_bold)
                 text_y += 28
                 value = f"{item_index + 1 + chunk_index * 6}. {_task_title(item, personal=personal)}"
                 task_font = bold if fill == DEADLINE_COLOR else regular
@@ -2414,7 +2452,9 @@ async def _build_print_report(
         plain_rows.append(
             f"{label}{missing_label}: "
             + "; ".join(
-                f"[{_task_period_label(item)}] {_task_title(item, personal=personal)}"
+                f"[{_task_period_label(item)}]"
+                f"{f' [{_task_marker_label(item)}]' if _task_marker_label(item) else ''} "
+                f"{_task_title(item, personal=personal)}"
                 for item in values
             )
         )

@@ -524,6 +524,28 @@ def test_task_cards_show_their_am_pm_period_in_email_and_excel() -> None:
     assert png.startswith(b"\x89PNG\r\n\x1a\n")
 
 
+def test_one_h_marker_is_a_separate_badge_next_to_am_pm() -> None:
+    tasks = [
+        {"title": "Flagged task", "finishPeriod": "AM", "one_h_marker": "FLAG"},
+        {"title": "Question task", "finishPeriod": "PM", "oneHMarker": "QUESTION"},
+    ]
+
+    report_html = _html_table([("1H 10:00", tasks, False)])
+
+    assert report_html.count('data-task-badge="finish-period"') == 2
+    assert report_html.count('data-task-badge="one-h-marker"') == 2
+    assert '>⚑</span>' in report_html
+    assert 'data-task-badge="finish-period"' in report_html
+    assert 'data-task-badge="one-h-marker"' in report_html
+
+    _, content, _ = _excel_table_attachment(
+        [("1H 10:00", tasks, False)], [], date(2026, 8, 14)
+    )
+    sheet = load_workbook(BytesIO(content)).active
+    assert "[AM] [⚑]\n" in sheet["C6"].value
+    assert "[PM] [?]\n" in sheet["D6"].value
+
+
 def test_0800_and_am_pm_badges_keep_their_distinct_designs_together() -> None:
     report_html = _html_table(
         [(

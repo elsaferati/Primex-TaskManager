@@ -974,6 +974,7 @@ def _task_to_out(
         is_bllok=task.is_bllok,
         is_1h_report=task.is_1h_report,
         one_h_report_slot=task.one_h_report_slot,
+        one_h_marker=task.one_h_marker,
         is_r1=task.is_r1,
         is_personal=task.is_personal,
         fast_task_order=task.fast_task_order,
@@ -2885,6 +2886,7 @@ async def update_task(
     start_date_set = _payload_has_field(payload, "start_date")
     due_date_set = _payload_has_field(payload, "due_date")
     finish_period_set = _payload_has_field(payload, "finish_period")
+    one_h_marker_set = _payload_has_field(payload, "one_h_marker")
     effective_start_date = _as_utc_datetime(payload.start_date) if start_date_set else _as_utc_datetime(task.start_date)
     effective_due_date = _as_utc_datetime(payload.due_date) if due_date_set else _as_utc_datetime(task.due_date)
     if (
@@ -3278,6 +3280,8 @@ async def update_task(
         task.is_1h_report = payload.is_1h_report
         if not payload.is_1h_report and not _payload_has_field(payload, "one_h_report_slot"):
             task.one_h_report_slot = None
+        if not payload.is_1h_report and not one_h_marker_set:
+            task.one_h_marker = None
     if _payload_has_field(payload, "one_h_report_slot"):
         if payload.one_h_report_slot is not None:
             # R1 uses the same report slots without changing the task type to 1H.
@@ -3286,6 +3290,13 @@ async def update_task(
             task.one_h_report_slot = payload.one_h_report_slot
         else:
             task.one_h_report_slot = None
+    if one_h_marker_set:
+        if payload.one_h_marker is not None and not task.is_1h_report:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Markers are only available for 1H tasks",
+            )
+        task.one_h_marker = payload.one_h_marker
     if payload.is_r1 is not None:
         task.is_r1 = payload.is_r1
 
@@ -3476,6 +3487,8 @@ async def update_task(
             shared_values["is_1h_report"] = task.is_1h_report
         if _payload_has_field(payload, "one_h_report_slot") or payload.is_1h_report is not None:
             shared_values["one_h_report_slot"] = task.one_h_report_slot
+        if one_h_marker_set or payload.is_1h_report is not None:
+            shared_values["one_h_marker"] = task.one_h_marker
         if payload.is_personal is not None:
             shared_values["is_personal"] = task.is_personal
         if fast_task_order_set:
@@ -3751,6 +3764,10 @@ class TaskOneHReportSlotUpdate(BaseModel):
     one_h_report_slot: str | None = None
 
 
+class TaskOneHMarkerUpdate(BaseModel):
+    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG)$")
+
+
 def _normalize_one_h_report_slot(value: str | None) -> str | None:
     normalized = (value or "").strip()
     return normalized if normalized in {"10:00", "11:00", "11:50", "14:20", "16:00"} else None
@@ -3820,6 +3837,35 @@ async def update_task_one_h_report_slot(
     task_out = _task_to_out(task, assignee_map.get(task.id, []), comment_map.get(task.id))
     task_out.one_h_report_slot = next_slot
     return task_out
+
+
+@router.patch("/{task_id}/one-h-marker", response_model=TaskOut)
+async def update_task_one_h_marker(
+    task_id: uuid.UUID,
+    payload: TaskOneHMarkerUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> TaskOut:
+    """Allow any authenticated user to classify a 1H task."""
+    task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if not task.is_1h_report:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Markers are only available for 1H tasks")
+
+    task.one_h_marker = payload.one_h_marker
+    if task.fast_task_group_id is not None:
+        await db.execute(
+            update(Task)
+            .where(Task.fast_task_group_id == task.fast_task_group_id)
+            .where(Task.is_active.is_(True))
+            .values(one_h_marker=payload.one_h_marker)
+        )
+
+    await db.commit()
+    await db.refresh(task)
+    assignee_map = await _assignees_for_tasks(db, [task.id])
+    return _task_to_out(task, assignee_map.get(task.id, []))
 
 
 @router.patch("/{task_id}/comment", response_model=TaskOut)
