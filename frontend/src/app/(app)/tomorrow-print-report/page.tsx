@@ -162,14 +162,18 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
     document.querySelectorAll<HTMLTableRowElement>('tr[data-task-card-row="content"]').forEach((contentRow) => {
       const dateRow = contentRow.nextElementSibling
       const dateCells = dateRow?.matches('tr[data-task-card-row="dates"]')
-        ? Array.from(dateRow.querySelectorAll<HTMLTableCellElement>("td"))
+        ? Array.from(dateRow.cells).filter((cell): cell is HTMLTableCellElement => cell.tagName === "TD")
         : []
-      const taskCells = Array.from(contentRow.querySelectorAll<HTMLTableCellElement>("td"))
+      const taskCells = Array.from(contentRow.cells).filter(
+        (cell): cell is HTMLTableCellElement => cell.tagName === "TD"
+      )
 
       taskCells.forEach((cell, index) => {
         const marker = cell.dataset.taskMarker || ""
         const isTaskCard = Boolean(cell.dataset.taskId)
-        const matches = !isTaskCard || markerFilter === "all" || (markerFilter === "none" ? !marker : marker === markerFilter)
+        const matches = markerFilter === "all" || (
+          isTaskCard && (markerFilter === "none" ? !marker : marker === markerFilter)
+        )
         cell.style.display = matches ? "" : "none"
         cell.dataset.taskMarkerFilterHidden = matches ? "false" : "true"
         if (dateCells[index]) dateCells[index].style.display = matches ? "" : "none"

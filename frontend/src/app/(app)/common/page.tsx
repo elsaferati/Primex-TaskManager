@@ -1297,15 +1297,6 @@ const getFastTaskDisplayNumber = (
   return currentIndex >= 0 ? currentIndex + 1 : 1
 }
 
-const getDeadlineIndicatorLabel = (dueDate?: string | null, targetDate?: string | null) => {
-  if (!dueDate) return "Deadline"
-  if (
-    targetDate &&
-    normalizeCommonDateOnly(dueDate) === normalizeCommonDateOnly(targetDate)
-  ) return "SOT"
-  return `DL ${formatDateDMY(dueDate)}`
-}
-
 const hasEightAmIndicator = (title?: string | null) =>
   /\b0?8:00\b/.test(title || "") || /\bEM\b/i.test(title || "")
 const getFinishPeriodIndicatorLabel = (finishPeriod?: string | null) => {
@@ -1516,9 +1507,13 @@ export default function CommonViewPage() {
     const dueLabel = formatDateHuman(toISODate(due))
     return `${startLabel} - ${dueLabel}`
   }
-  const formatFastTaskCardDate = (value?: string | null) => {
+  const formatFastTaskCardDate = (value?: string | null, targetDate?: string | null) => {
     const parsed = parseDateOnly(value || "")
-    return parsed ? formatDateHuman(toISODate(parsed)) : null
+    if (!parsed) return null
+    const normalizedDate = toISODate(parsed)
+    return targetDate && normalizedDate === normalizeCommonDateOnly(targetDate)
+      ? "SOT"
+      : formatDateHuman(normalizedDate)
   }
   const computeNextOccurrenceDate = (params: {
     recurrenceType: "weekly" | "monthly" | "yearly"
@@ -8320,8 +8315,8 @@ export default function CommonViewPage() {
                           {formatFastTaskCardDate(item.startDate || item.entryDate) ? (
                             <span>{formatFastTaskCardDate(item.startDate || item.entryDate)}</span>
                           ) : null}
-                          {formatFastTaskCardDate(item.dueDate) ? (
-                            <span className="due">{formatFastTaskCardDate(item.dueDate)}</span>
+                          {formatFastTaskCardDate(item.dueDate, item.entryDate) ? (
+                            <span className="due">{formatFastTaskCardDate(item.dueDate, item.entryDate)}</span>
                           ) : null}
                         </div>
                       </div>
@@ -15132,9 +15127,6 @@ export default function CommonViewPage() {
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {renderWfcIndicator(e)}
                                   {renderOneHMarkerControl(e)}
-                                  {e.isDeadlineImportant ? (
-                                    <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate, iso)}</span>
-                                  ) : null}
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
@@ -15199,9 +15191,6 @@ export default function CommonViewPage() {
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {renderWfcIndicator(e)}
                                   {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(e) : null}
-                                  {e.isDeadlineImportant ? (
-                                    <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate, iso)}</span>
-                                  ) : null}
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
@@ -15236,9 +15225,6 @@ export default function CommonViewPage() {
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {renderWfcIndicator(e)}
                                   {renderOneHMarkerControl(e)}
-                                  {e.isDeadlineImportant ? (
-                                    <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate, iso)}</span>
-                                  ) : null}
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
@@ -15798,11 +15784,6 @@ export default function CommonViewPage() {
                                         ) : null}
                                         {isFastTaskRowId(row.id) ? renderWfcIndicator(cell) : null}
                                         {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(cell) : null}
-                                        {isFastTaskRowId(row.id) && cell.isDeadlineImportant ? (
-                                          <span className="deadline-indicator" title={cell.dueDate ? `Deadline ${formatDateHuman(cell.dueDate)}` : "Deadline important"}>
-                                            {getDeadlineIndicatorLabel(cell.dueDate, cell.entryDate)}
-                                          </span>
-                                        ) : null}
                                         {isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title) ? (
                                           <span className="time-indicator" title="08:00 task">
                                             08:00
@@ -15835,11 +15816,6 @@ export default function CommonViewPage() {
                                         ) : null}
                                         {isFastTaskRowId(row.id) ? renderWfcIndicator(cell) : null}
                                         {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(cell) : null}
-                                        {isFastTaskRowId(row.id) && cell.isDeadlineImportant ? (
-                                          <span className="deadline-indicator" title={cell.dueDate ? `Deadline ${formatDateHuman(cell.dueDate)}` : "Deadline important"}>
-                                            {getDeadlineIndicatorLabel(cell.dueDate, cell.entryDate)}
-                                          </span>
-                                        ) : null}
                                         {isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title) ? (
                                           <span className="time-indicator" title="08:00 task">
                                             08:00
@@ -15919,7 +15895,7 @@ export default function CommonViewPage() {
                                       ? formatFastTaskCardDate(cell.startDate || cell.entryDate)
                                       : null
                                     const taskDueDate = showSeparateTaskDates
-                                      ? formatFastTaskCardDate(cell.dueDate)
+                                      ? formatFastTaskCardDate(cell.dueDate, cell.entryDate)
                                       : null
                                     if (!showSubtitle && !showDate && !isNoteOpen) return null
                                     return (
