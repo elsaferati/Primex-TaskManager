@@ -33,6 +33,28 @@ function extensionForMimeType(mimeType?: string): string {
   return "webm"
 }
 
+function microphoneErrorToMessage(error: unknown): string {
+  const name =
+    error && typeof error === "object" && "name" in error
+      ? String(error.name)
+      : ""
+
+  if (name === "NotAllowedError" || name === "SecurityError") {
+    return "Microphone access denied. Allow microphone access in the browser settings."
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return "No microphone found"
+  }
+  if (name === "NotReadableError" || name === "TrackStartError") {
+    return "Microphone is unavailable or is being used by another app"
+  }
+  if (name === "AbortError") {
+    return "Microphone request was interrupted"
+  }
+
+  return "Unable to start microphone"
+}
+
 export function useCloudDictation(options: UseCloudDictationOptions) {
   const { apiFetch, onFinalText, lang } = options
 
@@ -150,9 +172,9 @@ export function useCloudDictation(options: UseCloudDictationOptions) {
 
       recorder.start()
       setIsRecording(true)
-    } catch {
+    } catch (error) {
       cleanupStream()
-      toast.error("Microphone access denied")
+      toast.error(microphoneErrorToMessage(error))
     }
   }, [cleanupStream, isRecording, isTranscribing, transcribe])
 

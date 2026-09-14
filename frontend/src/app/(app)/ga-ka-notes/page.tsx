@@ -85,6 +85,20 @@ const ADDED_MARK_END = "[[/added]]"
 const NOTE_MARK_TOKEN_RE = /\[\[(done|added)\]\]|\[\[\/(done|added)\]\]/g
 const STRIKE_TIMESTAMP_RE = /^ \d{2}:\d{2} \d{2}\.\d{2}(?=$|\s)/
 
+function shouldPreferCloudDictation(): boolean {
+  if (typeof navigator === "undefined") return false
+
+  const userAgent = navigator.userAgent
+  const isIOSDevice =
+    /iPad|iPhone|iPod/i.test(userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  const isSafari =
+    /Safari/i.test(userAgent) &&
+    !/Chrome|Chromium|CriOS|FxiOS|EdgiOS|OPiOS|Android/i.test(userAgent)
+
+  return isIOSDevice || isSafari
+}
+
 type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "WAITING_CLIENT" | "WAITING_CONFIRMATION" | "DONE" | "UNKNOWN"
 type TaskStatusFilter = "all" | "notes" | "tasks" | "open" | "closed" | NormalizedTaskStatus
 type ContentFilter = "all" | "emails"
@@ -1204,8 +1218,13 @@ export default function GaKaNotesPage() {
   const [creatingInternalMeetingFromTask, setCreatingInternalMeetingFromTask] = React.useState(false)
   const internalMeetingDepartmentIdRef = React.useRef<string | null>(null)
   const [voiceLanguage, setVoiceLanguage] = React.useState<"en" | "sq">("sq")
+  const [preferCloudDictation, setPreferCloudDictation] = React.useState(false)
   const speechLang = voiceLanguage === "sq" ? "sq-AL" : "en-US"
   const cloudLang = voiceLanguage === "sq" ? "sq" : "en"
+
+  React.useEffect(() => {
+    setPreferCloudDictation(shouldPreferCloudDictation())
+  }, [])
 
   const insertEditDictationAtCursor = React.useCallback((spokenText: string) => {
     const transcript = spokenText.trim()
@@ -1278,7 +1297,14 @@ export default function GaKaNotesPage() {
     },
   })
 
-  const voiceMode = isVoiceSupported ? "browser" : isCloudSupported ? "cloud" : "none"
+  const voiceMode =
+    preferCloudDictation && isCloudSupported
+      ? "cloud"
+      : isVoiceSupported
+        ? "browser"
+        : isCloudSupported
+          ? "cloud"
+          : "none"
 
   const {
     isSupported: isEditVoiceSupported,
@@ -1303,7 +1329,14 @@ export default function GaKaNotesPage() {
     onFinalText: insertEditDictationAtCursor,
   })
 
-  const editVoiceMode = isEditVoiceSupported ? "browser" : isEditCloudSupported ? "cloud" : "none"
+  const editVoiceMode =
+    preferCloudDictation && isEditCloudSupported
+      ? "cloud"
+      : isEditVoiceSupported
+        ? "browser"
+        : isEditCloudSupported
+          ? "cloud"
+          : "none"
 
   React.useEffect(() => {
     if (posting && isVoiceListening) stopVoice()
