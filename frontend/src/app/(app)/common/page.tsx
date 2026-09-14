@@ -1507,11 +1507,16 @@ export default function CommonViewPage() {
     const dueLabel = formatDateHuman(toISODate(due))
     return `${startLabel} - ${dueLabel}`
   }
+  const isFastTaskDateOnTarget = (value?: string | null, targetDate?: string | null) => {
+    const normalizedValue = normalizeCommonDateOnly(value)
+    const normalizedTarget = normalizeCommonDateOnly(targetDate)
+    return Boolean(normalizedValue && normalizedTarget && normalizedValue === normalizedTarget)
+  }
   const formatFastTaskCardDate = (value?: string | null, targetDate?: string | null) => {
     const parsed = parseDateOnly(value || "")
     if (!parsed) return null
     const normalizedDate = toISODate(parsed)
-    return targetDate && normalizedDate === normalizeCommonDateOnly(targetDate)
+    return isFastTaskDateOnTarget(normalizedDate, targetDate)
       ? "SOT"
       : formatDateHuman(normalizedDate)
   }
@@ -5171,8 +5176,9 @@ export default function CommonViewPage() {
         const dueDate = normalizeCommonDateOnly(item.dueDate)
         if (!startDate && !dueDate) return ""
         const chip = (value: string, due = false) => {
-          const label = due && value === targetIso ? "SOT" : formatDateHuman(value)
-          return `<span class="print-task-date${due ? " due" : ""}">${escapePrintHtml(label)}</span>`
+          const dueToday = due && value === targetIso
+          const label = dueToday ? "SOT" : formatDateHuman(value)
+          return `<span class="print-task-date${due ? " due" : ""}${dueToday ? " today" : ""}">${escapePrintHtml(label)}</span>`
         }
         return `<div class="print-task-dates">${startDate ? chip(startDate) : ""}${dueDate ? chip(dueDate, true) : ""}</div>`
       }
@@ -5257,6 +5263,7 @@ export default function CommonViewPage() {
   .print-task-dates { position:absolute; left:5px; right:5px; bottom:4px; display:flex; align-items:flex-end; justify-content:space-between; gap:4px; white-space:nowrap; }
   .print-task-date { display:inline-flex; box-sizing:border-box; height:18px; align-items:center; border:1px solid #93c5fd; border-radius:3px; background:#eff6ff; color:#1d4ed8; padding:1px 4px; font-weight:800; line-height:1; }
   .print-task-date.due { border:3px solid #b91c1c; padding:0 2px; }
+  .print-task-date.due.today { height:20px; border:1px solid #991b1b; background:#dc2626; color:#fff; padding:2px 7px; font-size:11px; font-weight:900; }
   .print-task-badge { display:inline-block; margin:0 4px 3px 0; padding:2px 5px; border-radius:999px; font-size:8px; font-weight:800; line-height:1; white-space:nowrap; }
   .print-task-badge.period { background:#e0f2fe; border:1px solid #bae6fd; color:#0369a1; }
   .print-task-badge.wfc { background:#ffedd5; border:1px solid #fb923c; color:#c2410c; }
@@ -8316,7 +8323,9 @@ export default function CommonViewPage() {
                             <span>{formatFastTaskCardDate(item.startDate || item.entryDate)}</span>
                           ) : null}
                           {formatFastTaskCardDate(item.dueDate, item.entryDate) ? (
-                            <span className="due">{formatFastTaskCardDate(item.dueDate, item.entryDate)}</span>
+                            <span className={isFastTaskDateOnTarget(item.dueDate, item.entryDate) ? "due today" : "due"}>
+                              {formatFastTaskCardDate(item.dueDate, item.entryDate)}
+                            </span>
                           ) : null}
                         </div>
                       </div>
@@ -8838,6 +8847,15 @@ export default function CommonViewPage() {
           .single-day-print-task-dates span.due {
             border: 3px solid #b91c1c !important;
             padding: 0 2px;
+          }
+          .single-day-print-task-dates span.due.today {
+            height: 20px;
+            border: 1px solid #991b1b !important;
+            background: #dc2626 !important;
+            color: #ffffff !important;
+            padding: 2px 7px;
+            font-size: 11px;
+            font-weight: 900;
           }
           /* A one-day Common View printout is the compact fast-task report. */
           .single-day-print .swimlane-row:not(
@@ -10464,6 +10482,16 @@ export default function CommonViewPage() {
           border: 3px solid #b91c1c;
           padding: 0 4px;
         }
+        .swimlane-task-date.due.today {
+          height: 26px;
+          border: 1px solid #991b1b;
+          background: #dc2626;
+          color: #ffffff;
+          padding: 3px 9px;
+          font-size: 14px;
+          font-weight: 900;
+          box-shadow: 0 1px 3px rgba(153, 27, 27, 0.3);
+        }
         .swimlane-subtitle {
           font-size: 12px;
           color: var(--swim-muted);
@@ -11340,6 +11368,12 @@ export default function CommonViewPage() {
           border-color: rgba(255, 255, 255, 0.45);
           color: #ffffff;
           box-shadow: none;
+        }
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-task-date.due.today {
+          background: #dc2626;
+          border-color: #991b1b;
+          color: #ffffff;
+          box-shadow: 0 1px 3px rgba(127, 29, 29, 0.45);
         }
         .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-avatar,
         .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .fast-task-order-badge,
@@ -15897,6 +15931,8 @@ export default function CommonViewPage() {
                                     const taskDueDate = showSeparateTaskDates
                                       ? formatFastTaskCardDate(cell.dueDate, cell.entryDate)
                                       : null
+                                    const taskDueDateIsToday = showSeparateTaskDates &&
+                                      isFastTaskDateOnTarget(cell.dueDate, cell.entryDate)
                                     if (!showSubtitle && !showDate && !isNoteOpen) return null
                                     return (
                                       <div className="swimlane-meta">
@@ -15913,7 +15949,10 @@ export default function CommonViewPage() {
                                               </span>
                                             ) : null}
                                             {taskDueDate ? (
-                                              <span className="swimlane-task-date due" title="Due date">
+                                              <span
+                                                className={`swimlane-task-date due${taskDueDateIsToday ? " today" : ""}`}
+                                                title="Due date"
+                                              >
                                                 {taskDueDate}
                                               </span>
                                             ) : null}
