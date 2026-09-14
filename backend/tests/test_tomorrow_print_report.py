@@ -626,13 +626,16 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     assert "background-color:#DC2626" in report_html
     assert "border:1px solid #B91C1C" in report_html
     assert "color:#FFFFFF" in report_html
+    assert "height:26px" in report_html
+    assert "padding:3px 9px" in report_html
+    assert "font-size:14px" in report_html
     assert "font-weight:900" in report_html
+    assert "box-shadow:0 1px 3px rgba(127,29,29,0.45)" in report_html
     assert 'data-task-card-row="dates"' in report_html
     assert 'height="25" valign="bottom"' in report_html
     assert 'align="left"' in report_html
     assert 'align="right"' in report_html
     assert 'height="19" valign="bottom"' in report_html
-    assert "border:3px solid #B91C1C" in report_html
     assert "position:absolute" not in report_html
 
     _, content, _ = _excel_table_attachment([("DEADLINE / 08:00", tasks, False)], [], date(2026, 8, 14))
@@ -684,7 +687,11 @@ def test_done_task_stays_green_even_when_it_is_a_deadline() -> None:
     report_html = _html_table(rows, report_date=date(2026, 9, 3))
     assert 'bgcolor="#C4FDC4"' in report_html
     assert 'bgcolor="#DC2626"' not in report_html
-    assert "border:3px solid #B91C1C" in report_html
+    assert 'data-due-today="true"' in report_html
+    assert "background-color:#DC2626" in report_html
+    assert "border:1px solid #991B1B" in report_html
+    assert "color:#FFFFFF" in report_html
+    assert ">SOT</span>" in report_html
 
     _, content, _ = _excel_table_attachment(rows, [], date(2026, 9, 3))
     sheet = load_workbook(BytesIO(content), rich_text=True).active
