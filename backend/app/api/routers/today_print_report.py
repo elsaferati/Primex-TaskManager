@@ -115,7 +115,7 @@ async def update_settings(
 
 
 @router.get("/preview")
-async def preview(report_date: date | None = None, _: User = Depends(require_manager_or_admin)) -> dict:
+async def preview(report_date: date | None = None, _: User = Depends(get_current_user)) -> dict:
     target_date = report_date or datetime.now(report_timezone()).date()
     return await build_today_print_report(target_date)
 

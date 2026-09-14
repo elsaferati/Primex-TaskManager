@@ -85,7 +85,6 @@ async def preview_weekly_planning_audit(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WeeklyPlanningAuditPreviewOut:
-    _ensure_report_manager(user)
     config = await get_or_create_settings(db)
     report = await build_weekly_planning_audit(
         db,
@@ -108,7 +107,6 @@ async def generate_weekly_planning_audit(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WeeklyPlanningAuditRunOut:
-    _ensure_report_manager(user)
     try:
         run = await generate_report_run(
             db,
@@ -206,7 +204,6 @@ async def weekly_planning_audit_history(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WeeklyPlanningAuditHistoryOut:
-    _ensure_report_manager(user)
     query = select(WeeklyPlanningAuditRun)
     if week_start:
         query = query.where(WeeklyPlanningAuditRun.week_start == week_start)
@@ -233,7 +230,6 @@ async def download_weekly_planning_audit(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> FileResponse:
-    _ensure_report_manager(user)
     run = await db.get(WeeklyPlanningAuditRun, run_id)
     if run is None or not run.storage_path or not run.filename:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report file not found")

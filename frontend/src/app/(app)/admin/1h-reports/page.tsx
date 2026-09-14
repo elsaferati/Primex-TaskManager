@@ -24,7 +24,7 @@ const slots = ["10:00","11:00","11:50","14:10","14:20","16:00"]
 
 export default function ReportManagementPage() {
   const { apiFetch, user } = useAuth()
-  const canAccess = user?.role === "ADMIN" || user?.role === "MANAGER" || user?.full_name?.trim().toLocaleLowerCase() === "laurent hoxha"
+  const canManage = user?.role === "ADMIN" || user?.role === "MANAGER" || user?.full_name?.trim().toLocaleLowerCase() === "laurent hoxha"
   const [recipients,setRecipients] = React.useState<Recipient[]>([])
   const [schedules,setSchedules] = React.useState<Schedule[]>([])
   const [runs,setRuns] = React.useState<Run[]>([])
@@ -44,15 +44,15 @@ export default function ReportManagementPage() {
   const [scheduleForm,setScheduleForm] = React.useState({name:"",report_slot:"10:00",execution_time:"09:00"})
 
   const load = React.useCallback(async()=>{
+    if (!canManage) { setLoading(false); return }
     setLoading(true)
     try {
       const [rr,sr,hr,ar] = await Promise.all([apiFetch(`${API}/recipients`),apiFetch(`${API}/schedules`),apiFetch(`${API}/runs`),apiFetch(`${API}/audit`)])
       if (![rr,sr,hr,ar].every(r=>r.ok)) throw new Error("load")
       setRecipients(await rr.json()); setSchedules(await sr.json()); setRuns(await hr.json()); setAudit(await ar.json())
     } catch { toast.error("Unable to load 1H report management data") } finally { setLoading(false) }
-  },[apiFetch])
-  React.useEffect(()=>{const timer=window.setTimeout(()=>void load(),0);return()=>window.clearTimeout(timer)},[load])
-  React.useEffect(()=>{if(user && !canAccess) toast.error("Report management access required")},[user,canAccess])
+  },[apiFetch,canManage])
+  React.useEffect(()=>{if(!canManage)return;const timer=window.setTimeout(()=>void load(),0);return()=>window.clearTimeout(timer)},[canManage,load])
 
   const previewReport = async(format="json")=>{
     setPreviewing(true)
@@ -100,7 +100,18 @@ export default function ReportManagementPage() {
     if(!res.ok){toast.error("Download unavailable",{description:await res.text()});return}
     const blob=await res.blob(),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=`PrimeFlow_1H_${run.report_date}_${run.report_slot.replace(":","-")}.${format}`;a.click();URL.revokeObjectURL(url)
   }
-  if(!canAccess) return <div className="rounded-lg border p-8">Report management access required.</div>
+  if(!user) return <div className="rounded-lg border p-8">Sign in to access 1H reports.</div>
+  if(!canManage) return <div className="mx-auto max-w-[1400px] space-y-5">
+    <div><h1 className="text-2xl font-semibold">1H Reports</h1><p className="text-sm text-muted-foreground">Generate and download a fresh report for any date and slot.</p></div>
+    <div className="space-y-4 rounded-xl border bg-white p-5">
+      <div className="grid gap-3 md:grid-cols-4">
+        <div><Label>Date</Label><Input type="date" value={date} onChange={e=>{setDate(e.target.value);setPreview(null)}}/></div>
+        <div><Label>Slot</Label><Select value={slot} onValueChange={v=>{setSlot(v);setPreview(null)}}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>{slots.map(v=><SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent></Select></div>
+        <div className="flex items-end"><Button onClick={()=>void previewReport()} disabled={previewing}>{previewing?<RefreshCw className="animate-spin"/>:<MailCheck/>}Generate report</Button></div>
+      </div>
+      {preview ? <><div className="grid gap-3 text-sm md:grid-cols-3"><div><b>Subject</b><br/>{preview.document.subject}</div><div><b>Generated</b><br/>{preview.document.generated_at}</div><div><b>Tasks</b><br/>{preview.task_count}</div></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={()=>void previewReport("docx")}><Download/>Word</Button><Button variant="outline" onClick={()=>void previewReport("png")}><Download/>PNG</Button><Button variant="outline" onClick={()=>void previewReport("txt")}><Download/>Text</Button></div><iframe title="Email preview" srcDoc={preview.html} className="h-[620px] w-full rounded-lg border bg-white"/></> : null}
+    </div>
+  </div>
 
   const active=recipients.filter(r=>r.is_active)
   return <div className="mx-auto max-w-[1500px] space-y-5">

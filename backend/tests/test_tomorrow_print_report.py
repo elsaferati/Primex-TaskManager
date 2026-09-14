@@ -17,12 +17,30 @@ from app.services.tomorrow_print_report import (
     _missing_one_h_initials,
     _one_h_checklists_html,
     _png_table_attachment,
+    _task_marker_legend_html,
     _task_rows,
     build_today_print_report,
     build_tomorrow_print_report,
     ensure_required_shtypi_recipient,
     send_tomorrow_print_report,
 )
+
+
+def test_task_marker_legend_explains_the_report_symbols() -> None:
+    legend_html = _task_marker_legend_html()
+
+    assert 'data-task-marker-legend="true"' in legend_html
+    assert "Detyrë që parashihet me problem" in legend_html
+    assert "Kërkon monitorim / përcjellje nga dikush tjetër" in legend_html
+    assert "⚑" in legend_html
+    assert "GA" in legend_html
+    assert "color:#DC2626" in legend_html
+    assert "?</strong> - Detyrë" in legend_html
+    assert "!</strong> - Kërkon" in legend_html
+    assert "⚑</strong> - Monitorim nga GA" in legend_html
+    assert "KA</strong> - Monitorim nga KA" in legend_html
+    assert "GENT</strong> - Monitorim nga Genti" in legend_html
+    assert legend_html.count('aria-hidden="true"') == 4
 
 
 def test_missing_one_h_users_exclude_leave_admin_and_management_initials() -> None:
@@ -597,7 +615,8 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     assert 'data-badge-position="bottom-right"' in report_html
     assert 'data-due-today="true"' in report_html
     assert ">13.08.2026</span>" in report_html
-    assert report_html.count(">14.08.2026</span>") == 3
+    assert report_html.count(">14.08.2026</span>") == 1
+    assert report_html.count(">SOT</span>") == 2
     assert "DUE TODAY" not in report_html
     assert "background-color:#EFF6FF" in report_html
     assert "border:1px solid #93C5FD" in report_html
@@ -617,7 +636,7 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     _, content, _ = _excel_table_attachment([("DEADLINE / 08:00", tasks, False)], [], date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
     assert sheet["C6"].fill.fgColor.rgb.endswith("DC2626")
-    assert "[14.08.2026]" in sheet["C6"].value
+    assert "[SOT]" in sheet["C6"].value
     assert "DUE" not in sheet["C6"].value
     assert "[08:00]" in sheet["D6"].value
     assert sheet["D6"].border.left.color.rgb.endswith("DC2626")
@@ -642,7 +661,7 @@ def test_ga_personal_purple_overrides_deadline_red_in_email_and_excel() -> None:
     assert 'bgcolor="#D8B4FE"' in report_html
     assert 'bgcolor="#DC2626"' in report_html
     assert report_html.count('data-task-badge="due-date"') == 2
-    assert report_html.count(">14.08.2026</span>") == 2
+    assert report_html.count(">SOT</span>") == 2
 
     _, content, _ = _excel_table_attachment(rows, [], date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
@@ -759,13 +778,66 @@ def test_deadline_and_0800_tasks_have_a_dedicated_printed_row() -> None:
     assert [item["title"] for item in important_row[1]] == ["Deadline task", "08:00 task"]
 
 
-def test_personal_tasks_are_split_exclusively_into_ga_ka_and_px_rows() -> None:
+def test_wfe_tasks_move_to_a_dedicated_row_without_duplicates() -> None:
+    rows = _task_rows(
+        {
+            "oneH": [
+                {
+                    "title": "WFE 1H task",
+                    "date": "2026-08-14",
+                    "status": "WAITING_CLIENT",
+                    "oneHReportSlot": "10:00",
+                    "finishPeriod": "AM",
+                    "oneHMarker": "QUESTION",
+                },
+                {
+                    "title": "Regular 1H task",
+                    "date": "2026-08-14",
+                    "status": "TODO",
+                    "oneHReportSlot": "10:00",
+                },
+            ],
+            "blocked": [
+                {"title": "Legacy WFE task", "date": "2026-08-14", "status": "WFE"},
+            ],
+            "personal": [
+                {"title": "GA: Waiting for client", "date": "2026-08-14", "status": "WAITING_FOR_CLIENT"},
+            ],
+        },
+        date(2026, 8, 14),
+    )
+
+    wfe_index = next(index for index, row in enumerate(rows) if row[0] == "WFE")
+    blocked_index = next(index for index, row in enumerate(rows) if row[0].startswith("BLL"))
+    assert wfe_index < blocked_index
+    assert {item["title"] for item in rows[wfe_index][1]} == {
+        "WFE 1H task",
+        "Legacy WFE task",
+        "GA: Waiting for client",
+    }
+    assert [item["title"] for item in rows[0][1]] == ["Regular 1H task"]
+    assert sum(
+        item["title"] == "WFE 1H task"
+        for _, row_items, _ in rows
+        for item in row_items
+    ) == 1
+
+    report_html = _html_table(rows, report_date=date(2026, 8, 14))
+    assert ">WFE<" in report_html
+    assert 'data-task-badge="finish-period"' in report_html
+    assert 'data-task-badge="one-h-marker"' in report_html
+
+
+def test_personal_tasks_are_split_exclusively_into_ga_ka_gent_and_px_rows() -> None:
     rows = _task_rows(
         {
             "personal": [
                 {"title": "EF/GA: WFC", "date": "2026-08-14"},
                 {"title": "GA/KA: GA wins", "date": "2026-08-14"},
                 {"title": "ER: KA: Teams", "date": "2026-08-14"},
+                {"title": "ER/GENT: Personal Gent", "date": "2026-08-14"},
+                {"title": "ER/GENTI: Personal Genti", "date": "2026-08-14"},
+                {"title": "ER/GT: Personal GT", "date": "2026-08-14"},
                 {"title": "EP/ESH: Personal PX", "date": "2026-08-14"},
                 {"title": "Personal task without initials", "date": "2026-08-14"},
             ]
@@ -777,23 +849,86 @@ def test_personal_tasks_are_split_exclusively_into_ga_ka_and_px_rows() -> None:
     assert [row[0] for row in personal_rows] == [
         "P: GA\n08:15 / 13:15",
         "P: KA\n08:30 / 13:15",
+        "P: GENT",
         "P: PX\n08:45 / 14:00",
     ]
     assert {item["title"] for item in personal_rows[0][1]} == {"EF/GA: WFC", "GA/KA: GA wins"}
     assert [item["title"] for item in personal_rows[1][1]] == ["ER: KA: Teams"]
     assert {item["title"] for item in personal_rows[2][1]} == {
+        "ER/GENT: Personal Gent",
+        "ER/GENTI: Personal Genti",
+        "ER/GT: Personal GT",
+    }
+    assert {item["title"] for item in personal_rows[3][1]} == {
         "EP/ESH: Personal PX",
         "Personal task without initials",
     }
-    assert sum(len(row[1]) for row in personal_rows) == 5
+    assert sum(len(row[1]) for row in personal_rows) == 8
     report_html = _html_table(personal_rows)
     assert "font-size:10px" in report_html
     assert "P: GA" in report_html
     assert "P: KA" in report_html
+    assert "P: GENT" in report_html
     assert "P: PX" in report_html
     assert 'P: GA<br><span style="font-size:13px;line-height:1.2;font-weight:800;white-space:nowrap">08:15 / 13:15</span>' in report_html
     assert 'P: KA<br><span style="font-size:13px;line-height:1.2;font-weight:800;white-space:nowrap">08:30 / 13:15</span>' in report_html
     assert 'P: PX<br><span style="font-size:13px;line-height:1.2;font-weight:800;white-space:nowrap">08:45 / 14:00</span>' in report_html
+
+
+def test_wfc_tasks_are_appended_after_personal_tasks_and_removed_from_original_rows() -> None:
+    rows = _task_rows(
+        {
+            "oneH": [
+                {
+                    "title": "EF: WFC for KA",
+                    "date": "2026-08-14",
+                    "status": "WAITING_CONFIRMATION",
+                    "confirmation_owner": "KA",
+                    "one_h_report_slot": "10:00",
+                }
+            ],
+            "r1": [
+                {
+                    "title": "RA: WFC for Gent",
+                    "date": "2026-08-14",
+                    "status": "WAITING_CONFIRMATION",
+                    "confirmation_owner": "GENT",
+                }
+            ],
+            "personal": [
+                {"title": "AT/KA: Personal first", "date": "2026-08-14", "is_personal_task": True},
+                {"title": "LH/GENTI: Personal first", "date": "2026-08-14", "is_personal_task": True},
+                {
+                    "title": "EF: WFC for KA",
+                    "date": "2026-08-14",
+                    "status": "WAITING_CONFIRMATION",
+                    "confirmation_owner": "KA",
+                    "is_personal_task": False,
+                },
+                {
+                    "title": "RA: WFC for Gent",
+                    "date": "2026-08-14",
+                    "status": "WAITING_CONFIRMATION",
+                    "confirmation_owner": "GENT",
+                    "is_personal_task": False,
+                },
+            ],
+        },
+        date(2026, 8, 14),
+    )
+
+    ka_row = next(row for row in rows if row[0].startswith("P: KA"))
+    gent_row = next(row for row in rows if row[0] == "P: GENT")
+    assert [item["title"] for item in ka_row[1]] == ["AT/KA: Personal first", "EF: WFC for KA"]
+    assert [item["title"] for item in gent_row[1]] == ["LH/GENTI: Personal first", "RA: WFC for Gent"]
+    assert not any(
+        item["title"] in {"EF: WFC for KA", "RA: WFC for Gent"}
+        for label, items, personal in rows
+        if not personal
+        for item in items
+    )
+    report_html = _html_table([ka_row, gent_row], report_date=date(2026, 8, 14))
+    assert report_html.count('data-task-badge="wfc"') == 2
 
 
 def test_blocked_row_label_uses_full_afternoon_interval_and_keeps_report_time() -> None:

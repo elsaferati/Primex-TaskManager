@@ -277,7 +277,7 @@ async def overview(db: AsyncSession = Depends(get_db), _: User = Depends(require
 async def preview(
     payload: PreviewRequest,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_report_manager),
+    _: User = Depends(get_current_user),
 ):
     recipients = await _recipient_map(payload)
     document = await generate_fresh(payload.report_date, payload.report_slot, recipients)

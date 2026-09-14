@@ -40,9 +40,10 @@ function canCreatePimImageTestTaskForMeeting(meeting: Meeting): boolean {
   return isOneTime && Boolean(meeting.starts_at)
 }
 
-type PersonalTaskGroup = "GA" | "KA" | "PX"
-type PersonalRowId = "personalGA" | "personalKA" | "personalPX"
+type PersonalTaskGroup = "GA" | "KA" | "GENT" | "PX"
+type PersonalRowId = "personalGA" | "personalKA" | "personalGENT" | "personalPX"
 type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG"
+type OneHMarkerFilter = "all" | "none" | OneHMarker
 
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "EXCLAMATION", label: "!" },
@@ -80,10 +81,11 @@ type CommonType =
   | "diamond"
   | "bz"
 
-const PERSONAL_ROW_IDS: readonly PersonalRowId[] = ["personalGA", "personalKA", "personalPX"]
+const PERSONAL_ROW_IDS: readonly PersonalRowId[] = ["personalGA", "personalKA", "personalGENT", "personalPX"]
 const PERSONAL_ROW_SCHEDULES: Readonly<Record<PersonalRowId, string>> = {
   personalGA: "08:15 / 13:15",
   personalKA: "08:30 / 13:15",
+  personalGENT: "",
   personalPX: "08:45 / 14:00",
 }
 const DEFAULT_OPEN_SWIMLANE_TITLE_ROWS: CommonType[] = ["oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1550", "oneHNoSlot", "r1", ...PERSONAL_ROW_IDS]
@@ -136,7 +138,7 @@ const orderCommonRowsForPrint = <T extends { id: CommonType }>(rows: readonly T[
     .map(({ row }) => row)
 const getCommonPrintRowSubtext = (id: CommonType) => {
   if (id === "blocked") return "14:30 - 16:00\nRAP 16:10"
-  if (id === "personalGA" || id === "personalKA" || id === "personalPX") {
+  if (isPersonalRowId(id)) {
     return PERSONAL_ROW_SCHEDULES[id]
   }
   return ""
@@ -269,6 +271,9 @@ const oneHPrintChecklistsHtml = (reportDay: Date) =>
     }
   ).join("")}</section>`
 
+const oneHMarkerLegendHtml = () =>
+  `<div class="one-h-marker-legend"><strong>LEGJENDA:</strong><span><b>?</b> - Detyrë që parashihet me problem</span><i aria-hidden="true">/</i><span><b>!</b> - Kërkon monitorim / përcjellje nga dikush tjetër</span><i aria-hidden="true">/</i><span><b>⚑</b> - Monitorim nga GA</span><i aria-hidden="true">/</i><span><b>KA</b> - Monitorim nga KA</span><i aria-hidden="true">/</i><span><b>GENT</b> - Monitorim nga Genti</span></div>`
+
 function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
   return (
     <section className="one-h-print-checklists">
@@ -303,6 +308,23 @@ function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
   )
 }
 
+function OneHMarkerLegend() {
+  return (
+    <div className="one-h-marker-legend">
+      <strong>LEGJENDA:</strong>
+      <span><b>?</b> - Detyrë që parashihet me problem</span>
+      <i aria-hidden="true">/</i>
+      <span><b>!</b> - Kërkon monitorim / përcjellje nga dikush tjetër</span>
+      <i aria-hidden="true">/</i>
+      <span><b>⚑</b> - Monitorim nga GA</span>
+      <i aria-hidden="true">/</i>
+      <span><b>KA</b> - Monitorim nga KA</span>
+      <i aria-hidden="true">/</i>
+      <span><b>GENT</b> - Monitorim nga Genti</span>
+    </div>
+  )
+}
+
 type LateItem = { entryId?: string; person: string; date: string; until: string; start?: string; note?: string }
 type AbsentItem = { entryId?: string; person: string; date: string; from: string; to: string; note?: string; userId?: string }
 type LeaveItem = {
@@ -332,6 +354,8 @@ type FastTaskItemMeta = {
   createdAt?: string | null
   completedAt?: string | null
   dateIsToday?: boolean
+  confirmationOwner?: "KA" | "GENT" | null
+  isPersonalTask?: boolean
 }
 type BlockedItem = {
   title: string
@@ -557,9 +581,13 @@ const normalizeCommonTaskStatus = (status?: string | null, isDone?: boolean) => 
 
   if (normalized === "TO_DO") return "TODO"
   if (normalized === "INPROGRESS") return "IN_PROGRESS"
+  if (["WFE", "WAITINGCLIENT", "WAITING_FOR_CLIENT"].includes(normalized)) return "WAITING_CLIENT"
   if (normalized) return normalized
   return isDone ? "DONE" : "TODO"
 }
+
+const isWaitingClientTask = (entry: { status?: string | null; isDone?: boolean }) =>
+  normalizeCommonTaskStatus(entry.status, entry.isDone) === "WAITING_CLIENT"
 
 const isCommonTaskDone = (status?: string | null, isDone?: boolean) =>
   normalizeCommonTaskStatus(status, isDone) === "DONE"
@@ -905,6 +933,21 @@ const initials = (name: string) => {
   const last = parts.length > 1 ? parts[parts.length - 1]?.[0] || "" : ""
   return `${first}${last}`.toUpperCase()
 }
+const getKaGentiConfirmationOwner = (
+  confirmationUser?: Pick<User, "full_name" | "username" | "email"> | null
+): "KA" | "GENT" | null => {
+  if (!confirmationUser) return null
+  const fullName = (confirmationUser.full_name || "").trim()
+  const firstName = fullName.match(/[^\W\d_]+/u)?.[0]?.toLowerCase()
+  if (firstName === "gent" || firstName === "genti") return "GENT"
+  if (initials(fullName) === "KA") return "KA"
+
+  const username = (confirmationUser.username || "").trim().toLowerCase()
+  const email = (confirmationUser.email || "").trim().toLowerCase()
+  if (username === "gent.arifaj" || email === "g.arifaj@primexeu.com") return "GENT"
+  if (username === "kosove.arifaj" || email === "kosove.arifaj@ht-furniture.de") return "KA"
+  return null
+}
 const stripInitialsPrefix = (value: string) => {
   return value
 }
@@ -948,18 +991,40 @@ const commonPrintTitleHtml = (value: string) =>
     .join("")
 const getPersonalTaskGroup = (entry: { title: string }): PersonalTaskGroup => {
   const titlePrefix = commonPrintPersonalTaskTitle(entry).trim().toUpperCase()
-  const match = titlePrefix.match(/^[A-Z]{2,3}(?:\s*[:/]\s*[A-Z]{2,3})*(?=\s|:|\/|$)/)
+  const match = titlePrefix.match(/^[A-Z]{1,5}(?:\s*[:/]\s*[A-Z]{1,5})*(?=\s|:|\/|$)/)
   const participants = (match?.[0] || "").split(/[:/]/).map((value) => value.trim())
   if (participants.includes("GA")) return "GA"
   if (participants.includes("KA")) return "KA"
+  if (participants.some((value) => ["GENT", "GENTI", "GT"].includes(value))) return "GENT"
   return "PX"
 }
 const getPersonalRowGroup = (rowId: PersonalRowId): PersonalTaskGroup =>
-  rowId === "personalGA" ? "GA" : rowId === "personalKA" ? "KA" : "PX"
+  rowId === "personalGA" ? "GA" : rowId === "personalKA" ? "KA" : rowId === "personalGENT" ? "GENT" : "PX"
 const isPersonalRowId = (rowId: CommonType): rowId is PersonalRowId =>
   PERSONAL_ROW_IDS.includes(rowId as PersonalRowId)
-const personalTasksForRow = <T extends { title: string }>(items: readonly T[], rowId: PersonalRowId) =>
-  items.filter((item) => getPersonalTaskGroup(item) === getPersonalRowGroup(rowId))
+const isWaitingConfirmationTask = (entry: { status?: string | null; isDone?: boolean }) =>
+  normalizeCommonTaskStatus(entry.status, entry.isDone) === "WAITING_CONFIRMATION"
+const isAppendedWaitingConfirmation = (entry: FastTaskItemMeta & { status?: string | null; isDone?: boolean }) =>
+  entry.isPersonalTask === false && isWaitingConfirmationTask(entry) && Boolean(entry.confirmationOwner)
+const isRoutedWaitingConfirmation = (entry: FastTaskItemMeta & { status?: string | null; isDone?: boolean }) =>
+  isWaitingConfirmationTask(entry) && Boolean(entry.confirmationOwner)
+const renderWfcIndicator = (entry: { status?: string | null; isDone?: boolean }) =>
+  isWaitingConfirmationTask(entry) ? (
+    <span className="wfc-indicator" title="Waiting for confirmation">WFC</span>
+  ) : null
+const personalTasksForRow = <T extends FastTaskItemMeta & { title: string; status?: string | null; isDone?: boolean }>(
+  items: readonly T[],
+  rowId: PersonalRowId
+) => {
+  const group = getPersonalRowGroup(rowId)
+  const personal = items.filter(
+    (item) => !isAppendedWaitingConfirmation(item) && getPersonalTaskGroup(item) === group
+  )
+  const waitingConfirmation = items.filter(
+    (item) => isAppendedWaitingConfirmation(item) && item.confirmationOwner === group
+  )
+  return [...personal, ...waitingConfirmation]
+}
 
 const getCommonTitleMarkClass = (isDone: boolean, isAdded: boolean) => {
   if (isDone && isAdded) {
@@ -1072,6 +1137,8 @@ const isFastTaskRowId = (rowId: CommonType): rowId is FastTaskRowId | OneHSlotRo
   rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || isPersonalRowId(rowId) || rowId === "r1" || rowId === "waitingClient"
 const isPrintDedupeTaskRowId = (rowId: CommonType) =>
   rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || isPersonalRowId(rowId) || rowId === "r1" || rowId === "waitingClient"
+const isShtypiTaskRowId = (rowId: CommonType) =>
+  rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || isPersonalRowId(rowId) || rowId === "r1" || rowId === "waitingClient"
 
 const getFastTaskAssigneeKey = (entry: FastTaskEntry) => {
   const person = "person" in entry ? entry.person : ""
@@ -1162,11 +1229,6 @@ const getFastTaskDisplayNumber = (
   )
   const currentIndex = peerEntries.findIndex((item) => item.taskId === entry.taskId)
   return currentIndex >= 0 ? currentIndex + 1 : 1
-}
-
-const getDeadlineIndicatorLabel = (dueDate?: string | null) => {
-  if (!dueDate) return "Deadline"
-  return `DL ${formatDateDMY(dueDate)}`
 }
 
 const hasEightAmIndicator = (title?: string | null) =>
@@ -1379,9 +1441,18 @@ export default function CommonViewPage() {
     const dueLabel = formatDateHuman(toISODate(due))
     return `${startLabel} - ${dueLabel}`
   }
-  const formatFastTaskCardDate = (value?: string | null) => {
+  const isFastTaskDateOnTarget = (value?: string | null, targetDate?: string | null) => {
+    const normalizedValue = normalizeCommonDateOnly(value)
+    const normalizedTarget = normalizeCommonDateOnly(targetDate)
+    return Boolean(normalizedValue && normalizedTarget && normalizedValue === normalizedTarget)
+  }
+  const formatFastTaskCardDate = (value?: string | null, targetDate?: string | null) => {
     const parsed = parseDateOnly(value || "")
-    return parsed ? formatDateHuman(toISODate(parsed)) : null
+    if (!parsed) return null
+    const normalizedDate = toISODate(parsed)
+    return isFastTaskDateOnTarget(normalizedDate, targetDate)
+      ? "SOT"
+      : formatDateHuman(normalizedDate)
   }
   const computeNextOccurrenceDate = (params: {
     recurrenceType: "weekly" | "monthly" | "yearly"
@@ -1558,6 +1629,7 @@ export default function CommonViewPage() {
   const [typeFilters, setTypeFilters] = React.useState<Set<CommonType>>(new Set())
   const [typeMultiMode, setTypeMultiMode] = React.useState(false)
   const [colorFilter, setColorFilter] = React.useState<CommonColorFilter>("all")
+  const [oneHMarkerFilter, setOneHMarkerFilter] = React.useState<OneHMarkerFilter>("all")
   const [taskFocusFilter, setTaskFocusFilter] = React.useState<CommonTaskFocusFilter>("all")
   const [newTaskCategoryFilters, setNewTaskCategoryFilters] = React.useState<Set<CommonTaskNewCategory>>(
     () => new Set(COMMON_TASK_NEW_CATEGORY_OPTIONS.map((option) => option.value))
@@ -2869,12 +2941,14 @@ export default function CommonViewPage() {
               : undefined,
           finishPeriod: item.finishPeriod || item.finish_period || null,
           oneHReportSlot: normalizeOneHReportSlot(item.oneHReportSlot || item.one_h_report_slot),
+          oneHMarker: item.oneHMarker || item.one_h_marker || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
           createdAt: item.createdAt || item.created_at || null,
           completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
+          confirmationOwner: item.confirmationOwner || item.confirmation_owner || null,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
         }
@@ -2898,6 +2972,7 @@ export default function CommonViewPage() {
           createdAt: item.createdAt || item.created_at || null,
           completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
+          confirmationOwner: item.confirmationOwner || item.confirmation_owner || null,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
         }
@@ -2913,12 +2988,15 @@ export default function CommonViewPage() {
               ? (item.fastTaskOrder ?? item.fast_task_order)
               : undefined,
           finishPeriod: item.finishPeriod || item.finish_period || null,
+          oneHMarker: item.oneHMarker || item.one_h_marker || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
           createdAt: item.createdAt || item.created_at || null,
           completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
+          confirmationOwner: item.confirmationOwner || item.confirmation_owner || null,
+          isPersonalTask: item.isPersonalTask ?? item.is_personal_task ?? true,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
         }
@@ -2935,12 +3013,14 @@ export default function CommonViewPage() {
               : undefined,
           finishPeriod: item.finishPeriod || item.finish_period || null,
           oneHReportSlot: normalizeOneHReportSlot(item.oneHReportSlot || item.one_h_report_slot),
+          oneHMarker: item.oneHMarker || item.one_h_marker || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
           createdAt: item.createdAt || item.created_at || null,
           completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
+          confirmationOwner: item.confirmationOwner || item.confirmation_owner || null,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
         }
@@ -3484,6 +3564,11 @@ export default function CommonViewPage() {
 
             const assigneeId = t.assigned_to || t.assignees?.[0]?.id || t.assigned_to_user_id || null
             const assignee = t.assignees?.[0] || (assigneeId ? loadedUsers.find((u) => u.id === assigneeId) : null)
+            const confirmationOwner = getKaGentiConfirmationOwner(
+              t.confirmation_assignee_id
+                ? loadedUsers.find((candidate) => candidate.id === t.confirmation_assignee_id)
+                : null
+            )
             const ownerName = assignee?.full_name || assignee?.username || null
             const assigneeNames = t.assignees?.length
               ? t.assignees.map((a) => a.full_name || a.username || a.email || "Unknown")
@@ -3564,11 +3649,13 @@ export default function CommonViewPage() {
                   fastTaskOrder: t.fast_task_order ?? undefined,
                   finishPeriod: t.finish_period || null,
                   oneHReportSlot: normalizeOneHReportSlot(t.one_h_report_slot),
+                  oneHMarker: t.one_h_marker || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
                   startDate: t.start_date || null,
                   createdAt: t.created_at || null,
                   completedAt: t.completed_at || null,
+                  confirmationOwner,
                 })
               }
               if (t.is_1h_report) {
@@ -3591,6 +3678,7 @@ export default function CommonViewPage() {
                   startDate: t.start_date || null,
                   createdAt: t.created_at || null,
                   completedAt: t.completed_at || null,
+                  confirmationOwner,
                 })
               }
               if (t.is_personal) {
@@ -3607,11 +3695,14 @@ export default function CommonViewPage() {
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
                   finishPeriod: t.finish_period || null,
+                  oneHMarker: t.one_h_marker || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
                   startDate: t.start_date || null,
                   createdAt: t.created_at || null,
                   completedAt: t.completed_at || null,
+                  confirmationOwner,
+                  isPersonalTask: true,
                 })
               }
               if (t.is_r1) {
@@ -3628,11 +3719,43 @@ export default function CommonViewPage() {
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
                   finishPeriod: t.finish_period || null,
+                  oneHMarker: t.one_h_marker || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
                   startDate: t.start_date || null,
                   createdAt: t.created_at || null,
                   completedAt: t.completed_at || null,
+                  confirmationOwner,
+                })
+              }
+              if (
+                !t.is_personal &&
+                !isDone &&
+                normalizedTaskStatus === "WAITING_CONFIRMATION" &&
+                confirmationOwner
+              ) {
+                allData.personal.push({
+                  taskId: t.id,
+                  title: t.title,
+                  person: assigneeLabel,
+                  assignees: assigneeNames,
+                  userId: assigneeId || undefined,
+                  date: taskDate,
+                  note: t.description || undefined,
+                  departmentId,
+                  status: normalizedTaskStatus,
+                  isDone: false,
+                  fastTaskOrder: t.fast_task_order ?? undefined,
+                  finishPeriod: t.finish_period || null,
+                  oneHReportSlot: normalizeOneHReportSlot(t.one_h_report_slot),
+                  oneHMarker: t.one_h_marker || null,
+                  isDeadlineImportant: Boolean(t.is_deadline_important),
+                  dueDate: t.due_date || null,
+                  startDate: t.start_date || null,
+                  createdAt: t.created_at || null,
+                  completedAt: null,
+                  confirmationOwner,
+                  isPersonalTask: false,
                 })
               }
             }
@@ -4176,11 +4299,14 @@ export default function CommonViewPage() {
       if (!entry.taskId || savingOneHMarkerTaskId) return
       const previousMarker = entry.oneHMarker || null
       const applyMarker = (marker: OneHMarker | null) => {
+        const updateItems = <T extends FastTaskItemMeta>(items: T[]) =>
+          items.map((item) => item.taskId === entry.taskId ? { ...item, oneHMarker: marker } : item)
         setCommonData((current) => ({
           ...current,
-          oneH: current.oneH.map((item) =>
-            item.taskId === entry.taskId ? { ...item, oneHMarker: marker } : item
-          ),
+          blocked: updateItems(current.blocked),
+          oneH: updateItems(current.oneH),
+          personal: updateItems(current.personal),
+          r1: updateItems(current.r1),
         }))
       }
 
@@ -4343,6 +4469,12 @@ export default function CommonViewPage() {
     }
     const matchesColorFilter = (entry: FastTaskEntry) =>
       colorFilter === "all" || getCommonTaskColor(entry) === colorFilter
+    const matchesOneHMarkerFilter = (entry: FastTaskEntry) => {
+      const marker = entry.oneHMarker || null
+      if (oneHMarkerFilter === "all") return true
+      if (oneHMarkerFilter === "none") return marker === null
+      return marker === oneHMarkerFilter
+    }
     const matchesTaskFocusFilter = (entry: FastTaskEntry) => {
       if (taskFocusFilter === "new") {
         const category = getCommonTaskNewCategory(entry)
@@ -4372,6 +4504,7 @@ export default function CommonViewPage() {
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
       .filter(matchesTaskFocusFilter)
       .filter(matchesColorFilter)
+      .filter(matchesOneHMarkerFilter)
       .map(narrowAssigneesForSelectedUser)
     const oneH = commonData.oneH
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -4379,6 +4512,7 @@ export default function CommonViewPage() {
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
       .filter(matchesTaskFocusFilter)
       .filter(matchesColorFilter)
+      .filter(matchesOneHMarkerFilter)
       .map(narrowAssigneesForSelectedUser)
     const personal = commonData.personal
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -4386,6 +4520,7 @@ export default function CommonViewPage() {
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
       .filter(matchesTaskFocusFilter)
       .filter(matchesColorFilter)
+      .filter(matchesOneHMarkerFilter)
       .map(narrowAssigneesForSelectedUser)
     const r1 = commonData.r1
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -4393,6 +4528,7 @@ export default function CommonViewPage() {
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
       .filter(matchesTaskFocusFilter)
       .filter(matchesColorFilter)
+      .filter(matchesOneHMarkerFilter)
       .map(narrowAssigneesForSelectedUser)
     const external = commonData.external
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -4487,7 +4623,7 @@ export default function CommonViewPage() {
       fullyCoveredDates,
       hiddenUsersByDate,
     }
-  }, [colorFilter, commonData, newTaskCategoryFilters, selectedCommonUserId, selectedDates, taskFocusFilter, users, weekISOs])
+  }, [colorFilter, commonData, newTaskCategoryFilters, oneHMarkerFilter, selectedCommonUserId, selectedDates, taskFocusFilter, users, weekISOs])
 
   const allUsersLeaveByDate = React.useMemo(() => {
     const datesToUse = selectedDates.size ? Array.from(selectedDates) : weekISOs
@@ -4910,6 +5046,18 @@ export default function CommonViewPage() {
                   typeof item.createdAt === "string" ? item.createdAt : typeof item.created_at === "string" ? item.created_at : undefined,
                 status: typeof item.status === "string" ? item.status : undefined,
                 isDone: Boolean(item.isDone),
+                confirmationOwner:
+                  item.confirmationOwner === "KA" || item.confirmationOwner === "GENT"
+                    ? item.confirmationOwner
+                    : item.confirmation_owner === "KA" || item.confirmation_owner === "GENT"
+                      ? item.confirmation_owner
+                      : null,
+                isPersonalTask:
+                  typeof item.isPersonalTask === "boolean"
+                    ? item.isPersonalTask
+                    : typeof item.is_personal_task === "boolean"
+                      ? item.is_personal_task
+                      : true,
               }) as PrintTask
           )
 
@@ -4918,14 +5066,24 @@ export default function CommonViewPage() {
         ...ONE_H_SLOT_ROWS.map((slot) => ({
           id: slot.id,
           label: slot.label,
-          items: normalizeTasks(payload.items.oneH).filter((item) =>
-            slot.slot === null
-              ? !normalizeOneHReportSlot(item.oneHReportSlot)
-              : normalizeOneHReportSlot(item.oneHReportSlot) === slot.slot
-          ),
+          items: normalizeTasks(payload.items.oneH)
+            .filter((item) => !isRoutedWaitingConfirmation(item))
+            .filter((item) =>
+              slot.slot === null
+                ? !normalizeOneHReportSlot(item.oneHReportSlot)
+                : normalizeOneHReportSlot(item.oneHReportSlot) === slot.slot
+            ),
         })),
-        { id: "blocked", label: "BLL", items: normalizeTasks(payload.items.blocked) },
-        { id: "r1", label: "R1=1H", items: normalizeTasks(payload.items.r1) },
+        {
+          id: "blocked",
+          label: "BLL",
+          items: normalizeTasks(payload.items.blocked).filter((item) => !isRoutedWaitingConfirmation(item)),
+        },
+        {
+          id: "r1",
+          label: "R1=1H",
+          items: normalizeTasks(payload.items.r1).filter((item) => !isRoutedWaitingConfirmation(item)),
+        },
         ...PERSONAL_ROW_IDS.map((id) => ({
           id,
           label: `P: ${getPersonalRowGroup(id)}`,
@@ -4951,8 +5109,11 @@ export default function CommonViewPage() {
         const startDate = normalizeCommonDateOnly(item.startDate || item.date)
         const dueDate = normalizeCommonDateOnly(item.dueDate)
         if (!startDate && !dueDate) return ""
-        const chip = (value: string, due = false) =>
-          `<span class="print-task-date${due ? " due" : ""}">${escapePrintHtml(formatDateHuman(value))}</span>`
+        const chip = (value: string, due = false) => {
+          const dueToday = due && value === targetIso
+          const label = dueToday ? "SOT" : formatDateHuman(value)
+          return `<span class="print-task-date${due ? " due" : ""}${dueToday ? " today" : ""}">${escapePrintHtml(label)}</span>`
+        }
         return `<div class="print-task-dates">${startDate ? chip(startDate) : ""}${dueDate ? chip(dueDate, true) : ""}</div>`
       }
 
@@ -4979,6 +5140,10 @@ export default function CommonViewPage() {
                 const taskBadges = isMeetingTable
                   ? ""
                   : `<span class="print-task-badge period">${escapePrintHtml(getCommonTaskPeriodLabel((item as PrintTask).finishPeriod))}</span>${
+                      isWaitingConfirmationTask(item as PrintTask)
+                        ? '<span class="print-task-badge wfc">WFC</span>'
+                        : ""
+                    }${
                       (item as PrintTask).oneHMarker
                         ? `<span class="print-task-badge marker">${escapePrintHtml(getOneHMarkerLabel((item as PrintTask).oneHMarker))}</span>`
                         : ""
@@ -5013,6 +5178,9 @@ export default function CommonViewPage() {
   .one-h-print-checklist-day-label { grid-column:1 / -1; margin:0 0 4px; font-weight:800; }
   .one-h-print-checklist-separator { font-size:13px; font-weight:900; line-height:8px; }
   .one-h-print-checklist-description { color:#475569; }
+  .one-h-marker-legend { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 10px; padding:6px 9px; border:1px solid #fca5a5; border-radius:5px; background:#fef2f2; color:#7f1d1d; font-size:9px; font-weight:700; }
+  .one-h-marker-legend b { color:#dc2626; font-size:14px; font-weight:900; }
+  .one-h-marker-legend i { color:#dc2626; font-size:20px; font-style:normal; font-weight:900; line-height:1; }
   table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9px; line-height: 1.2; }
   table + table { margin-top: 12px; }
   th, td { border: 1px solid #000; padding: 4px 5px; vertical-align: top; overflow-wrap: anywhere; text-align: left; font-weight: 400; }
@@ -5029,12 +5197,15 @@ export default function CommonViewPage() {
   .print-task-dates { position:absolute; left:5px; right:5px; bottom:4px; display:flex; align-items:flex-end; justify-content:space-between; gap:4px; white-space:nowrap; }
   .print-task-date { display:inline-flex; box-sizing:border-box; height:18px; align-items:center; border:1px solid #93c5fd; border-radius:3px; background:#eff6ff; color:#1d4ed8; padding:1px 4px; font-weight:800; line-height:1; }
   .print-task-date.due { border:3px solid #b91c1c; padding:0 2px; }
+  .print-task-date.due.today { height:20px; border:1px solid #991b1b; background:#dc2626; color:#fff; padding:2px 7px; font-size:11px; font-weight:900; }
   .print-task-badge { display:inline-block; margin:0 4px 3px 0; padding:2px 5px; border-radius:999px; font-size:8px; font-weight:800; line-height:1; white-space:nowrap; }
   .print-task-badge.period { background:#e0f2fe; border:1px solid #bae6fd; color:#0369a1; }
-  .print-task-badge.marker { background:#fff7ed; border:1px solid #fdba74; color:#9a3412; }
+  .print-task-badge.wfc { background:#ffedd5; border:1px solid #fb923c; color:#c2410c; }
+  .print-task-badge.marker { padding:2px 7px; background:#fef2f2; border:1px solid #fca5a5; color:#dc2626; font-size:13px; font-weight:900; }
 </style></head><body>
   <div class="print-header"><div></div><div class="print-title">1H SHTYPI — ${escapePrintHtml(reportDate)}</div><div class="print-date">${escapePrintHtml(formatDateTimeDMY(new Date()))}</div></div>
   ${oneHPrintChecklistsHtml(deliveryDate)}
+  ${oneHMarkerLegendHtml()}
   <table><colgroup><col class="print-number-column"><col class="print-label-column"><col span="6"></colgroup><thead><tr><th>NR</th><th>LLoji dhe sloti</th><th colspan="6">Tasks</th></tr></thead><tbody>${buildTableRows(sortedTaskRows)}</tbody></table>
   <table><colgroup><col class="print-number-column"><col class="print-label-column"><col span="6"></colgroup><thead><tr><th>NR</th><th>LLoji</th><th colspan="6">Meeting</th></tr></thead><tbody>${buildTableRows(meetingRows, true)}</tbody></table>
 </body></html>`
@@ -5258,17 +5429,32 @@ export default function CommonViewPage() {
         externalHoliday: filtered.externalHoliday.filter((x) => x.date === iso),
         waitingClient: sortTasksByOrder(
           [...filtered.blocked, ...filtered.oneH, ...filtered.personal, ...filtered.r1].filter(
-            (x) => x.date === iso && (x.status || "").toUpperCase() === "WAITING_CLIENT"
+            (x) => x.date === iso && isWaitingClientTask(x)
           ),
           false
         ),
-        blocked: sortTasksByOrder(filtered.blocked.filter((x) => x.date === iso && (x.status || "").toUpperCase() !== "WAITING_CLIENT"), false),
-        oneH: sortTasksByOrder(filtered.oneH.filter((x) => x.date === iso && (x.status || "").toUpperCase() !== "WAITING_CLIENT"), false),
-        personal: sortTasksByOrder(filtered.personal.filter((x) => x.date === iso && (x.status || "").toUpperCase() !== "WAITING_CLIENT"), false),
+        blocked: sortTasksByOrder(
+          filtered.blocked.filter(
+            (x) => x.date === iso && !isWaitingClientTask(x) && !isRoutedWaitingConfirmation(x)
+          ),
+          false
+        ),
+        oneH: sortTasksByOrder(
+          filtered.oneH.filter(
+            (x) => x.date === iso && !isWaitingClientTask(x) && !isRoutedWaitingConfirmation(x)
+          ),
+          false
+        ),
+        personal: sortTasksByOrder(filtered.personal.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
         external: sortByTime(filtered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         internal: sortByTime(filtered.internal.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         bz: sortByTime(filtered.bz.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
-        r1: sortTasksByOrder(filtered.r1.filter((x) => x.date === iso && (x.status || "").toUpperCase() !== "WAITING_CLIENT"), false),
+        r1: sortTasksByOrder(
+          filtered.r1.filter(
+            (x) => x.date === iso && !isWaitingClientTask(x) && !isRoutedWaitingConfirmation(x)
+          ),
+          false
+        ),
         problems: [
           ...filtered.problems.filter((x) => !x.everyday && x.date === iso),
           ...dailyProblems,
@@ -5363,7 +5549,7 @@ export default function CommonViewPage() {
           (e: OneHItem | R1Item) =>
             `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${
               isOneHSlotRowId(rowId) ? `[${getOneHReportSlotLabel((e as OneHItem).oneHReportSlot)}] ` : ""
-            }[${getCommonTaskPeriodLabel(e.finishPeriod)}] ${
+            }[${getCommonTaskPeriodLabel(e.finishPeriod)}] ${isWaitingConfirmationTask(e) ? "[WFC] " : ""}${
               isOneHSlotRowId(rowId) && (e as OneHItem).oneHMarker
                 ? `[${getOneHMarkerLabel((e as OneHItem).oneHMarker)}] `
                 : ""
@@ -5372,7 +5558,9 @@ export default function CommonViewPage() {
       }
       if (isPersonalRowId(rowId)) {
         return (entries as PersonalItem[]).map(
-          (e) => `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${commonPrintPersonalTaskTitle(e)}${assigneesSuffix(e)}`
+          (e) => `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. `
+            + `[${getCommonTaskPeriodLabel(e.finishPeriod)}] ${isWaitingConfirmationTask(e) ? "[WFC] " : ""}`
+            + `${commonPrintPersonalTaskTitle(e)}${assigneesSuffix(e)}`
         )
       }
       if (rowId === "external") {
@@ -6844,6 +7032,7 @@ export default function CommonViewPage() {
     personal: "JANË DETYRA TË VENDOSURA NGA GA/KA DHE PERGJEGJESIT BARAZOHEMI VETËM ME TA ORA PËR BZ: 16:00",
     personalGA: "DETYRA PERSONALE ME GA.",
     personalKA: "DETYRA PERSONALE ME KA.",
+    personalGENT: "DETYRA PERSONALE ME GENTIN.",
     personalPX: "DETYRA PERSONALE ME PX TJERË.",
     external: "Takime externe",
     internal: "Takime interne",
@@ -7023,8 +7212,6 @@ export default function CommonViewPage() {
     const includeR1 = typeFilters.size === 0 || typeFilters.has("r1")
     const includeBlocked = typeFilters.size === 0 || typeFilters.has("blocked")
     const includePersonal = typeFilters.size === 0 || typeFilters.has("personal")
-    const isWaitingClientTask = (entry: FastTaskEntry) =>
-      (entry.status || "").trim().toUpperCase() === "WAITING_CLIENT"
     const waitingClientSource = sortTasksByOrder(
       [
         ...(includeBlocked ? filtered.blocked : []),
@@ -7034,8 +7221,12 @@ export default function CommonViewPage() {
       ].filter(isWaitingClientTask),
       isMultiDate
     )
-    const activeOneH = filtered.oneH.filter((entry) => !isWaitingClientTask(entry))
-    const activeR1 = filtered.r1.filter((entry) => !isWaitingClientTask(entry))
+    const activeOneH = filtered.oneH.filter(
+      (entry) => !isWaitingClientTask(entry) && !isRoutedWaitingConfirmation(entry)
+    )
+    const activeR1 = filtered.r1.filter(
+      (entry) => !isWaitingClientTask(entry) && !isRoutedWaitingConfirmation(entry)
+    )
     const oneHTotal = activeOneH.length
     const r1Total = activeR1.length
     const oneHDone = activeOneH.filter((x) => x.isDone).length
@@ -7143,7 +7334,12 @@ export default function CommonViewPage() {
       entryDate: x.date,
     }))
 
-    const blockedSource = sortTasksByOrder(filtered.blocked.filter((entry) => !isWaitingClientTask(entry)), isMultiDate)
+    const blockedSource = sortTasksByOrder(
+      filtered.blocked.filter(
+        (entry) => !isWaitingClientTask(entry) && !isRoutedWaitingConfirmation(entry)
+      ),
+      isMultiDate
+    )
     const blockedItems: SwimlaneCell[] = blockedSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
@@ -7159,6 +7355,7 @@ export default function CommonViewPage() {
       fastTaskOrder: x.fastTaskOrder,
       finishPeriod: x.finishPeriod,
       oneHReportSlot: x.oneHReportSlot,
+      oneHMarker: x.oneHMarker,
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
@@ -7196,7 +7393,8 @@ export default function CommonViewPage() {
 
     const personalSource = sortTasksByOrder(filtered.personal.filter((entry) => !isWaitingClientTask(entry)), isMultiDate)
     const buildPersonalItems = (group: PersonalTaskGroup): SwimlaneCell[] => {
-      const groupSource = personalSource.filter((item) => getPersonalTaskGroup(item) === group)
+      const rowId = PERSONAL_ROW_IDS.find((candidate) => getPersonalRowGroup(candidate) === group)
+      const groupSource = rowId ? personalTasksForRow(personalSource, rowId) : []
       return groupSource.map((x) => ({
         title: x.title,
         assignees: x.assignees || (x.person ? [x.person] : []),
@@ -7211,6 +7409,7 @@ export default function CommonViewPage() {
         departmentId: x.departmentId,
         fastTaskOrder: x.fastTaskOrder,
         finishPeriod: x.finishPeriod,
+        oneHMarker: x.oneHMarker,
         entryDate: x.date,
         isDeadlineImportant: x.isDeadlineImportant,
         dueDate: x.dueDate,
@@ -7223,6 +7422,7 @@ export default function CommonViewPage() {
     const personalItemsByGroup: Record<PersonalTaskGroup, SwimlaneCell[]> = {
       GA: buildPersonalItems("GA"),
       KA: buildPersonalItems("KA"),
+      GENT: buildPersonalItems("GENT"),
       PX: buildPersonalItems("PX"),
     }
 
@@ -7299,6 +7499,7 @@ export default function CommonViewPage() {
       fastTaskOrder: x.fastTaskOrder,
       finishPeriod: x.finishPeriod,
       oneHReportSlot: x.oneHReportSlot,
+      oneHMarker: x.oneHMarker,
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
@@ -7376,6 +7577,7 @@ export default function CommonViewPage() {
       fastTaskOrder: entry.fastTaskOrder,
       finishPeriod: entry.finishPeriod,
       oneHReportSlot: entry.oneHReportSlot,
+      oneHMarker: entry.oneHMarker,
       entryDate: entry.date,
       isDeadlineImportant: entry.isDeadlineImportant,
       dueDate: entry.dueDate,
@@ -7513,6 +7715,7 @@ export default function CommonViewPage() {
     const personalHeaderBreakdownByGroup: Record<PersonalTaskGroup, ReturnType<typeof buildFastHeaderBreakdown>> = {
       GA: buildFastHeaderBreakdown(personalItemsByGroup.GA),
       KA: buildFastHeaderBreakdown(personalItemsByGroup.KA),
+      GENT: buildFastHeaderBreakdown(personalItemsByGroup.GENT),
       PX: buildFastHeaderBreakdown(personalItemsByGroup.PX),
     }
 
@@ -7722,17 +7925,17 @@ export default function CommonViewPage() {
         externalHoliday: filtered.externalHoliday.filter((x) => x.date === iso),
         waitingClient: sortTasksByOrder(
           [...filtered.blocked, ...filtered.oneH, ...filtered.personal, ...filtered.r1].filter(
-            (x) => x.date === iso && (x.status || "").toUpperCase() === "WAITING_CLIENT"
+            (x) => x.date === iso && isWaitingClientTask(x)
           ),
           false
         ),
-        blocked: sortTasksByOrder(filtered.blocked.filter((x) => x.date === iso && (x.status || "").toUpperCase() !== "WAITING_CLIENT"), false),
-        oneH: sortTasksByOrder(filtered.oneH.filter((x) => x.date === iso && (x.status || "").toUpperCase() !== "WAITING_CLIENT"), false),
-        personal: sortTasksByOrder(filtered.personal.filter((x) => x.date === iso && (x.status || "").toUpperCase() !== "WAITING_CLIENT"), false),
+        blocked: sortTasksByOrder(filtered.blocked.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
+        oneH: sortTasksByOrder(filtered.oneH.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
+        personal: sortTasksByOrder(filtered.personal.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
         external: sortByTime(filtered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         internal: sortByTime(filtered.internal.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         bz: sortByTime(filtered.bz.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
-        r1: sortTasksByOrder(filtered.r1.filter((x) => x.date === iso && (x.status || "").toUpperCase() !== "WAITING_CLIENT"), false),
+        r1: sortTasksByOrder(filtered.r1.filter((x) => x.date === iso && !isWaitingClientTask(x)), false),
         problems: [
           ...filtered.problems.filter((x) => !x.everyday && x.date === iso),
           ...dailyProblems,
@@ -8055,8 +8258,10 @@ export default function CommonViewPage() {
                           {formatFastTaskCardDate(item.startDate || item.entryDate) ? (
                             <span>{formatFastTaskCardDate(item.startDate || item.entryDate)}</span>
                           ) : null}
-                          {formatFastTaskCardDate(item.dueDate) ? (
-                            <span className="due">{formatFastTaskCardDate(item.dueDate)}</span>
+                          {formatFastTaskCardDate(item.dueDate, item.entryDate) ? (
+                            <span className={isFastTaskDateOnTarget(item.dueDate, item.entryDate) ? "due today" : "due"}>
+                              {formatFastTaskCardDate(item.dueDate, item.entryDate)}
+                            </span>
                           ) : null}
                         </div>
                       </div>
@@ -8260,7 +8465,8 @@ export default function CommonViewPage() {
         .hide-when-all-days { display: none !important; }
         .swimlane-print-title { display: none; }
         .single-day-print-table { display: none; }
-        .one-h-print-checklists { display: none; }
+        .one-h-print-checklists,
+        .one-h-marker-legend { display: none; }
         .print-header,
         .print-footer {
           display: none;
@@ -8404,6 +8610,35 @@ export default function CommonViewPage() {
             gap: 12px;
             margin: 0 0 12px;
             page-break-inside: avoid;
+          }
+          .one-h-marker-legend {
+            display: flex !important;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin: 0 0 8px;
+            padding: 5px 7px;
+            border: 1px solid #fca5a5 !important;
+            border-radius: 5px;
+            background: #fef2f2 !important;
+            color: #7f1d1d !important;
+            font-size: 8px;
+            font-weight: 700;
+            page-break-inside: avoid;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          .one-h-marker-legend b {
+            color: #dc2626 !important;
+            font-size: 13px;
+            font-weight: 900;
+          }
+          .one-h-marker-legend i {
+            color: #dc2626 !important;
+            font-size: 19px;
+            font-style: normal;
+            font-weight: 900;
+            line-height: 1;
           }
           .one-h-print-checklist-title {
             background: #eef2ff !important;
@@ -8549,6 +8784,15 @@ export default function CommonViewPage() {
             border: 3px solid #b91c1c !important;
             padding: 0 2px;
           }
+          .single-day-print-task-dates span.due.today {
+            height: 20px;
+            border: 1px solid #991b1b !important;
+            background: #dc2626 !important;
+            color: #ffffff !important;
+            padding: 2px 7px;
+            font-size: 11px;
+            font-weight: 900;
+          }
           /* A one-day Common View printout is the compact fast-task report. */
           .single-day-print .swimlane-row:not(
             .swimlane-row-waitingClient,
@@ -8562,6 +8806,7 @@ export default function CommonViewPage() {
             .swimlane-row-r1,
             .swimlane-row-personalGA,
             .swimlane-row-personalKA,
+            .swimlane-row-personalGENT,
             .swimlane-row-personalPX
           ) {
             display: none !important;
@@ -10173,6 +10418,16 @@ export default function CommonViewPage() {
           border: 3px solid #b91c1c;
           padding: 0 4px;
         }
+        .swimlane-task-date.due.today {
+          height: 26px;
+          border: 1px solid #991b1b;
+          background: #dc2626;
+          color: #ffffff;
+          padding: 3px 9px;
+          font-size: 14px;
+          font-weight: 900;
+          box-shadow: 0 1px 3px rgba(153, 27, 27, 0.3);
+        }
         .swimlane-subtitle {
           font-size: 12px;
           color: var(--swim-muted);
@@ -10622,20 +10877,37 @@ export default function CommonViewPage() {
           flex: 0 0 auto;
           white-space: nowrap;
         }
+        .wfc-indicator {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 0;
+          height: 20px;
+          padding: 0 7px;
+          border-radius: 999px;
+          background: #ffedd5;
+          border: 1px solid #fb923c;
+          color: #c2410c;
+          font-weight: 800;
+          font-size: 10px;
+          line-height: 1;
+          flex: 0 0 auto;
+          white-space: nowrap;
+        }
         .oneh-marker-select {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          min-width: 42px;
-          max-width: 62px;
-          height: 20px;
-          padding: 0 4px;
+          min-width: 58px;
+          max-width: 64px;
+          height: 22px;
+          padding: 0 2px;
           border-radius: 999px;
-          background: #fff7ed;
-          border: 1px solid #fdba74;
-          color: #9a3412;
-          font-weight: 800;
-          font-size: 10px;
+          background: #fef2f2;
+          border: 1px solid #fca5a5;
+          color: #dc2626;
+          font-weight: 900;
+          font-size: 16px;
           line-height: 1;
           flex: 0 0 auto;
           cursor: pointer;
@@ -10643,6 +10915,11 @@ export default function CommonViewPage() {
         .oneh-marker-select:disabled {
           cursor: wait;
           opacity: 0.65;
+        }
+        .oneh-marker-select option {
+          color: #dc2626;
+          font-weight: 900;
+          font-size: 16px;
         }
         .oneh-slot-indicator {
           display: inline-flex;
@@ -11055,6 +11332,12 @@ export default function CommonViewPage() {
           border-color: rgba(255, 255, 255, 0.45);
           color: #ffffff;
           box-shadow: none;
+        }
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-task-date.due.today {
+          background: #dc2626;
+          border-color: #991b1b;
+          color: #ffffff;
+          box-shadow: 0 1px 3px rgba(127, 29, 29, 0.45);
         }
         .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-avatar,
         .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .fast-task-order-badge,
@@ -12056,6 +12339,24 @@ export default function CommonViewPage() {
                 </button>
               ))}
             </div>
+          </div>
+          <div className="toolbar-group">
+            <label className="flex items-center gap-2 text-sm font-semibold">
+              Symbol
+              <select
+                className="input"
+                value={oneHMarkerFilter}
+                onChange={(event) => setOneHMarkerFilter(event.target.value as OneHMarkerFilter)}
+                aria-label="Filter tasks by symbol"
+                style={{ width: "125px", color: "#dc2626", fontWeight: 800 }}
+              >
+                <option value="all">All</option>
+                <option value="none">No symbol</option>
+                {ONE_H_MARKER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
           </div>
           <div style={{ position: "relative", display: "inline-flex", alignItems: "center", width: "auto" }}>
             <input
@@ -14822,10 +15123,8 @@ export default function CommonViewPage() {
                                     <span className="oneh-slot-indicator">{getOneHReportSlotLabel((e as OneHItem | R1Item).oneHReportSlot)}</span>
                                   ) : null}
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
-                                  {isOneHSlotRowId(row.id) ? renderOneHMarkerControl(e as OneHItem) : null}
-                                  {e.isDeadlineImportant ? (
-                                    <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
-                                  ) : null}
+                                  {renderWfcIndicator(e)}
+                                  {renderOneHMarkerControl(e)}
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
@@ -14888,9 +15187,8 @@ export default function CommonViewPage() {
                                     <span className="oneh-slot-indicator">{getOneHReportSlotLabel(e.oneHReportSlot)}</span>
                                   ) : null}
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
-                                  {e.isDeadlineImportant ? (
-                                    <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
-                                  ) : null}
+                                  {renderWfcIndicator(e)}
+                                  {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(e) : null}
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
@@ -14923,9 +15221,8 @@ export default function CommonViewPage() {
                                   <span>
                                   <span className="week-table-line-number">{idx + 1}.</span>
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
-                                  {e.isDeadlineImportant ? (
-                                    <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
-                                  ) : null}
+                                  {renderWfcIndicator(e)}
+                                  {renderOneHMarkerControl(e)}
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
@@ -15215,6 +15512,7 @@ export default function CommonViewPage() {
               </div>
             </div>
             <OneHPrintChecklists reportDay={new Date(`${calendarDateIso}T12:00:00`)} />
+            <OneHMarkerLegend />
             <table className="single-day-print-table">
               <colgroup>
                 <col className="single-day-print-number-column" />
@@ -15486,12 +15784,8 @@ export default function CommonViewPage() {
                                             {getCommonTaskPeriodLabel(cell.finishPeriod)}
                                           </span>
                                         ) : null}
-                                        {isOneHSlotRowId(row.id) ? renderOneHMarkerControl(cell) : null}
-                                        {isFastTaskRowId(row.id) && cell.isDeadlineImportant ? (
-                                          <span className="deadline-indicator" title={cell.dueDate ? `Deadline ${formatDateHuman(cell.dueDate)}` : "Deadline important"}>
-                                            {getDeadlineIndicatorLabel(cell.dueDate)}
-                                          </span>
-                                        ) : null}
+                                        {isFastTaskRowId(row.id) ? renderWfcIndicator(cell) : null}
+                                        {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(cell) : null}
                                         {isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title) ? (
                                           <span className="time-indicator" title="08:00 task">
                                             08:00
@@ -15525,12 +15819,8 @@ export default function CommonViewPage() {
                                             {getCommonTaskPeriodLabel(cell.finishPeriod)}
                                           </span>
                                         ) : null}
-                                        {isOneHSlotRowId(row.id) ? renderOneHMarkerControl(cell) : null}
-                                        {isFastTaskRowId(row.id) && cell.isDeadlineImportant ? (
-                                          <span className="deadline-indicator" title={cell.dueDate ? `Deadline ${formatDateHuman(cell.dueDate)}` : "Deadline important"}>
-                                            {getDeadlineIndicatorLabel(cell.dueDate)}
-                                          </span>
-                                        ) : null}
+                                        {isFastTaskRowId(row.id) ? renderWfcIndicator(cell) : null}
+                                        {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(cell) : null}
                                         {isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title) ? (
                                           <span className="time-indicator" title="08:00 task">
                                             08:00
@@ -15616,8 +15906,10 @@ export default function CommonViewPage() {
                                       ? formatFastTaskCardDate(cell.startDate || cell.entryDate)
                                       : null
                                     const taskDueDate = showSeparateTaskDates
-                                      ? formatFastTaskCardDate(cell.dueDate)
+                                      ? formatFastTaskCardDate(cell.dueDate, cell.entryDate)
                                       : null
+                                    const taskDueDateIsToday = showSeparateTaskDates &&
+                                      isFastTaskDateOnTarget(cell.dueDate, cell.entryDate)
                                     if (!showSubtitle && !showDate && !isNoteOpen) return null
                                     return (
                                       <div className="swimlane-meta">
@@ -15634,7 +15926,10 @@ export default function CommonViewPage() {
                                               </span>
                                             ) : null}
                                             {taskDueDate ? (
-                                              <span className="swimlane-task-date due" title="Due date">
+                                              <span
+                                                className={`swimlane-task-date due${taskDueDateIsToday ? " today" : ""}`}
+                                                title="Due date"
+                                              >
                                                 {taskDueDate}
                                               </span>
                                             ) : null}

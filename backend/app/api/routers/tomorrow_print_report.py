@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, require_manager_or_admin
+from app.api.deps import get_current_user, get_db, require_manager_or_admin
 from app.models.tomorrow_print_report_delivery import TomorrowPrintReportDelivery
 from app.models.tomorrow_print_report_settings import TomorrowPrintReportSettings
 from app.models.user import User
@@ -117,7 +117,7 @@ async def update_settings(payload: SettingsPayload, db: AsyncSession = Depends(g
 async def preview(
     report_date: date | None = None,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_manager_or_admin),
+    _: User = Depends(get_current_user),
 ) -> dict:
     delivery_date = report_date or datetime.now(report_timezone()).date()
     return await build_tomorrow_print_report(delivery_date, db=db)

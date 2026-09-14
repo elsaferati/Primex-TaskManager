@@ -4044,9 +4044,11 @@ async def send_section_report(
     report_day: date,
     sections: list[dict[str, str]],
     tomorrow: date | None = None,
+    extra_attachments: list[tuple[str, bytes, str]] | None = None,
 ) -> dict[str, Any]:
     gmail = GmailService()
     attachments = section_report_attachments(subject, report_code, report_day, sections, tomorrow=tomorrow)
+    attachments.extend(extra_attachments or [])
     return await gmail.send_verified(subject, recipients, plain_text, html_body, attachments=attachments)
 
 
@@ -4056,10 +4058,20 @@ async def send_meetings_report(
     plain_text: str,
     html_body: str,
     *,
+    db: AsyncSession,
     report_day: date,
     tomorrow: date,
     sections: list[dict[str, str]],
 ) -> dict[str, Any]:
+    # Import locally because the shared GA renderer also reuses M3 table helpers.
+    from app.services.one_h_ga_attachments import render_ga_time_table_png
+
+    week_start = report_day - timedelta(days=report_day.weekday())
+    ga_time_table_attachment = (
+        f"GA-Time-Table-{week_start:%Y-%m-%d}.png",
+        await render_ga_time_table_png(db, report_day),
+        "image/png",
+    )
     return await send_section_report(
         subject,
         recipients,
@@ -4069,4 +4081,5 @@ async def send_meetings_report(
         report_day=report_day,
         tomorrow=tomorrow,
         sections=sections,
+        extra_attachments=[ga_time_table_attachment],
     )

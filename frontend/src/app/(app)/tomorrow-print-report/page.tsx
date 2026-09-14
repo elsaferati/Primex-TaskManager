@@ -29,6 +29,16 @@ type Delivery = {
   last_error?: string | null
 }
 type Preview = { subject: string; target_date: string; html: string }
+type TaskMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG"
+type TaskMarkerFilter = "all" | "none" | TaskMarker
+
+const taskMarkerOptions: Array<{ value: TaskMarker; label: string }> = [
+  { value: "EXCLAMATION", label: "!" },
+  { value: "QUESTION", label: "?" },
+  { value: "KA", label: "KA" },
+  { value: "GENT", label: "GENT" },
+  { value: "FLAG", label: "⚑" },
+]
 
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
@@ -60,15 +70,17 @@ function formatDateTime(value?: string | null) {
 export function PrintReportPage({ today = false }: { today?: boolean }) {
   const API = today ? "/today-print-report" : "/tomorrow-print-report"
   const reportName = today ? "1H SHTYPI Today" : "1H SHTYPI Tomorrow"
-  const { apiFetch, user } = useAuth()
+  const { apiFetch, user, loading: authLoading } = useAuth()
   const [settings, setSettings] = React.useState<SettingsState | null>(null)
   const [recipientInputs, setRecipientInputs] = React.useState({ to: "", cc: "", bcc: "" })
   const [preview, setPreview] = React.useState<Preview | null>(null)
+  const [markerFilter, setMarkerFilter] = React.useState<TaskMarkerFilter>("all")
   const [history, setHistory] = React.useState<Delivery[]>([])
   const [loading, setLoading] = React.useState(true)
   const [saving, setSaving] = React.useState(false)
   const [sending, setSending] = React.useState(false)
   const previewRef = React.useRef<HTMLDivElement | null>(null)
+  const previewFrameRef = React.useRef<HTMLIFrameElement | null>(null)
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
 
   const applySettings = React.useCallback((next: SettingsState) => {
@@ -81,7 +93,10 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
   }, [])
 
   const load = React.useCallback(async () => {
-    if (!canManage) return
+    if (!canManage) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const [settingsResponse, historyResponse] = await Promise.all([apiFetch(`${API}/settings`), apiFetch(`${API}/history`)])
@@ -141,6 +156,124 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
     }
   }
 
+  const applyPreviewMarkerFilter = React.useCallback(() => {
+    const document = previewFrameRef.current?.contentDocument
+    if (!document) return
+    document.querySelectorAll<HTMLTableRowElement>('tr[data-task-card-row="content"]').forEach((contentRow) => {
+      const dateRow = contentRow.nextElementSibling
+      const dateCells = dateRow?.matches('tr[data-task-card-row="dates"]')
+        ? Array.from(dateRow.cells).filter((cell): cell is HTMLTableCellElement => cell.tagName === "TD")
+        : []
+      const taskCells = Array.from(contentRow.cells).filter(
+        (cell): cell is HTMLTableCellElement => cell.tagName === "TD"
+      )
+
+      taskCells.forEach((cell, index) => {
+        const marker = cell.dataset.taskMarker || ""
+        const isTaskCard = Boolean(cell.dataset.taskId)
+        const matches = markerFilter === "all" || (
+          isTaskCard && (markerFilter === "none" ? !marker : marker === markerFilter)
+        )
+        cell.style.display = matches ? "" : "none"
+        cell.dataset.taskMarkerFilterHidden = matches ? "false" : "true"
+        if (dateCells[index]) dateCells[index].style.display = matches ? "" : "none"
+
+        // Clear the old content-only filtering style from previews generated
+        // before full-card filtering was introduced.
+        const content = cell.querySelector<HTMLElement>("[data-task-marker-filter-content]")
+        if (content) content.style.visibility = ""
+      })
+    })
+  }, [markerFilter])
+
+  const setupPreviewMarkerControls = React.useCallback(() => {
+    const document = previewFrameRef.current?.contentDocument
+    if (!document) return
+
+    document.querySelectorAll<HTMLElement>("td[data-task-id]").forEach((cell) => {
+      if (cell.querySelector("select[data-task-marker-control]")) return
+      const taskId = cell.dataset.taskId
+      if (!taskId) return
+
+      const content = document.createElement("div")
+      content.dataset.taskMarkerFilterContent = "true"
+      content.style.display = "contents"
+      while (cell.firstChild) content.appendChild(cell.firstChild)
+      cell.appendChild(content)
+
+      const existingBadge = cell.querySelector<HTMLElement>('[data-task-badge="one-h-marker"]')
+      existingBadge?.remove()
+
+      const select = document.createElement("select")
+      select.dataset.taskMarkerControl = "true"
+      select.setAttribute("aria-label", "Task marker")
+      select.title = "Task marker"
+      select.style.cssText = [
+        "display:inline-block",
+        "float:right",
+        "height:22px",
+        "min-width:58px",
+        "max-width:64px",
+        "margin:0 0 3px 4px",
+        "padding:0 2px",
+        "border:1px solid #FCA5A5",
+        "border-radius:999px",
+        "background:#FEF2F2",
+        "color:#DC2626",
+        "font:900 16px/1 Arial,sans-serif",
+        "cursor:pointer",
+      ].join(";")
+
+      const emptyOption = document.createElement("option")
+      emptyOption.value = ""
+      emptyOption.textContent = "—"
+      emptyOption.style.cssText = "color:#DC2626;font-size:16px;font-weight:900"
+      select.appendChild(emptyOption)
+      taskMarkerOptions.forEach((option) => {
+        const element = document.createElement("option")
+        element.value = option.value
+        element.textContent = option.label
+        element.style.cssText = "color:#DC2626;font-size:16px;font-weight:900"
+        select.appendChild(element)
+      })
+      select.value = cell.dataset.taskMarker || ""
+
+      select.addEventListener("change", async () => {
+        const previousValue = cell.dataset.taskMarker || ""
+        const nextValue = select.value
+        select.disabled = true
+        try {
+          const response = await apiFetch(`/tasks/${taskId}/one-h-marker`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ one_h_marker: nextValue || null }),
+          })
+          if (!response?.ok) {
+            const detail = await response?.json().catch(() => null)
+            throw new Error(typeof detail?.detail === "string" ? detail.detail : "Could not update task marker")
+          }
+          cell.dataset.taskMarker = nextValue
+          applyPreviewMarkerFilter()
+          toast.success("Task marker updated")
+        } catch (error) {
+          select.value = previousValue
+          toast.error("Task marker update failed", { description: String(error) })
+        } finally {
+          select.disabled = false
+        }
+      })
+
+      const periodBadge = cell.querySelector('[data-task-badge="finish-period"]')
+      if (periodBadge) periodBadge.insertAdjacentElement("afterend", select)
+      else content.prepend(select)
+    })
+    applyPreviewMarkerFilter()
+  }, [apiFetch, applyPreviewMarkerFilter])
+
+  React.useEffect(() => {
+    applyPreviewMarkerFilter()
+  }, [applyPreviewMarkerFilter, preview])
+
   const sendNow = async () => {
     setSending(true)
     try {
@@ -155,7 +288,7 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
     }
   }
 
-  if (!canManage) return <div className="rounded-lg border bg-white p-8">Manager or administrator access is required for {reportName}.</div>
+  if (!authLoading && !user) return <div className="rounded-lg border bg-white p-8">Sign in to access {reportName}.</div>
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-5">
@@ -164,14 +297,27 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
           <h1 className="text-2xl font-semibold">{reportName}</h1>
           <p className="text-sm text-muted-foreground">{today ? "Today's Common View tasks and meetings, sent at 09:00 Monday-Friday." : "Next-working-day tasks and meetings, sent as an HTML email."}</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => void generateReport(true)}><Eye /> Preview email</Button>
-          <Button variant="outline" onClick={() => void generateReport()}><RefreshCw /> Generate</Button>
-          <Button onClick={() => void sendNow()} disabled={sending}><Send /> {sending ? "Sending..." : "Send now"}</Button>
+        <div className="flex flex-wrap gap-2">
+          <label className="flex items-center gap-2 rounded-md border bg-white px-3 text-sm font-medium">
+            Symbol
+            <select
+              className="h-8 bg-transparent text-sm outline-none"
+              value={markerFilter}
+              onChange={(event) => setMarkerFilter(event.target.value as TaskMarkerFilter)}
+              aria-label="Filter tasks by symbol"
+            >
+              <option value="all">All</option>
+              <option value="none">No symbol</option>
+              {taskMarkerOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <Button variant="outline" onClick={() => void generateReport(true)} disabled={!user}><Eye /> Preview email</Button>
+          <Button variant="outline" onClick={() => void generateReport()} disabled={!user}><RefreshCw /> Generate</Button>
+          {canManage ? <Button onClick={() => void sendNow()} disabled={sending}><Send /> {sending ? "Sending..." : "Send now"}</Button> : null}
         </div>
       </div>
 
-      {settings ? (
+      {canManage && settings ? (
         <div className="space-y-4 rounded-lg border bg-white p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -197,16 +343,16 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3"><span className="text-sm text-muted-foreground">Last run: {formatDateTime(settings.last_run_date)}</span><Button variant="outline" onClick={() => void saveSettings()} disabled={saving}><Save /> Save settings</Button></div>
         </div>
-      ) : <div className="rounded-lg border bg-white p-8 text-sm text-muted-foreground">{loading ? "Loading settings..." : "No settings available."}</div>}
+      ) : canManage ? <div className="rounded-lg border bg-white p-8 text-sm text-muted-foreground">{loading ? "Loading settings..." : "No settings available."}</div> : null}
 
       {preview ? (
-        <div ref={previewRef} className="space-y-3 rounded-lg border bg-white p-4"><div><h2 className="font-semibold">Generated email</h2><p className="text-sm text-muted-foreground">{preview.subject}</p></div><iframe title={`${reportName} generated email`} srcDoc={preview.html} className="h-[620px] w-full rounded border bg-white" /></div>
+        <div ref={previewRef} className="space-y-3 rounded-lg border bg-white p-4"><div><h2 className="font-semibold">Generated email</h2><p className="text-sm text-muted-foreground">{preview.subject}</p></div><iframe ref={previewFrameRef} onLoad={setupPreviewMarkerControls} title={`${reportName} generated email`} srcDoc={preview.html} className="h-[620px] w-full rounded border bg-white" /></div>
       ) : null}
 
-      <div className="rounded-lg border bg-white p-4">
+      {canManage ? <div className="rounded-lg border bg-white p-4">
         <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Delivery history</h2><p className="text-sm text-muted-foreground">Last 50 attempts</p></div><Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}><RefreshCw className={loading ? "animate-spin" : ""} /> Refresh</Button></div>
         <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="border-b text-left text-muted-foreground"><tr><th className="p-2">Delivery</th><th className="p-2">Report for</th><th className="p-2">Status</th><th className="p-2">Sent</th><th className="p-2">To</th></tr></thead><tbody>{history.map((row) => <tr key={row.id} className="border-b"><td className="p-2">{row.delivery_date}</td><td className="p-2">{row.target_date}</td><td className="p-2">{row.status}</td><td className="p-2">{formatDateTime(row.sent_at)}</td><td className="p-2">{row.recipients.to.join(", ") || "-"}{row.last_error ? <div className="text-xs text-red-600">{row.last_error}</div> : null}</td></tr>)}{!history.length ? <tr><td className="p-4 text-muted-foreground" colSpan={5}>No deliveries yet.</td></tr> : null}</tbody></table></div>
-      </div>
+      </div> : null}
     </div>
   )
 }

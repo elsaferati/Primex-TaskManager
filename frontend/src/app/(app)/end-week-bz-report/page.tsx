@@ -90,8 +90,9 @@ export default function EndWeekBzReportPage() {
   }
 
   const showPreview = async () => {
-    const saved = await save(); if (!saved) return
-    const response = await apiFetch(`${API}/${saved.id}/preview`)
+    const previewDraft = canManage ? await save() : draft
+    if (!previewDraft) return
+    const response = await apiFetch(`${API}/${previewDraft.id}/preview`)
     if (!response.ok) return toast.error("Preview failed", { description: await errorText(response) })
     setPreview((await response.json()).html)
   }
@@ -124,7 +125,7 @@ export default function EndWeekBzReportPage() {
     }
   }
 
-  if (!authLoading && !canManage) return <div className="rounded-lg border p-8">Manager or administrator access is required.</div>
+  if (!authLoading && !user) return <div className="rounded-lg border p-8">Sign in to access this report.</div>
 
   return <div className="mx-auto max-w-[1400px] space-y-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -132,17 +133,17 @@ export default function EndWeekBzReportPage() {
       <div className="flex gap-2"><Button variant="outline" onClick={() => void load()} disabled={busy}><RefreshCw className={busy ? "animate-spin" : ""}/> Refresh</Button><Button onClick={() => void generate()} disabled={busy}><RefreshCw/> Generate</Button></div>
     </div>
     <Tabs defaultValue="report">
-      <TabsList><TabsTrigger value="report"><Pencil/> Report</TabsTrigger><TabsTrigger value="history"><History/> Send history</TabsTrigger></TabsList>
+      <TabsList><TabsTrigger value="report"><Pencil/> Report</TabsTrigger>{canManage ? <TabsTrigger value="history"><History/> Send history</TabsTrigger> : null}</TabsList>
       <TabsContent value="report" className="space-y-5">
         <div className="grid gap-3 rounded-lg border bg-white p-4 md:grid-cols-[220px_1fr_auto]">
           <div><Label>Date</Label><Input type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)}/></div>
-          <div><Label>Subject</Label><Input value={draft?.subject || ""} onChange={(event) => draft && setDraft({ ...draft, subject: event.target.value })} placeholder="Generate a draft first"/></div>
-          <div className="flex items-end gap-2"><Button variant="outline" disabled={!draft} onClick={() => void save()}><Save/> Save</Button><Button variant="outline" disabled={!draft} onClick={() => void showPreview()}><Eye/> Preview</Button><Button disabled={!draft || busy} onClick={() => void send()}><Send/> Send</Button></div>
+          <div><Label>Subject</Label><Input value={draft?.subject || ""} onChange={(event) => draft && setDraft({ ...draft, subject: event.target.value })} placeholder="Generate a draft first" disabled={!canManage}/></div>
+          <div className="flex items-end gap-2">{canManage ? <Button variant="outline" disabled={!draft} onClick={() => void save()}><Save/> Save</Button> : null}<Button variant="outline" disabled={!draft} onClick={() => void showPreview()}><Eye/> Preview</Button>{canManage ? <Button disabled={!draft || busy} onClick={() => void send()}><Send/> Send</Button> : null}</div>
         </div>
         {draft ? <>
-          <div className="grid gap-3 rounded-lg border bg-white p-4 md:grid-cols-3">{(["to", "cc", "bcc"] as const).map((kind) => <div key={kind}><Label>{kind.toUpperCase()}</Label><Input value={recipientInputs[kind]} onChange={(event) => editRecipients("draft", kind, event.target.value)}/></div>)}</div>
+          {canManage ? <div className="grid gap-3 rounded-lg border bg-white p-4 md:grid-cols-3">{(["to", "cc", "bcc"] as const).map((kind) => <div key={kind}><Label>{kind.toUpperCase()}</Label><Input value={recipientInputs[kind]} onChange={(event) => editRecipients("draft", kind, event.target.value)}/></div>)}</div> : null}
           <div className="space-y-4">{draft.sections.map((section, index) => <div key={section.section_key || index} className="rounded-lg border bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between"><div className="font-semibold">{index + 1}. {section.title}</div>{editing?.index !== index ? <Button variant="outline" size="sm" onClick={() => setEditing({ index, title: section.title, lines: reportSectionEditorLines(section.body) })}><Pencil/> Edit</Button> : null}</div>
+            <div className="flex items-center justify-between"><div className="font-semibold">{index + 1}. {section.title}</div>{canManage && editing?.index !== index ? <Button variant="outline" size="sm" onClick={() => setEditing({ index, title: section.title, lines: reportSectionEditorLines(section.body) })}><Pencil/> Edit</Button> : null}</div>
             {editing?.index === index ? <ReportSectionFieldEditor lines={editing.lines} onCancel={() => setEditing(null)} onSave={(lines) => { const next = { ...draft, sections: draft.sections.map((item, position) => position === index ? { ...item, body: lines.join("\n") } : item) }; setDraft(next); setEditing(null); void save(next) }}/> : <ReportSectionPreview body={reportSectionPreviewText(section.body)}/>} 
           </div>)}</div>
         </> : <div className="rounded-lg border bg-white p-8 text-center text-sm text-muted-foreground">No draft for this date. Generate one to begin.</div>}
@@ -154,7 +155,7 @@ export default function EndWeekBzReportPage() {
           <div className="flex justify-end"><Button variant="outline" onClick={() => void saveSettings()}><Save/> Save settings</Button></div>
         </div> : null}
       </TabsContent>
-      <TabsContent value="history"><div className="rounded-lg border bg-white"><Table><TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Sent at</TableHead><TableHead>Subject</TableHead><TableHead>Status</TableHead></TableRow></TableHeader><TableBody>{history.map((item) => <TableRow key={item.id}><TableCell>{item.report_date}</TableCell><TableCell>{item.sent_at ? new Date(item.sent_at).toLocaleString() : "-"}</TableCell><TableCell>{item.subject}</TableCell><TableCell>{item.last_error ? "ERROR" : item.status}</TableCell></TableRow>)}{!history.length ? <TableRow><TableCell colSpan={4} className="h-24 text-center text-muted-foreground">No sent reports yet.</TableCell></TableRow> : null}</TableBody></Table></div></TabsContent>
+      {canManage ? <TabsContent value="history"><div className="rounded-lg border bg-white"><Table><TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Sent at</TableHead><TableHead>Subject</TableHead><TableHead>Status</TableHead></TableRow></TableHeader><TableBody>{history.map((item) => <TableRow key={item.id}><TableCell>{item.report_date}</TableCell><TableCell>{item.sent_at ? new Date(item.sent_at).toLocaleString() : "-"}</TableCell><TableCell>{item.subject}</TableCell><TableCell>{item.last_error ? "ERROR" : item.status}</TableCell></TableRow>)}{!history.length ? <TableRow><TableCell colSpan={4} className="h-24 text-center text-muted-foreground">No sent reports yet.</TableCell></TableRow> : null}</TableBody></Table></div></TabsContent> : null}
     </Tabs>
     <Dialog open={Boolean(preview)} onOpenChange={(open) => !open && setPreview(null)}><DialogContent className="max-w-5xl"><DialogHeader><DialogTitle>Email preview</DialogTitle></DialogHeader>{preview ? <iframe title={`${LABEL} preview`} srcDoc={preview} className="h-[650px] w-full rounded border bg-white"/> : null}</DialogContent></Dialog>
   </div>
