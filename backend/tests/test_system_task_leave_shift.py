@@ -257,6 +257,7 @@ class TestSystemTaskLeaveGeneration(IsolatedAsyncioTestCase):
             [call.kwargs["target_day"] for call in reconcile_day.await_args_list],
             [date(2026, 5, 1), date(2026, 5, 2), date(2026, 5, 3)],
         )
+        self.assertTrue(all(call.kwargs["template_ids"] is None for call in reconcile_day.await_args_list))
 
     async def test_daily_reconciliation_reassigns_single_absent_user_to_zv1(self) -> None:
         primary_id, zv1_id, zv2_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from app.api.routers.system_tasks import (
+    _regenerate_template_after_assignment_change,
     _reset_template_slots_next_run_at,
     approve_system_task_template,
     update_system_task_template,
@@ -44,6 +45,59 @@ class _FakeSession:
 
 
 class TestSystemTaskTemplateSlotReschedule(unittest.IsolatedAsyncioTestCase):
+    async def test_assignment_change_generates_and_reconciles_from_today(self) -> None:
+        template = SimpleNamespace(
+            id=uuid.uuid4(),
+            frequency=FrequencyType.DAILY,
+            timezone="Europe/Budapest",
+            due_time=time(9, 0),
+            interval=1,
+            apply_from=None,
+            created_at=datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc),
+        )
+        changed_at = datetime(2026, 3, 3, 12, 0, tzinfo=timezone.utc)
+        db = SimpleNamespace()
+
+        with (
+            patch(
+                "app.api.routers.system_tasks._reset_template_slots_next_run_at",
+                new=AsyncMock(),
+            ) as reset_slots,
+            patch(
+                "app.api.routers.system_tasks.generate_system_task_instances",
+                new=AsyncMock(return_value=1),
+            ) as generate_instances,
+            patch(
+                "app.api.routers.system_tasks.reconcile_system_task_assignments_in_range",
+                new=AsyncMock(return_value={}),
+            ) as reconcile_assignments,
+        ):
+            await _regenerate_template_after_assignment_change(
+                db,
+                template=template,
+                now=changed_at,
+            )
+
+        reset_slots.assert_awaited_once_with(
+            db,
+            template=template,
+            now=datetime(2026, 3, 2, 23, 0, tzinfo=timezone.utc),
+        )
+        generate_instances.assert_awaited_once_with(
+            db=db,
+            now_utc=changed_at,
+            start=changed_at.date(),
+            end=changed_at.date().replace(day=10),
+            template_ids=[template.id],
+        )
+        reconcile_assignments.assert_awaited_once_with(
+            db=db,
+            start=changed_at.date(),
+            end=changed_at.date().replace(day=10),
+            now_utc=changed_at,
+            template_ids=[template.id],
+        )
+
     async def test_approval_resets_pending_cursor_and_generates_forward_only(self) -> None:
         template = SimpleNamespace(
             id=uuid.uuid4(),
@@ -95,6 +149,7 @@ class TestSystemTaskTemplateSlotReschedule(unittest.IsolatedAsyncioTestCase):
             start=approved_at.date(),
             end=approved_at.date().replace(day=10),
             now_utc=approved_at,
+            template_ids=[template.id],
         )
         db.flush.assert_awaited_once()
         db.commit.assert_awaited_once()
