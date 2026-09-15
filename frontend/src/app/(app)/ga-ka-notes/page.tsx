@@ -2115,8 +2115,13 @@ export default function GaKaNotesPage() {
     if (!textarea) return
 
     const value = textarea.value
+    const textareaScrollTop = textarea.scrollTop
+    const textareaScrollLeft = textarea.scrollLeft
+    const dialogScroller = textarea.parentElement?.closest<HTMLElement>(".overflow-y-auto") ?? null
+    const dialogScrollTop = dialogScroller?.scrollTop
     let start = textarea.selectionStart
     let end = textarea.selectionEnd
+    const selectionDirection = textarea.selectionDirection
 
     const lineRange = completeLineRange(value, start, end)
     if (!lineRange) {
@@ -2132,8 +2137,13 @@ export default function GaKaNotesPage() {
     setEditDoneRanges(nextContent.doneRanges)
     setEditAddedRanges((current) => adjustTextRangesForTextChange(editContent, nextContent.text, current))
     window.setTimeout(() => {
-      textarea.focus()
-      textarea.setSelectionRange(start, end)
+      textarea.focus({ preventScroll: true })
+      textarea.setSelectionRange(start, end, selectionDirection)
+      textarea.scrollTop = textareaScrollTop
+      textarea.scrollLeft = textareaScrollLeft
+      if (dialogScroller && dialogScrollTop !== undefined) {
+        dialogScroller.scrollTop = dialogScrollTop
+      }
     }, 0)
   }
 
@@ -4907,6 +4917,7 @@ export default function GaKaNotesPage() {
                     variant="outline"
                     size="sm"
                     className="h-8"
+                    onMouseDown={(event) => event.preventDefault()}
                     onClick={markSelectedEditTextDone}
                   >
                     Mark / undo selected done
