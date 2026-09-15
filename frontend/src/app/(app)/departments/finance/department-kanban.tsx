@@ -417,13 +417,17 @@ export default function DepartmentKanban() {
 
   const dailyRlzStates = React.useMemo(() => dailyRlzStateByTask(dailyReport), [dailyReport])
 
+  const canManageDailyRlz = user?.role === "ADMIN" || user?.role === "MANAGER"
+  const dailyRlzSubjectUserId =
+    canManageDailyRlz && dailyReportUserId && dailyReportUserId !== user?.id ? dailyReportUserId : undefined
+
   const dailyRlzStateForRow = React.useCallback(
     (taskId: string) => {
       const state = dailyRlzStates.get(taskId)
-      if (!state || dailyReportUserId === user?.id) return state
+      if (!state || dailyReportUserId === user?.id || canManageDailyRlz) return state
       return { ...state, is_editable: false }
     },
-    [dailyReportUserId, dailyRlzStates, user?.id]
+    [canManageDailyRlz, dailyReportUserId, dailyRlzStates, user?.id]
   )
 
   const usersById = React.useMemo(() => {
@@ -927,6 +931,7 @@ export default function DepartmentKanban() {
                             taskId={row.id}
                             day={todayIso}
                             state={dailyRlzStateForRow(row.id)}
+                            subjectUserId={dailyRlzSubjectUserId}
                             onSaved={refreshDailyReport}
                           />
                         </TableCell>
@@ -935,6 +940,7 @@ export default function DepartmentKanban() {
                             taskId={row.id}
                             day={todayIso}
                             state={dailyRlzStateForRow(row.id)}
+                            subjectUserId={dailyRlzSubjectUserId}
                             onSaved={refreshDailyReport}
                           />
                         </TableCell>

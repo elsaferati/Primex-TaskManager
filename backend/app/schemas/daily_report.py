@@ -38,6 +38,7 @@ class DailyRlzCloseStateOut(BaseModel):
 
 class DailyRlzStateUpsert(BaseModel):
     day: date
+    user_id: uuid.UUID | None = None
     reason_code: str | None = None
     comment: str | None = Field(default=None, max_length=10000)
 

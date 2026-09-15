@@ -69,10 +69,11 @@ export function dailyRlzStateByTask(report: DailyReportResponse | null) {
   return map
 }
 
-export function DailyRlzReasonCell({ taskId, day, state, onSaved }: {
+export function DailyRlzReasonCell({ taskId, day, state, subjectUserId, onSaved }: {
   taskId?: string | null
   day: string
   state?: DailyRlzTaskState | null
+  subjectUserId?: string
   onSaved: () => Promise<void> | void
 }) {
   const { apiFetch } = useAuth()
@@ -88,6 +89,7 @@ export function DailyRlzReasonCell({ taskId, day, state, onSaved }: {
           method: "PUT", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             day,
+            user_id: subjectUserId,
             reason_code: reasonCode === DAILY_RLZ_EMPTY_REASON ? null : reasonCode,
             // Preserve whatever comment was already saved for this day — never wipe it
             // just because the reason dropdown changed.
@@ -114,10 +116,11 @@ export function DailyRlzReasonCell({ taskId, day, state, onSaved }: {
 // TaskDailyRlzState row as DailyRlzReasonCell (via /reports/daily-rlz-state/{taskId}),
 // so the comment is actually part of the daily RLZ evidence instead of overwriting the
 // task's single, non-dated Task.comment field.
-export function DailyRlzCommentField({ taskId, day, state, onSaved }: {
+export function DailyRlzCommentField({ taskId, day, state, subjectUserId, onSaved }: {
   taskId?: string | null
   day: string
   state?: DailyRlzTaskState | null
+  subjectUserId?: string
   onSaved: () => Promise<void> | void
 }) {
   const { apiFetch } = useAuth()
@@ -138,6 +141,7 @@ export function DailyRlzCommentField({ taskId, day, state, onSaved }: {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           day,
+          user_id: subjectUserId,
           reason_code: state?.reason_code || null,
           comment: trimmed || null,
         }),

@@ -679,20 +679,37 @@ async def upsert_daily_rlz_state(
     task = await db.get(Task, task_id)
     if task is None or not task.is_active:
         raise HTTPException(status_code=404, detail="Task not found")
-    assigned = task.assigned_to == user.id or bool(await db.scalar(select(TaskAssignee.task_id).where(
-        TaskAssignee.task_id == task_id, TaskAssignee.user_id == user.id,
+    target_user_id = payload.user_id or user.id
+    if target_user_id != user.id and user.role not in {UserRole.MANAGER, UserRole.ADMIN}:
+        raise HTTPException(status_code=403, detail="Only manager/admin can edit another employee's Daily Report")
+    if target_user_id != user.id and await db.get(User, target_user_id) is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    assigned = task.assigned_to == target_user_id or bool(await db.scalar(select(TaskAssignee.task_id).where(
+        TaskAssignee.task_id == task_id, TaskAssignee.user_id == target_user_id,
     )))
     if not assigned:
-        raise HTTPException(status_code=403, detail="You can edit only your own Daily Report tasks")
+        raise HTTPException(status_code=403, detail="The selected employee is not assigned to this task")
     row = (await db.execute(select(TaskDailyRlzState).where(
-        TaskDailyRlzState.task_id == task_id, TaskDailyRlzState.user_id == user.id,
+        TaskDailyRlzState.task_id == task_id, TaskDailyRlzState.user_id == target_user_id,
         TaskDailyRlzState.day_date == payload.day,
     ).with_for_update())).scalar_one_or_none()
+    before = {"reason_code": row.reason_code, "comment": row.comment} if row else None
     if row is None:
-        row = TaskDailyRlzState(task_id=task_id, user_id=user.id, day_date=payload.day)
+        row = TaskDailyRlzState(task_id=task_id, user_id=target_user_id, day_date=payload.day)
         db.add(row)
     row.reason_code = payload.reason_code
     row.comment = payload.comment.strip() if payload.comment and payload.comment.strip() else None
+    if target_user_id != user.id:
+        await db.flush()
+        add_audit_log(
+            db=db,
+            actor_user_id=user.id,
+            entity_type="task_daily_rlz_state",
+            entity_id=row.id,
+            action="MANAGER_DAILY_RLZ_UPDATE",
+            before=before,
+            after={"reason_code": row.reason_code, "comment": row.comment, "user_id": str(target_user_id)},
+        )
     await db.commit()
     await db.refresh(row)
     return _daily_rlz_state_out(row, payload.day)
