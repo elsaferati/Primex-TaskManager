@@ -392,7 +392,9 @@ def test_tomorrow_report_uses_delivery_day_for_thursday_questions() -> None:
     import asyncio
 
     sent_thursday = asyncio.run(
-        build_tomorrow_print_report(date(2026, 9, 3), payload={"items": {}})
+        build_tomorrow_print_report(
+            date(2026, 9, 3), include_attachment=True, payload={"items": {}}
+        )
     )
     sent_wednesday = asyncio.run(
         build_tomorrow_print_report(date(2026, 9, 2), payload={"items": {}})
@@ -403,6 +405,13 @@ def test_tomorrow_report_uses_delivery_day_for_thursday_questions() -> None:
     assert "Emails per missing info, per me vazhdu javen tjeter" in sent_thursday["plain_text"]
     assert sent_thursday["plain_text"].count("E ENJTE- PYETJET E TE ENJTES") == 1
     assert "Planifikimi javor short" not in sent_wednesday["html"]
+    thursday_excel = load_workbook(BytesIO(sent_thursday["attachments"][0][1])).active
+    thursday_excel_values = [
+        str(cell.value or "") for row in thursday_excel.iter_rows() for cell in row
+    ]
+    assert "E ENJTE- PYETJET E TE ENJTES" in thursday_excel_values
+    assert any("Planifikimi javor short" in value for value in thursday_excel_values)
+    assert any("Shikohen det qe mbesin vetem per neser" in value for value in thursday_excel_values)
 
 
 def test_friday_checklists_add_staff_questions_and_keep_board_unchanged() -> None:
@@ -434,7 +443,9 @@ def test_tomorrow_report_uses_delivery_day_for_friday_questions() -> None:
     import asyncio
 
     report = asyncio.run(
-        build_tomorrow_print_report(date(2026, 9, 4), payload={"items": {}})
+        build_tomorrow_print_report(
+            date(2026, 9, 4), include_attachment=True, payload={"items": {}}
+        )
     )
 
     assert report["plain_text"].count("E PREMTE - PYETJET E TE PREMTES") == 1
@@ -442,6 +453,13 @@ def test_tomorrow_report_uses_delivery_day_for_friday_questions() -> None:
     assert report["target_date"] == "2026-09-07"
     assert "Barazimi i planifikimit javor - next week" in report["html"]
     assert "Barazimi i realizimit javor - this week" in report["plain_text"]
+    friday_excel = load_workbook(BytesIO(report["attachments"][0][1])).active
+    friday_excel_values = [
+        str(cell.value or "") for row in friday_excel.iter_rows() for cell in row
+    ]
+    assert "E PREMTE - PYETJET E TE PREMTES" in friday_excel_values
+    assert any("Barazimi i planifikimit javor - next week" in value for value in friday_excel_values)
+    assert any("Barazimi i realizimit javor - this week" in value for value in friday_excel_values)
 
 
 def test_today_report_puts_thursday_questions_under_the_weekday_title() -> None:
@@ -639,8 +657,11 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     _, content, _ = _excel_table_attachment([("DEADLINE / 08:00", tasks, False)], [], date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
     assert sheet["C6"].fill.fgColor.rgb.endswith("DC2626")
-    assert "[SOT]" in sheet["C6"].value
-    assert "DUE" not in sheet["C6"].value
+    assert "[START: 13.08.2026]" in sheet["C6"].value
+    assert "[DUE: SOT]" in sheet["C6"].value
+    assert "[START: 14.08.2026]" in sheet["D6"].value
+    assert "[DUE: SOT]" in sheet["D6"].value
+    assert "DUE TODAY" not in sheet["C6"].value
     assert "[08:00]" in sheet["D6"].value
     assert sheet["D6"].border.left.color.rgb.endswith("DC2626")
 
