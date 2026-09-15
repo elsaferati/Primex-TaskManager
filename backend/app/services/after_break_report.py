@@ -393,7 +393,9 @@ async def apply_waiting_client_task_table(
 
 
 def _unheld_meeting_section(
-    meetings: list[Meeting], status_by_meeting: dict[Any, str]
+    meetings: list[Meeting],
+    status_by_meeting: dict[Any, str],
+    all_meetings: list[Meeting] | None = None,
 ) -> tuple[list[str], int]:
     unheld = []
     for meeting in meetings:
@@ -405,12 +407,17 @@ def _unheld_meeting_section(
         unheld.append(meeting)
     external = [meeting for meeting in unheld if str(getattr(meeting, "meeting_type", "")).lower() == "external"]
     internal = [meeting for meeting in unheld if str(getattr(meeting, "meeting_type", "")).lower() != "external"]
+    external_by_id = {
+        str(meeting.id): meeting
+        for meeting in (all_meetings or meetings)
+        if str(getattr(meeting, "meeting_type", "")).lower() == "external"
+    }
     return ([
         *_meeting_group_title("TAK EXTERNE"),
-        *_meeting_status_checkbox_table(external, status_by_meeting),
+        *_meeting_status_checkbox_table(external, status_by_meeting, external_by_id),
         "",
         *_meeting_group_title("TAK INTERNE"),
-        *_meeting_status_checkbox_table(internal, status_by_meeting),
+        *_meeting_status_checkbox_table(internal, status_by_meeting, external_by_id),
     ], len(unheld))
 
 
@@ -826,6 +833,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
     unheld_meeting_section, unheld_meeting_count = _unheld_meeting_section(
         today_meetings,
         {row.meeting_id: row.status for row in meeting_statuses},
+        meetings,
     )
 
     confirmation_ids = {

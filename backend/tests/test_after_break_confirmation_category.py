@@ -348,6 +348,58 @@ class UnheldMeetingRowsTests(unittest.TestCase):
         self.assertNotIn("Held", body)
         self.assertNotIn("Afternoon", body)
 
+    def test_m2_linked_internal_meeting_inherits_external_color(self) -> None:
+        timezone = ZoneInfo("Europe/Tirane")
+        external = SimpleNamespace(
+            id="external",
+            title="External weekly",
+            starts_at=datetime(2026, 8, 24, 10, 30, tzinfo=timezone),
+            meeting_type="external",
+            recurrence_type="weekly",
+            calendar_categories=["Brown"],
+            calendar_imported=True,
+            microsoft_event_id="calendar-event",
+            paired_external_meeting_id=None,
+            pre_external_meeting_id=None,
+        )
+        linked_internal = SimpleNamespace(
+            id="linked",
+            title="Internal before external",
+            starts_at=datetime(2026, 8, 24, 8, 15, tzinfo=timezone),
+            meeting_type="internal",
+            recurrence_type="weekly",
+            calendar_categories=[],
+            calendar_imported=False,
+            microsoft_event_id=None,
+            paired_external_meeting_id="external",
+            pre_external_meeting_id=None,
+        )
+        manual_internal = SimpleNamespace(
+            id="manual",
+            title="Manual internal",
+            starts_at=datetime(2026, 8, 24, 8, 30, tzinfo=timezone),
+            meeting_type="internal",
+            recurrence_type="weekly",
+            calendar_categories=[],
+            calendar_imported=False,
+            microsoft_event_id=None,
+            paired_external_meeting_id=None,
+            pre_external_meeting_id=None,
+        )
+
+        lines, _ = _unheld_meeting_section(
+            [external, linked_internal, manual_internal],
+            {},
+            [external, linked_internal, manual_internal],
+        )
+
+        body = "\n".join(lines)
+        self.assertIn("Internal before external [[mc:meeting-brown]]", body)
+        self.assertIn("Manual internal [[mc:meeting-blue]]", body)
+        html = _render_ascii_table_html(lines)
+        self.assertIn('bgcolor="#C9A98A"', html)
+        self.assertIn('bgcolor="#DCECFF"', html)
+
 
 if __name__ == "__main__":
     unittest.main()

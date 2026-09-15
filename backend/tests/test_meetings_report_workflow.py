@@ -45,6 +45,7 @@ from app.services.meetings_report import (
     _task_owners,
     _daily_baseline_task_ids,
     _tomorrow_common_section,
+    _tomorrow_meeting_table,
     _tomorrow_task_table,
     normalize_meetings_report_sections,
     render_html,
@@ -791,6 +792,68 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
 
         self.assertTrue(lines[0].startswith("- 10:15: One-off earlier"))
         self.assertTrue(lines[1].startswith("- 13:15: Recurring later"))
+
+    def test_m3_linked_internal_meetings_inherit_external_colors(self) -> None:
+        external_id = uuid.uuid4()
+        external = SimpleNamespace(
+            id=external_id,
+            title="External weekly",
+            meeting_type="external",
+            calendar_categories=["Brown"],
+            calendar_imported=True,
+            microsoft_event_id="calendar-event",
+            recurrence_type="weekly",
+        )
+        linked_internal = SimpleNamespace(
+            id=uuid.uuid4(),
+            title="Internal before external",
+            starts_at=datetime(2026, 8, 11, 12, 20),
+            meeting_type="internal",
+            paired_external_meeting_id=external_id,
+            pre_external_meeting_id=None,
+            recurrence_type="weekly",
+            calendar_categories=[],
+            calendar_imported=False,
+            microsoft_event_id=None,
+        )
+        manual_internal = SimpleNamespace(
+            id=uuid.uuid4(),
+            title="Manual internal",
+            starts_at=datetime(2026, 8, 11, 13, 20),
+            meeting_type="internal",
+            paired_external_meeting_id=None,
+            pre_external_meeting_id=None,
+            recurrence_type="weekly",
+            calendar_categories=[],
+            calendar_imported=False,
+            microsoft_event_id=None,
+        )
+
+        lines = _meeting_lines(
+            [linked_internal, manual_internal],
+            {str(external_id): external},
+        )
+
+        self.assertIn("[[mc:meeting-brown]]", lines[0])
+        self.assertIn("[[mc:meeting-blue]]", lines[1])
+        table_lines = _tomorrow_meeting_table("TAK INTERNE", lines)
+        html = _render_ascii_table_html(table_lines)
+        self.assertIn('bgcolor="#C9A98A"', html)
+        self.assertIn('bgcolor="#DCECFF"', html)
+
+        sections = [{"title": SECTION_TITLES[5], "body": "\n".join(table_lines)}]
+        docx = render_section_report_docx("PrimeFlow M3", "M3", date(2026, 8, 10), sections)
+        with ZipFile(BytesIO(docx)) as archive:
+            document_xml = archive.read("word/document.xml").decode("utf-8").lower()
+        self.assertIn("c9a98a", document_xml)
+        self.assertIn("dcecff", document_xml)
+
+        from PIL import Image
+
+        png = render_section_report_png("PrimeFlow M3", "M3", date(2026, 8, 10), sections)
+        colors = set(Image.open(BytesIO(png)).convert("RGB").getdata())
+        self.assertIn((201, 169, 138), colors)
+        self.assertIn((220, 236, 255), colors)
 
     def test_many_assignees_display_as_all(self) -> None:
         assignee_ids = {uuid.uuid4() for _ in range(11)}

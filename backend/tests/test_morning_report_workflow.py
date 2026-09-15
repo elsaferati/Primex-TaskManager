@@ -504,6 +504,83 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("05.08.2026", body)
         self.assertIn("DEV", body)
 
+    async def test_m1_linked_internal_meeting_inherits_external_color(self) -> None:
+        report_day = date(2026, 8, 5)
+        external_id = uuid.uuid4()
+        common_fields = {
+            "recurrence_days_of_week": None,
+            "recurrence_days_of_month": None,
+            "calendar_sync_status": "active",
+        }
+        external = SimpleNamespace(
+            **common_fields,
+            id=external_id,
+            title="External physical meeting",
+            starts_at=datetime(2026, 8, 5, 11, 0),
+            created_at=datetime(2026, 8, 5, 11, 0),
+            meeting_type="external",
+            recurrence_type="none",
+            calendar_categories=["Event"],
+            calendar_imported=True,
+            microsoft_event_id="calendar-event",
+            paired_external_meeting_id=None,
+            pre_external_meeting_id=None,
+        )
+        linked_internal = SimpleNamespace(
+            **common_fields,
+            id=uuid.uuid4(),
+            title="Internal before external",
+            starts_at=datetime(2026, 8, 5, 8, 15),
+            created_at=datetime(2026, 8, 5, 8, 15),
+            meeting_type="internal",
+            recurrence_type="none",
+            calendar_categories=[],
+            calendar_imported=False,
+            microsoft_event_id=None,
+            paired_external_meeting_id=external_id,
+            pre_external_meeting_id=None,
+        )
+        manual_internal = SimpleNamespace(
+            **common_fields,
+            id=uuid.uuid4(),
+            title="Manual internal",
+            starts_at=datetime(2026, 8, 5, 8, 30),
+            created_at=datetime(2026, 8, 5, 8, 30),
+            meeting_type="internal",
+            recurrence_type="none",
+            calendar_categories=[],
+            calendar_imported=False,
+            microsoft_event_id=None,
+            paired_external_meeting_id=None,
+            pre_external_meeting_id=None,
+        )
+        meetings = [external, linked_internal, manual_internal]
+        meeting_result = SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: meetings),
+            all=lambda: [],
+        )
+        empty_result = SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: []),
+            all=lambda: [],
+        )
+        db = SimpleNamespace(execute=AsyncMock(side_effect=[meeting_result, empty_result]))
+
+        with (
+            patch("app.services.morning_report._all_participant_user_ids", new=AsyncMock(return_value=set())),
+            patch("app.services.morning_report._bz_alignment_lines", new=AsyncMock(return_value=[])),
+        ):
+            body, _ = await _day_context_section(db, [], {}, [], {}, report_day)
+
+        self.assertIn("Internal before external [[mc:meeting-teal]]", body)
+        self.assertIn("Manual internal [[mc:meeting-blue]]", body)
+        report_html = render_html(
+            subject_for(report_day),
+            report_day,
+            [{"title": SECTION_TITLES[4], "body": body}],
+        )
+        self.assertIn('bgcolor="#CCEFF1"', report_html)
+        self.assertIn('bgcolor="#DCECFF"', report_html)
+
     def test_email_html_is_mobile_safe_and_contains_m1_heading(self) -> None:
         subject = subject_for(date(2026, 8, 5))
         html = render_html(
