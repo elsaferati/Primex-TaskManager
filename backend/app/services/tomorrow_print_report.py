@@ -264,6 +264,8 @@ def _initials(value: str) -> str:
     cleaned = value.strip()
     if not cleaned:
         return ""
+    if re.sub(r"\s+", " ", cleaned).casefold() == "haris shaqiri":
+        return "HSH"
     if re.fullmatch(r"[A-Za-z]{1,4}", cleaned):
         return cleaned.upper()
     parts = re.findall(r"[^\W\d_]+", cleaned, flags=re.UNICODE)
@@ -766,6 +768,46 @@ def _meeting_time_sort_key(item: dict[str, Any]) -> tuple[int, int, int, str]:
     return (1, 24, 60, f"{raw_time.casefold()}|{_first_line(item.get('title')).casefold()}")
 
 
+def _is_calendar_meeting(item: dict[str, Any], *, meeting_type: str) -> bool:
+    if meeting_type == "internal" and (
+        item.get("pairedExternalMeetingId")
+        or item.get("paired_external_meeting_id")
+        or item.get("preExternalMeetingId")
+        or item.get("pre_external_meeting_id")
+    ):
+        return bool(
+            item.get("linkedExternalCalendarImported")
+            or item.get("linked_external_calendar_imported")
+        )
+    return bool(
+        item.get("calendarImported")
+        or item.get("calendar_imported")
+        or item.get("microsoftEventId")
+        or item.get("microsoft_event_id")
+    )
+
+
+def _is_manual_internal_meeting(item: dict[str, Any], *, meeting_type: str) -> bool:
+    return meeting_type == "internal" and not any(
+        item.get(field)
+        for field in (
+            "pairedExternalMeetingId",
+            "paired_external_meeting_id",
+            "preExternalMeetingId",
+            "pre_external_meeting_id",
+        )
+    )
+
+
+def _meeting_time_display(item: dict[str, Any], *, meeting_type: str) -> str:
+    value = str(item.get("time") or "-").strip() or "-"
+    if _is_calendar_meeting(item, meeting_type=meeting_type):
+        return f"{value} CAL"
+    if _is_manual_internal_meeting(item, meeting_type=meeting_type):
+        return f"{value} MANUAL"
+    return value
+
+
 def _meeting_rows(items: dict[str, Any], target_date: date) -> list[tuple[str, list[dict[str, Any]]]]:
     rows: list[tuple[str, list[dict[str, Any]]]] = []
     for bucket, label in MEETING_ROWS:
@@ -1057,16 +1099,30 @@ def _dated_meetings_html(
         value = _report_text(_first_line(item.get("title")))
         meeting_type = "internal" if "INT" in label.upper() else "external"
         color = meeting_report_color(item, meeting_type=meeting_type)
+        calendar_badge = (
+            ' <span data-calendar-meeting="true" style="display:inline-block;padding:1px 5px;'
+            'border-radius:999px;background:#0D9488;color:#FFFFFF;font-size:9px;font-weight:700">CAL</span>'
+            if _is_calendar_meeting(item, meeting_type=meeting_type)
+            else ""
+        )
+        manual_badge = (
+            ' <span data-manual-internal-meeting="true" style="display:inline-block;padding:1px 5px;'
+            'border-radius:999px;background:#2563EB;color:#FFFFFF;font-size:9px;font-weight:700">MANUAL</span>'
+            if _is_manual_internal_meeting(item, meeting_type=meeting_type)
+            else ""
+        )
         background = f' bgcolor="{color}"'
         highlight = (
             f";border:2px solid {NON_ROUTINE_MEETING_BORDER_COLOR}"
             if _is_non_routine_meeting(item)
+            or _is_manual_internal_meeting(item, meeting_type=meeting_type)
             else ""
         )
         return (
             f'<td data-meeting-time="true"{background} style="{CELL_STYLE};{divider}{highlight};background-color:{color};white-space:nowrap">'
-            f'{html.escape(meeting_time)}</td>'
-            f'<td data-meeting-cell="true"{background} style="{CELL_STYLE};{divider}{highlight};background-color:{color}">'
+            f'{html.escape(meeting_time)}{calendar_badge}{manual_badge}</td>'
+            f'<td data-meeting-cell="true"{background} style="{CELL_STYLE};{divider}{highlight};background-color:{color};'
+            f'{"font-weight:800" if manual_badge else ""}">'
             f"{index}. {html.escape(value)}</td>"
         )
 
@@ -1646,14 +1702,21 @@ def _excel_table_attachment(
             sheet.merge_cells(start_row=row_number, start_column=1, end_row=row_number, end_column=2)
             sheet.merge_cells(start_row=row_number, start_column=4, end_row=row_number, end_column=8)
             sheet.cell(row_number, 1, label)
-            sheet.cell(row_number, 3, str(item.get("time") or "-").strip() if item else "-")
+            meeting_type = "internal" if "INT" in label.upper() else "external"
+            sheet.cell(
+                row_number,
+                3,
+                _meeting_time_display(item, meeting_type=meeting_type) if item else "-",
+            )
             sheet.cell(
                 row_number,
                 4,
                 f"{index}. {_report_text(_first_line(item.get('title')))}" if item else "-",
             )
-            highlighted = item is not None and _is_non_routine_meeting(item)
-            meeting_type = "internal" if "INT" in label.upper() else "external"
+            highlighted = item is not None and (
+                _is_non_routine_meeting(item)
+                or _is_manual_internal_meeting(item, meeting_type=meeting_type)
+            )
             meeting_fill = (
                 PatternFill("solid", fgColor=meeting_report_color(item, meeting_type=meeting_type).removeprefix("#"))
                 if item else None
@@ -1665,6 +1728,8 @@ def _excel_table_attachment(
                 if meeting_fill is not None and column >= 3:
                     cell.fill = meeting_fill
             sheet.cell(row_number, 1).font = Font(bold=True)
+            if item is not None and _is_manual_internal_meeting(item, meeting_type=meeting_type):
+                sheet.cell(row_number, 4).font = Font(bold=True)
             row_number += 1
         return row_number
 
@@ -1919,10 +1984,11 @@ def _docx_table_attachment(
             meeting_fill = meeting_report_color(item, meeting_type=meeting_type)
             shade(row.cells[1], meeting_fill)
             shade(row.cells[2], meeting_fill)
-            set_cell(row.cells[1], str(item.get("time") or "-").strip() or "-")
+            set_cell(row.cells[1], _meeting_time_display(item, meeting_type=meeting_type))
             set_cell(
                 row.cells[2],
                 f"{index}. {_report_text(_first_line(item.get('title')))}",
+                bold=_is_manual_internal_meeting(item, meeting_type=meeting_type),
             )
 
     heading("KOMENTE PER STAF", size=10)
@@ -2283,6 +2349,7 @@ def _core_png_table_attachment(
                     outline = (
                         NON_ROUTINE_MEETING_BORDER_COLOR
                         if _is_non_routine_meeting(item)
+                        or _is_manual_internal_meeting(item, meeting_type=meeting_type)
                         else "#111827"
                     )
                     outline_width = 3 if outline == NON_ROUTINE_MEETING_BORDER_COLOR else 1
@@ -2300,7 +2367,7 @@ def _core_png_table_attachment(
                     )
                     draw.text(
                         (label_right + 6, y + 8),
-                        str(item.get("time") or "-").strip() or "-",
+                        _meeting_time_display(item, meeting_type=meeting_type),
                         fill="#111827",
                         font=regular,
                     )
@@ -2311,7 +2378,7 @@ def _core_png_table_attachment(
                             (time_right + 9, y + 8 + line_index * 20),
                             line,
                             fill="#111827",
-                            font=regular,
+                            font=(bold if _is_manual_internal_meeting(item, meeting_type=meeting_type) else regular),
                         )
                 x = content_right
             draw.line((center, y, center, row_bottom), fill=NON_ROUTINE_MEETING_BORDER_COLOR, width=5)

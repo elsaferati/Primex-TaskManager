@@ -235,7 +235,8 @@ LATE:
 
         rendered = await render_ga_time_table_html(db, date(2026, 8, 24))
 
-        self.assertIn("REMINDER 00:00: Follow up tomorrow", rendered)
+        self.assertIn("R: 00:00: Follow up tomorrow", rendered)
+        self.assertNotIn("REMINDER 00:00: Follow up tomorrow", rendered)
         self.assertIn("background-color:#FEF3C7", rendered)
 
     async def test_timetable_email_uses_common_view_meeting_visibility(self) -> None:

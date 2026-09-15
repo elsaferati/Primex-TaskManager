@@ -947,6 +947,11 @@ function GaTimeRichTextContent({ value, backgroundColor }: { value: string; back
   return <span dangerouslySetInnerHTML={{ __html: normalizeGaTimeRichTextValue(html) }} />
 }
 
+const gaTimeEntryDisplayContent = (entry: GaTimeSlotEntry) =>
+  entry.source_type === "reminder"
+    ? entry.content.replace(/^\s*REMINDER\s*:?\s*/i, "R: ")
+    : entry.content
+
 function GaTimeRichTextEditor({
   value,
   onChange,
@@ -7326,7 +7331,7 @@ export default function AdminTasksPage() {
                                       className="ga-time-entry"
                                       style={gaTimeEntryStyle(entry)}
                                     >
-                                      <GaTimeRichTextContent value={entry.content} backgroundColor={entry.background_color} />
+                                      <GaTimeRichTextContent value={gaTimeEntryDisplayContent(entry)} backgroundColor={entry.background_color} />
                                     </div>
                                   ))}
                                 {!entries.length && !meetings.length && !slot.isSpecial ? (
@@ -7750,7 +7755,7 @@ export default function AdminTasksPage() {
                                       setGaTimeEditingId(entry.id)
                                     }}
                                   >
-                                    <GaTimeRichTextContent value={entry.content} backgroundColor={entry.background_color} />
+                                    <GaTimeRichTextContent value={gaTimeEntryDisplayContent(entry)} backgroundColor={entry.background_color} />
                                   </span>
                                   {canEditGaTimeSlots && !isImported ? (
                                     <button

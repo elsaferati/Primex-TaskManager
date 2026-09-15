@@ -4063,8 +4063,9 @@ async def send_meetings_report(
     tomorrow: date,
     sections: list[dict[str, str]],
 ) -> dict[str, Any]:
-    # Import locally because the shared GA renderer also reuses M3 table helpers.
+    # Import locally because the GA delivery helpers also reuse M3 table helpers.
     from app.services.one_h_ga_attachments import render_ga_time_table_png
+    from app.services.primeflow_report_delivery import split_ga_recipient_map
 
     week_start = report_day - timedelta(days=report_day.weekday())
     ga_time_table_attachment = (
@@ -4072,14 +4073,31 @@ async def send_meetings_report(
         await render_ga_time_table_png(db, report_day),
         "image/png",
     )
-    return await send_section_report(
-        subject,
-        recipients,
-        plain_text,
-        html_body,
-        report_code="M3",
-        report_day=report_day,
-        tomorrow=tomorrow,
-        sections=sections,
-        extra_attachments=[ga_time_table_attachment],
-    )
+    regular_recipients, ga_recipients = split_ga_recipient_map(recipients)
+    messages: list[dict[str, Any]] = []
+    if any(regular_recipients.values()):
+        messages.append(await send_section_report(
+            subject,
+            regular_recipients,
+            plain_text,
+            html_body,
+            report_code="M3",
+            report_day=report_day,
+            tomorrow=tomorrow,
+            sections=sections,
+        ))
+    if ga_recipients is not None:
+        messages.append(await send_section_report(
+            subject,
+            ga_recipients,
+            plain_text,
+            html_body,
+            report_code="M3",
+            report_day=report_day,
+            tomorrow=tomorrow,
+            sections=sections,
+            extra_attachments=[ga_time_table_attachment],
+        ))
+    if not messages:
+        raise ValueError("At least one recipient is required")
+    return messages[-1]
