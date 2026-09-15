@@ -579,13 +579,16 @@ function synchronizeNumberedListProgress(parsed: ParsedMarkedNoteContent): Parse
 
   const titleLine = lines[titleLineIndex]
   const titleMatch = titleLine.match(
-    /^(\s*[A-Za-zÀ-ž]{1,5}(?:\s*\/\s*[A-Za-zÀ-ž]{1,5})?\s*:\s*(?:[A-Za-zÀ-ž0-9][A-Za-zÀ-ž0-9/_-]{0,11}\s*-\s*)?)(?:(\d{1,3}(?:\s*\/\s*\d{1,3})?)(?=\s+|$|\/))?/
+    /^(\s*(?:[A-Za-zÀ-ž]{1,5}(?:\s*\/\s*[A-Za-zÀ-ž]{1,5})?\s*:\s*)+)(?:([A-Za-zÀ-ž0-9][A-Za-zÀ-ž0-9/_-]{0,11}\s*-\s*))?(?:(\d{1,3}(?:\s*\/\s*\d{1,3})?)(?=\s+|$|\/))?/
   )
   if (!titleMatch) return parsed
 
   const progressLabel = progress.completed > 0 ? `${progress.completed}/${progress.total}` : String(progress.total)
+  const initialsPrefix = titleMatch[1]
+  const codePrefix = titleMatch[2] || ""
+  const progressStart = initialsPrefix.length + codePrefix.length
   let progressEnd = titleMatch[0].length
-  const slashParts = titleLine.slice(titleMatch[1].length).match(
+  const slashParts = titleLine.slice(progressStart).match(
     /^\d{1,3}(?:\s*\/\s*[A-Za-zÀ-ž0-9_-]+)+/
   )
 
@@ -600,15 +603,22 @@ function synchronizeNumberedListProgress(parsed: ParsedMarkedNoteContent): Parse
       // `1/68/20` after the first checklist point is struck. A plain automatic
       // progress such as `1/68` continues to be replaced as one complete value.
       const automaticPartCount = separators.length >= 2 ? 2 : 1
-      progressEnd = titleMatch[1].length + (
+      progressEnd = progressStart + (
         automaticPartCount === 2 ? separators[1].index : separators[0].index
       )
     }
   }
 
-  const titleSuffix = titleLine.slice(progressEnd).trimStart()
-  const suffixSeparator = titleSuffix.startsWith("/") ? "" : " "
-  const nextTitleLine = `${titleMatch[1]}${progressLabel}${titleSuffix ? `${suffixSeparator}${titleSuffix}` : ""}`
+  let titleSuffix = titleLine.slice(progressEnd).trimStart()
+  let manualProgressSuffix = ""
+  const manualSuffixMatch = titleSuffix.match(/^(\/\s*[A-Za-zÀ-ž0-9_-]+)(?:\s+|$)/)
+  if (manualSuffixMatch) {
+    manualProgressSuffix = manualSuffixMatch[1]
+    titleSuffix = titleSuffix.slice(manualSuffixMatch[0].length).trimStart()
+  }
+
+  const remainingTitle = [codePrefix.trim(), titleSuffix].filter(Boolean).join(" ")
+  const nextTitleLine = `${initialsPrefix}${progressLabel}${manualProgressSuffix}${remainingTitle ? ` ${remainingTitle}` : ""}`
   if (nextTitleLine === titleLine) return parsed
 
   lines[titleLineIndex] = nextTitleLine
