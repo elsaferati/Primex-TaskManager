@@ -999,6 +999,60 @@ def test_done_tasks_are_last_within_each_printed_row() -> None:
     assert [item["title"] for item in first_slot_items] == ["Todo later alphabetically", "Done first alphabetically"]
 
 
+def test_same_task_details_for_separate_assignees_are_not_deduplicated() -> None:
+    shared = {
+        "title": "RA/EF: 2 FRG: RREG PRICELISTAT",
+        "date": "2026-09-15",
+        "status": "TODO",
+        "oneHReportSlot": "14:20",
+        "finishPeriod": "PM",
+    }
+    rows = _task_rows(
+        {
+            "oneH": [
+                {**shared, "id": "task:elsa:2026-09-15", "task_id": "elsa", "assignees": ["Elsa Ferati"]},
+                {**shared, "id": "task:rinesa:2026-09-15", "task_id": "rinesa", "assignees": ["Rinesa Ahmedi"]},
+            ]
+        },
+        date(2026, 9, 15),
+    )
+
+    slot_items = next(row[1] for row in rows if row[0] == "1H 14:20")
+    assert {item["task_id"] for item in slot_items} == {"elsa", "rinesa"}
+
+    report_html = _html_table(rows, report_date=date(2026, 9, 15))
+    assert "EF: 2 FRG: RREG PRICELISTAT" in report_html
+    assert "RA: 2 FRG: RREG PRICELISTAT" in report_html
+
+    _, content, _ = _excel_table_attachment(rows, [], date(2026, 9, 15))
+    excel_values = [
+        str(cell.value or "")
+        for row in load_workbook(BytesIO(content)).active.iter_rows()
+        for cell in row
+    ]
+    assert any("EF: 2 FRG: RREG PRICELISTAT" in value for value in excel_values)
+    assert any("RA: 2 FRG: RREG PRICELISTAT" in value for value in excel_values)
+
+
+def test_same_task_repeated_across_buckets_is_still_deduplicated() -> None:
+    shared = {
+        "id": "task:same:2026-09-15",
+        "task_id": "same",
+        "title": "EF: Waiting client",
+        "date": "2026-09-15",
+        "status": "WAITING_CLIENT",
+        "oneHReportSlot": "10:00",
+        "assignees": ["Elsa Ferati"],
+    }
+    rows = _task_rows(
+        {"oneH": [shared], "blocked": [dict(shared)]},
+        date(2026, 9, 15),
+    )
+
+    waiting_items = next(row[1] for row in rows if row[0] == "WFE")
+    assert [item["task_id"] for item in waiting_items] == ["same"]
+
+
 def test_non_daily_or_weekly_meetings_get_blue_borders_in_email_and_excel() -> None:
     meetings = [
         ("TAK EXT", [

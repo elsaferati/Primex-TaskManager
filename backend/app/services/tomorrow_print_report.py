@@ -691,9 +691,20 @@ def _is_personal_task_for_ga(item: dict[str, Any]) -> bool:
 
 def _dedupe(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str, str, str]] = set()
+    seen: set[tuple[str, str, str, str, str, str]] = set()
     for item in items:
+        # Development and converted-note multi-assignee work is stored as one
+        # independent task row per assignee.  Those rows intentionally share
+        # their title, date and report metadata, so include their stable task
+        # identity (or assignees for legacy payloads) in the duplicate key.
+        # The same task repeated across Common View buckets still collapses.
+        identity = str(
+            item.get("task_id") or item.get("taskId") or item.get("id") or ""
+        ).strip()
+        if not identity:
+            identity = "/".join(_assignees(item))
         key = (
+            identity,
             _first_line(item.get("title")).casefold(),
             str(item.get("date") or ""),
             _slot(item),
