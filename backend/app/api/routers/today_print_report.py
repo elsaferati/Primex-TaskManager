@@ -78,7 +78,7 @@ async def _settings_row(db: AsyncSession) -> TodayPrintReportSettings:
     ).scalars().first()
     if row is None:
         row = TodayPrintReportSettings(
-            send_time=time(9, 0), weekdays=[0, 1, 2, 3, 4], recipients=DEFAULT_RECIPIENTS
+            send_time=time(8, 50), weekdays=[0, 1, 2, 3, 4], recipients=DEFAULT_RECIPIENTS
         )
         db.add(row)
         await db.commit()

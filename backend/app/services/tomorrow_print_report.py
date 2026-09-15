@@ -1599,13 +1599,18 @@ def _excel_table_attachment(
                             labels.append(f"[{marker_label}]")
                         if _is_eight_am_task(item):
                             labels.append("[08:00]")
-                        if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
-                            due_day = _task_due_day(item)
-                            if due_day:
-                                due_label = "SOT" if due_day == target_date else due_day.strftime("%d.%m.%Y")
-                                labels.append(f"[{due_label}]")
                         if labels:
                             value = f"{' '.join(labels)}\n{value}"
+                        date_labels: list[str] = []
+                        start_day = _task_start_day(item)
+                        due_day = _task_due_day(item)
+                        if start_day:
+                            date_labels.append(f"[START: {start_day:%d.%m.%Y}]")
+                        if due_day:
+                            due_label = "SOT" if due_day == target_date else due_day.strftime("%d.%m.%Y")
+                            date_labels.append(f"[DUE: {due_label}]")
+                        if date_labels:
+                            value = f"{value}\n{' '.join(date_labels)}"
                     cell_value = f"{item_index - 2 + chunk_index * 6}. {value}"
                     background = _task_cell_style(
                         item, personal=personal, report_date=target_date
