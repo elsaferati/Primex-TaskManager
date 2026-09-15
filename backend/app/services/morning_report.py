@@ -559,6 +559,11 @@ async def _day_context_section(
     today_meetings = [meeting for meeting in meetings if _meeting_occurs_on_date(meeting, report_day)]
     external_meetings = [meeting for meeting in today_meetings if meeting.meeting_type == "external"]
     internal_meetings = [meeting for meeting in today_meetings if meeting.meeting_type != "external"]
+    external_meetings_by_id = {
+        str(meeting.id): meeting
+        for meeting in meetings
+        if meeting.meeting_type == "external"
+    }
 
     # BZ can include a completed alignment task. Keep the open-task list for
     # normal report filtering, but retain all tasks for BZ row metadata so a
@@ -601,9 +606,15 @@ async def _day_context_section(
         "",
         *_ascii_table("FESTA EXTERNE", [("NR", 2), ("FESTA", 48), ("NOTE", 32)], holiday_rows),
         "",
-        *_tomorrow_meeting_table("TAKIMET EXTERNE", _meeting_lines(external_meetings)),
+        *_tomorrow_meeting_table(
+            "TAKIMET EXTERNE",
+            _meeting_lines(external_meetings, external_meetings_by_id),
+        ),
         "",
-        *_tomorrow_meeting_table("TAKIMET INTERNE", _meeting_lines(internal_meetings)),
+        *_tomorrow_meeting_table(
+            "TAKIMET INTERNE",
+            _meeting_lines(internal_meetings, external_meetings_by_id),
+        ),
         "",
         *_tomorrow_task_table(
             "BZ ME GA",

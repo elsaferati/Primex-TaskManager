@@ -1307,6 +1307,11 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     tomorrow_meetings = [meeting for meeting in meetings if _meeting_occurs_on_date(meeting, tomorrow)]
     external_meetings = [m for m in tomorrow_meetings if getattr(m, "meeting_type", None) == "external"]
     internal_meetings = [m for m in tomorrow_meetings if getattr(m, "meeting_type", None) != "external"]
+    external_meetings_by_id = {
+        str(meeting.id): meeting
+        for meeting in meetings
+        if getattr(meeting, "meeting_type", None) == "external"
+    }
     leave_entries = (
         await db.execute(select(CommonEntry).where(CommonEntry.category == CommonCategory.annual_leave))
     ).scalars().all()
@@ -1345,8 +1350,8 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     section_4 = _tomorrow_common_section(
         common_items=common_items,
         tomorrow=tomorrow,
-        fallback_external=_meeting_lines(external_meetings),
-        fallback_internal=_meeting_lines(internal_meetings),
+        fallback_external=_meeting_lines(external_meetings, external_meetings_by_id),
+        fallback_internal=_meeting_lines(internal_meetings, external_meetings_by_id),
         fallback_bz=bz_alignment_lines
         or _task_lines(
             bz_tasks, names, assignee_ids_by_task, include_status=True, all_participant_ids=all_participant_ids
@@ -1417,7 +1422,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
             **table_kwargs,
         ),
     ]
-    section_6 = await _today_meeting_status_section(db, today_meetings, report_day)
+    section_6 = await _today_meeting_status_section(db, today_meetings, report_day, meetings)
 
     by_title = {
         SECTION_TITLES[0]: "(Ploteso manualisht)",
@@ -1828,19 +1833,44 @@ def _meeting_clock_sort_key(meeting: Meeting) -> tuple[int, int, str]:
     return (local.hour, local.minute, _clean_task_title(meeting.title).casefold())
 
 
-def _meeting_lines(meetings: list[Meeting]) -> list[str]:
+def _linked_external_meeting(
+    meeting: Meeting,
+    external_by_id: dict[str, Meeting] | None,
+) -> Meeting | None:
+    if not external_by_id or str(getattr(meeting, "meeting_type", "") or "").lower() != "internal":
+        return None
+    linked_id = (
+        getattr(meeting, "paired_external_meeting_id", None)
+        or getattr(meeting, "pre_external_meeting_id", None)
+    )
+    return external_by_id.get(str(linked_id)) if linked_id else None
+
+
+def _meeting_lines(
+    meetings: list[Meeting],
+    external_by_id: dict[str, Meeting] | None = None,
+) -> list[str]:
     if not meetings:
         return ["(Asnje takim)"]
 
     return [
-        f"- {_local_time(meeting.starts_at)}: {_meeting_title_with_highlight(meeting)}"
+        f"- {_local_time(meeting.starts_at)}: "
+        f"{_meeting_title_with_highlight(meeting, _linked_external_meeting(meeting, external_by_id))}"
         for meeting in sorted(meetings, key=_meeting_clock_sort_key)
     ]
 
 
-def _meeting_title_with_highlight(meeting: Meeting) -> str:
+def _meeting_title_with_highlight(
+    meeting: Meeting,
+    linked_external: Meeting | None = None,
+) -> str:
     title = _clean_task_title(meeting.title)
-    title = f"{title} [[mc:{meeting_report_tone(meeting)}]]"
+    tone = (
+        meeting_report_tone(linked_external, meeting_type="external")
+        if linked_external is not None
+        else meeting_report_tone(meeting)
+    )
+    title = f"{title} [[mc:{tone}]]"
     recurrence = str(getattr(meeting, "recurrence_type", None) or "").strip().lower()
     if recurrence not in {"daily", "weekly"}:
         return f"{title} {MEETING_HIGHLIGHT_MARKER}"
@@ -1877,7 +1907,11 @@ def _meeting_group_title(title: str) -> list[str]:
     return [title]
 
 
-def _meeting_status_checkbox_table(meetings: list[Meeting], status_by_meeting: dict[Any, str]) -> list[str]:
+def _meeting_status_checkbox_table(
+    meetings: list[Meeting],
+    status_by_meeting: dict[Any, str],
+    external_by_id: dict[str, Meeting] | None = None,
+) -> list[str]:
     border = "+----+-------+----------+------------------------------------------------------------------+"
     rows = [
         border,
@@ -1890,7 +1924,12 @@ def _meeting_status_checkbox_table(meetings: list[Meeting], status_by_meeting: d
         return rows
     for index, meeting in enumerate(sorted(meetings, key=_meeting_clock_sort_key), start=1):
         status = status_by_meeting.get(meeting.id, "")
-        title_value, highlighted = _split_meeting_highlight_marker(_meeting_title_with_highlight(meeting))
+        title_value, highlighted = _split_meeting_highlight_marker(
+            _meeting_title_with_highlight(
+                meeting,
+                _linked_external_meeting(meeting, external_by_id),
+            )
+        )
         title_value, meeting_tone = _split_meeting_tone_marker(title_value)
         title_lines = _append_meeting_markers(_wrap_fixed_width(title_value, 64), highlighted, meeting_tone, 64)
         status_icon = "\u2713" if status == "held" else "\u2715" if status == "canceled" else ""
@@ -1903,7 +1942,12 @@ def _meeting_status_checkbox_table(meetings: list[Meeting], status_by_meeting: d
     return rows
 
 
-async def _today_meeting_status_section(db: AsyncSession, meetings: list[Meeting], report_day: date) -> str:
+async def _today_meeting_status_section(
+    db: AsyncSession,
+    meetings: list[Meeting],
+    report_day: date,
+    all_meetings: list[Meeting] | None = None,
+) -> str:
     statuses = (
         await db.execute(
             select(MeetingOccurrenceStatus).where(MeetingOccurrenceStatus.occurrence_date == report_day)
@@ -1912,13 +1956,18 @@ async def _today_meeting_status_section(db: AsyncSession, meetings: list[Meeting
     status_by_meeting = {row.meeting_id: row.status for row in statuses}
     external = [meeting for meeting in meetings if getattr(meeting, "meeting_type", None) == "external"]
     internal = [meeting for meeting in meetings if getattr(meeting, "meeting_type", None) != "external"]
+    external_by_id = {
+        str(meeting.id): meeting
+        for meeting in (all_meetings or meetings)
+        if getattr(meeting, "meeting_type", None) == "external"
+    }
 
     return _normalize_section([
         *_meeting_group_title("TAK EXTERNE"),
-        *_meeting_status_checkbox_table(external, status_by_meeting),
+        *_meeting_status_checkbox_table(external, status_by_meeting, external_by_id),
         "",
         *_meeting_group_title("TAK INTERNE"),
-        *_meeting_status_checkbox_table(internal, status_by_meeting),
+        *_meeting_status_checkbox_table(internal, status_by_meeting, external_by_id),
     ])
 
 

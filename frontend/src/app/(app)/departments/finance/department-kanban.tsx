@@ -4,6 +4,11 @@ import * as React from "react"
 import { toast } from "sonner"
 
 import { TaskEditDialog } from "@/components/task-edit-dialog"
+import {
+  DailyRlzCommentField,
+  DailyRlzReasonCell,
+  dailyRlzStateByTask,
+} from "@/components/daily-rlz-panel"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -15,7 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, toDateInputValue } from "@/lib/dates"
 import { renderMarkedNoteContent } from "@/lib/note-markup"
-import type { Department, SystemTaskOut, Task, User } from "@/lib/types"
+import type { DailyReportResponse, Department, SystemTaskOut, Task, User } from "@/lib/types"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 
 const ALL_USERS_VALUE = "__all__"
@@ -33,6 +38,7 @@ type RowView = {
   id: string
   title: string
   typeLabel: string
+  period: "AM" | "PM" | "AM/PM"
   oneHReportSlot: string
   assigneeIds: string[]
   assigneeLabel: string
@@ -127,7 +133,7 @@ function formatInternalDetails(notes?: string | null) {
   ].join("\n")
 }
 
-function resolvePeriod(finishPeriod?: Task["finish_period"] | null) {
+function resolvePeriod(finishPeriod?: Task["finish_period"] | null): RowView["period"] {
   if (finishPeriod === "PM") return "PM"
   if (finishPeriod === "AM") return "AM"
   return "AM/PM"
@@ -184,10 +190,6 @@ function systemFrequencyDisplayLabel(frequency?: string | null) {
 function normalizeOneHReportSlot(value?: string | null) {
   const normalized = (value || "").trim()
   return ONE_H_REPORT_SLOT_OPTIONS.includes(normalized as (typeof ONE_H_REPORT_SLOT_OPTIONS)[number]) ? normalized : ""
-}
-
-function getOneHReportSlotLabel(value?: string | null) {
-  return normalizeOneHReportSlot(value) || "No slot"
 }
 
 function getFinanceSlotDisplay(task: Task) {
@@ -300,6 +302,7 @@ export default function DepartmentKanban() {
   const [exportingExcel, setExportingExcel] = React.useState(false)
   const [editingTask, setEditingTask] = React.useState<Task | null>(null)
   const [viewingDescriptionTask, setViewingDescriptionTask] = React.useState<Task | null>(null)
+  const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
   const [systemTaskFrequencyByTemplateId, setSystemTaskFrequencyByTemplateId] = React.useState<Record<string, string>>({})
   const todayIso = React.useMemo(() => toDateInputValue(new Date()), [])
   const currentWeekEndIso = React.useMemo(() => endOfCurrentWeekIso(new Date()), [])
@@ -364,6 +367,65 @@ export default function DepartmentKanban() {
     void loadData()
   }, [loadData])
 
+  const dailyReportUserId = selectedUserId === ALL_USERS_VALUE ? user?.id : selectedUserId
+
+  const refreshDailyReport = React.useCallback(async () => {
+    if (!department?.id || !dailyReportUserId) {
+      setDailyReport(null)
+      return
+    }
+
+    const query = new URLSearchParams({
+      day: todayIso,
+      department_id: department.id,
+      user_id: dailyReportUserId,
+    })
+    const response = await apiFetch(`/reports/daily?${query.toString()}`)
+    if (!response.ok) throw new Error("Unable to load today's Daily Report details.")
+    setDailyReport((await response.json()) as DailyReportResponse)
+  }, [apiFetch, dailyReportUserId, department?.id, todayIso])
+
+  React.useEffect(() => {
+    let cancelled = false
+
+    const loadDailyReport = async () => {
+      setDailyReport(null)
+      try {
+        if (!department?.id || !dailyReportUserId) {
+          setDailyReport(null)
+          return
+        }
+        const query = new URLSearchParams({
+          day: todayIso,
+          department_id: department.id,
+          user_id: dailyReportUserId,
+        })
+        const response = await apiFetch(`/reports/daily?${query.toString()}`)
+        if (!response.ok) throw new Error("Unable to load today's Daily Report details.")
+        const payload = (await response.json()) as DailyReportResponse
+        if (!cancelled) setDailyReport(payload)
+      } catch {
+        if (!cancelled) setDailyReport(null)
+      }
+    }
+
+    void loadDailyReport()
+    return () => {
+      cancelled = true
+    }
+  }, [apiFetch, dailyReportUserId, department?.id, todayIso])
+
+  const dailyRlzStates = React.useMemo(() => dailyRlzStateByTask(dailyReport), [dailyReport])
+
+  const dailyRlzStateForRow = React.useCallback(
+    (taskId: string) => {
+      const state = dailyRlzStates.get(taskId)
+      if (!state || dailyReportUserId === user?.id) return state
+      return { ...state, is_editable: false }
+    },
+    [dailyReportUserId, dailyRlzStates, user?.id]
+  )
+
   const usersById = React.useMemo(() => {
     const map = new Map<string, User>()
     for (const entry of users) {
@@ -389,6 +451,7 @@ export default function DepartmentKanban() {
           id: task.id,
           title: task.title || "-",
           typeLabel: financeTaskTypeLabel(task),
+          period: resolvePeriod(task.finish_period),
           oneHReportSlot: normalizeOneHReportSlot(task.one_h_report_slot),
           assigneeIds: assigneeInfo.ids,
           assigneeLabel: assigneeInfo.label,
@@ -760,8 +823,8 @@ export default function DepartmentKanban() {
                 <TableHeader className="bg-slate-50">
                   <TableRow className="bg-slate-50">
                     <TableHead>NR</TableHead>
-                    <TableHead>Title</TableHead>
-                    <TableHead className="w-20 min-w-20 px-1 text-center" title="Frequency">Frequency</TableHead>
+                    <TableHead className="w-[480px] min-w-[480px]">Title</TableHead>
+                    <TableHead className="w-16 min-w-16 max-w-16 px-0 text-center" title="Frequency">Freq.</TableHead>
                     <TableHead>Type</TableHead>
                     <TableHead className="w-28 min-w-28 px-1 text-center" title="1H report time">
                       Slot
@@ -770,9 +833,10 @@ export default function DepartmentKanban() {
                     <TableHead className="text-xs font-normal text-slate-400">Created</TableHead>
                     <TableHead>Start Date</TableHead>
                     <TableHead>Due Date</TableHead>
-                    <TableHead>Priority</TableHead>
                     <TableHead>Late</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead className="min-w-[170px]">Arsyeja</TableHead>
+                    <TableHead className="min-w-[190px]">Koment</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -781,12 +845,12 @@ export default function DepartmentKanban() {
                     filteredRows.map((row, index) => (
                       <TableRow key={row.id}>
                         <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
-                        <TableCell className="min-w-[320px] whitespace-normal font-medium text-slate-800">
+                        <TableCell className="w-[480px] min-w-[480px] whitespace-normal font-medium text-slate-800">
                           {typeof row.title === "string" && row.title.includes("[[")
                             ? renderMarkedNoteContent(row.title, row.title)
                             : row.title}
                         </TableCell>
-                        <TableCell className="w-20 min-w-20 px-1 text-center">
+                        <TableCell className="w-16 min-w-16 max-w-16 px-0 text-center">
                           {row.systemFrequencyDisplayLabel ? (
                             <span
                               className="inline-flex h-5 items-center justify-center rounded-full border border-slate-200 px-2 text-[10px] font-semibold text-slate-600"
@@ -847,11 +911,6 @@ export default function DepartmentKanban() {
                         <TableCell>{formatDateDMY(row.startDateIso)}</TableCell>
                         <TableCell>{formatDateDMY(row.dueDateIso)}</TableCell>
                         <TableCell>
-                          <Badge variant={row.priority === "HIGH" || row.priority === "BLLOK" ? "destructive" : "outline"}>
-                            {row.priority}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
                           {row.lateDays != null && row.lateDays > 0 ? (
                             <Badge variant="destructive">{row.lateDays}</Badge>
                           ) : (
@@ -862,6 +921,22 @@ export default function DepartmentKanban() {
                           <span className={`inline-flex rounded px-2 py-1 text-xs font-medium uppercase ${row.statusClassName}`}>
                             {row.status}
                           </span>
+                        </TableCell>
+                        <TableCell className="min-w-[170px]">
+                          <DailyRlzReasonCell
+                            taskId={row.id}
+                            day={todayIso}
+                            state={dailyRlzStateForRow(row.id)}
+                            onSaved={refreshDailyReport}
+                          />
+                        </TableCell>
+                        <TableCell className="min-w-[190px]">
+                          <DailyRlzCommentField
+                            taskId={row.id}
+                            day={todayIso}
+                            state={dailyRlzStateForRow(row.id)}
+                            onSaved={refreshDailyReport}
+                          />
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-2">
@@ -895,7 +970,7 @@ export default function DepartmentKanban() {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={13} className="py-8 text-center text-sm text-slate-500">
+                      <TableCell colSpan={14} className="py-8 text-center text-sm text-slate-500">
                         No Finance tasks match the selected filters.
                       </TableCell>
                     </TableRow>
