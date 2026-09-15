@@ -110,6 +110,7 @@ TABLE_STYLE = "width:100%;border-collapse:collapse;table-layout:fixed;margin:12p
 CELL_STYLE = "border:1px solid #000;padding:5px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word"
 HEADER_STYLE = f"{CELL_STYLE};text-align:center;font-weight:700"
 SLOT_DIVIDER_STYLE = "border-top:2px solid #111827"
+MEETING_TYPE_DIVIDER_STYLE = "border-top:4px solid #111827"
 INTRA_SLOT_DIVIDER_STYLE = "border-top:1px solid #cbd5e1"
 SLOT_END_DIVIDER_STYLE = "border-bottom:2px solid #111827"
 TASK_TABLE_FRAME_STYLE = "border:3px solid #111827"
@@ -977,7 +978,12 @@ def _html_table(
         personal = bool(rest and rest[0])
         chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
         for chunk_index, chunk in enumerate(chunks):
-            row_divider_style = INTRA_SLOT_DIVIDER_STYLE if chunk_index else SLOT_DIVIDER_STYLE
+            first_row_divider = (
+                MEETING_TYPE_DIVIDER_STYLE
+                if meeting and "INT" in label.upper()
+                else SLOT_DIVIDER_STYLE
+            )
+            row_divider_style = INTRA_SLOT_DIVIDER_STYLE if chunk_index else first_row_divider
             if not meeting:
                 title_cells: list[str] = []
                 date_cells: list[str] = []
@@ -1063,7 +1069,7 @@ def _html_table(
             cells.extend(f'<td style="{CELL_STYLE};{row_divider_style}"></td>' for _ in range(6 - len(cells)))
             label_divider_style = (
                 f"{SLOT_DIVIDER_STYLE};{SLOT_END_DIVIDER_STYLE}"
-                if not meeting else SLOT_DIVIDER_STYLE
+                if not meeting else first_row_divider
             )
             row_header = (
                 f'<th rowspan="{len(chunks)}" style="{SLOT_LABEL_STYLE};{label_divider_style}">{number}</th>'
@@ -1130,9 +1136,9 @@ def _dated_meetings_html(
             else ""
         )
         return (
-            f'<td data-meeting-time="true"{background} style="{CELL_STYLE};{divider}{highlight};background-color:{color};white-space:nowrap">'
+            f'<td data-meeting-time="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};white-space:nowrap">'
             f'{html.escape(meeting_time)}{calendar_badge}{manual_badge}</td>'
-            f'<td data-meeting-cell="true"{background} style="{CELL_STYLE};{divider}{highlight};background-color:{color};'
+            f'<td data-meeting-cell="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};'
             f'{"font-weight:800" if manual_badge else ""}">'
             f"{index}. {html.escape(value)}</td>"
         )
@@ -1153,15 +1159,16 @@ def _dated_meetings_html(
         right_items = right_rows.get(label, [])
         meeting_count = max(len(left_items), len(right_items), 1)
         for index in range(meeting_count):
-            row_divider = SLOT_DIVIDER_STYLE if index == 0 else INTRA_SLOT_DIVIDER_STYLE
+            type_divider = MEETING_TYPE_DIVIDER_STYLE if "INT" in label.upper() else SLOT_DIVIDER_STYLE
+            row_divider = type_divider if index == 0 else INTRA_SLOT_DIVIDER_STYLE
             left_label = (
                 f'<th rowspan="{meeting_count}" data-meeting-type="true" '
-                f'style="{SLOT_LABEL_STYLE};{SLOT_DIVIDER_STYLE}">{html.escape(label)}</th>'
+                f'style="{SLOT_LABEL_STYLE};{type_divider}">{html.escape(label)}</th>'
                 if index == 0 else ""
             )
             right_label = (
                 f'<th rowspan="{meeting_count}" data-meeting-type="true" '
-                f'style="{SLOT_LABEL_STYLE};{SLOT_DIVIDER_STYLE};{divider_style}">'
+                f'style="{SLOT_LABEL_STYLE};{type_divider};{divider_style}">'
                 f'{html.escape(label)}</th>'
                 if index == 0 else ""
             )
@@ -1373,6 +1380,7 @@ def _excel_table_attachment(
         top=Side(style="thin", color="CBD5E1"), bottom=Side(style="thin", color="000000"),
     )
     medium_grid_side = Side(style="medium", color="111827")
+    meeting_type_divider_side = Side(style="thick", color="111827")
 
     def task_grid_border(
         current: Border, *, category_start: bool = False, category_end: bool = False,
@@ -1384,6 +1392,14 @@ def _excel_table_attachment(
             right=medium_grid_side if outer_right else current.right,
             top=medium_grid_side if category_start else current.top,
             bottom=medium_grid_side if category_end else current.bottom,
+        )
+
+    def meeting_type_border(current: Border) -> Border:
+        return Border(
+            left=current.left,
+            right=current.right,
+            top=meeting_type_divider_side,
+            bottom=current.bottom,
         )
     header_fill = PatternFill("solid", fgColor="EAF0FF")
     fills = {
@@ -1735,6 +1751,10 @@ def _excel_table_attachment(
             for column in range(1, 9):
                 cell = sheet.cell(row_number, column)
                 cell.border = non_routine_meeting_border if highlighted and column >= 3 else border
+                if "INT" in label.upper():
+                    previous_label = meeting_values[index - 2][0] if index > 1 else ""
+                    if "INT" not in previous_label.upper():
+                        cell.border = meeting_type_border(cell.border)
                 cell.alignment = Alignment(vertical="top", wrap_text=True)
                 if meeting_fill is not None and column >= 3:
                     cell.fill = meeting_fill
@@ -1870,6 +1890,20 @@ def _docx_table_attachment(
             shade(cell, "E2E8F0")
             set_cell(cell, cell.text, bold=True, center=True)
 
+    def set_meeting_type_divider(cell: Any) -> None:
+        properties = cell._tc.get_or_add_tcPr()
+        borders = properties.find(qn("w:tcBorders"))
+        if borders is None:
+            borders = OxmlElement("w:tcBorders")
+            properties.append(borders)
+        top = borders.find(qn("w:top"))
+        if top is None:
+            top = OxmlElement("w:top")
+            borders.append(top)
+        top.set(qn("w:val"), "single")
+        top.set(qn("w:sz"), "24")
+        top.set(qn("w:color"), "111827")
+
     def set_widths(table: Any, widths: list[float]) -> None:
         table.autofit = False
         for column, width in zip(table.columns, widths):
@@ -1988,7 +2022,8 @@ def _docx_table_attachment(
         for index, value in enumerate(["LLOJI", "KOHA", "TAKIMET"]):
             set_cell(meeting_table.rows[0].cells[index], value, bold=True, center=True)
         style_header(meeting_table.rows[0])
-        for index, (label, item) in enumerate(_flatten_meeting_rows(dated_rows), 1):
+        flattened_meetings = _flatten_meeting_rows(dated_rows)
+        for index, (label, item) in enumerate(flattened_meetings, 1):
             row = meeting_table.add_row()
             set_cell(row.cells[0], label, bold=True)
             meeting_type = "internal" if "INT" in label.upper() else "external"
@@ -2001,6 +2036,10 @@ def _docx_table_attachment(
                 f"{index}. {_report_text(_first_line(item.get('title')))}",
                 bold=_is_manual_internal_meeting(item, meeting_type=meeting_type),
             )
+            previous_label = flattened_meetings[index - 2][0] if index > 1 else ""
+            if "INT" in label.upper() and "INT" not in previous_label.upper():
+                for cell in row.cells:
+                    set_meeting_type_divider(cell)
 
     heading("KOMENTE PER STAF", size=10)
     for line in _comment_write_in_lines(comment_initials or list(COMMENT_FIXED_INITIALS)):
@@ -2343,6 +2382,19 @@ def _core_png_table_attachment(
         draw.line((center, y, center, y + 38), fill=NON_ROUTINE_MEETING_BORDER_COLOR, width=5)
         y += 38
         for meeting_index, (left_entry, right_entry, row_height) in enumerate(meeting_layout, 1):
+            previous_left = meeting_layout[meeting_index - 2][0] if meeting_index > 1 else None
+            previous_right = meeting_layout[meeting_index - 2][1] if meeting_index > 1 else None
+
+            def starts_internal_group(
+                entry: tuple[str, dict[str, Any]] | None,
+                previous: tuple[str, dict[str, Any]] | None,
+            ) -> bool:
+                return bool(
+                    entry
+                    and "INT" in entry[0].upper()
+                    and (previous is None or "INT" not in previous[0].upper())
+                )
+
             x = margin
             row_bottom = y + row_height
             for entry in (left_entry, right_entry):
@@ -2393,6 +2445,10 @@ def _core_png_table_attachment(
                         )
                 x = content_right
             draw.line((center, y, center, row_bottom), fill=NON_ROUTINE_MEETING_BORDER_COLOR, width=5)
+            if starts_internal_group(left_entry, previous_left):
+                draw.line((margin, y, center, y), fill="#111827", width=6)
+            if starts_internal_group(right_entry, previous_right):
+                draw.line((center, y, table_right, y), fill="#111827", width=6)
             y = row_bottom
         draw.rectangle((margin, meeting_table_top, table_right, y), outline="#111827", width=4)
 

@@ -1108,6 +1108,7 @@ def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
     assert "Today one-off 10:00" not in report_html
     assert "border-left:4px solid #2563EB" in report_html
     assert report_html.count("border:2px solid #2563EB") == 4
+    assert report_html.count("border-top:4px solid #111827") == 6
     assert report_html.count('data-meeting-row="true"') == 3
     assert report_html.count('rowspan="2"') == 2
     assert 'bgcolor="#DCECFF"' in report_html
@@ -1182,6 +1183,8 @@ def test_calendar_linked_internal_meeting_inherits_external_tone_and_cal_badge()
     assert set(time_cells) == {"10:00 CAL", "10:30 CAL", "11:00 MANUAL"}
     assert time_cells["10:00 CAL"].fill.fgColor.rgb.endswith("CCEFF1")
     assert time_cells["10:30 CAL"].fill.fgColor.rgb.endswith("CCEFF1")
+    assert time_cells["10:30 CAL"].border.top.style == "thick"
+    assert time_cells["10:30 CAL"].border.top.color.rgb.endswith("111827")
     assert time_cells["11:00 MANUAL"].fill.fgColor.rgb.endswith("DCECFF")
 
 
