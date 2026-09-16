@@ -309,7 +309,12 @@ async def _text_overrides_for_1h_interval(
     by_task: dict[uuid.UUID, list[TaskStrikeEvent]] = {}
     current_titles: dict[uuid.UUID, str] = {}
     current_descriptions: dict[uuid.UUID, str | None] = {}
-    for task_id, task_title, task_description, system_template_origin_id, system_task_slot_id, ga_content, plan_content, event in rows:
+    for row in rows:
+        if len(row) == 8:
+            task_id, task_title, task_description, system_template_origin_id, system_task_slot_id, ga_content, plan_content, event = row
+        else:  # Compatibility with lightweight report/test row providers.
+            task_id, task_title, task_description, ga_content, plan_content, event = row
+            system_template_origin_id = system_task_slot_id = None
         source_title = ga_content or plan_content or task_title or ""
         normalized_title = "\n".join(
             " ".join(line.split())

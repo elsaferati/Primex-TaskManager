@@ -21,10 +21,23 @@ export function useVisibleRefresh(refresh: () => void | Promise<void>, enabled =
     window.addEventListener("focus", run)
     document.addEventListener("visibilitychange", run)
     const timer = window.setInterval(run, intervalMs)
+    let rolloverTimer: number
+    const scheduleRollover = () => {
+      const now = new Date()
+      const rollover = new Date(now)
+      rollover.setHours(16, 0, 0, 0)
+      if (rollover.getTime() <= now.getTime()) rollover.setDate(rollover.getDate() + 1)
+      rolloverTimer = window.setTimeout(async () => {
+        await run()
+        scheduleRollover()
+      }, rollover.getTime() - now.getTime())
+    }
+    scheduleRollover()
     return () => {
       window.removeEventListener("focus", run)
       document.removeEventListener("visibilitychange", run)
       window.clearInterval(timer)
+      window.clearTimeout(rolloverTimer)
     }
   }, [enabled, intervalMs])
 }

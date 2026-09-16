@@ -6,6 +6,8 @@ const SYMBOLS: Record<NonNullable<Task["one_h_marker"]>, string> = {
   QUESTION: "?",
   KA: "KA",
   GENT: "GENT",
+  M2: "M2",
+  M3: "M3",
   FLAG: "\u2691",
 }
 

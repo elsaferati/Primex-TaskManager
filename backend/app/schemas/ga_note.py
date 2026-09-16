@@ -57,7 +57,7 @@ class GaNoteCreate(BaseModel):
     completed_at: datetime | None = None
     is_converted_to_task: bool | None = None
     is_discussed: bool | None = None
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG)$")
+    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|M2|M3)$")
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
 
@@ -68,7 +68,7 @@ class GaNoteUpdate(BaseModel):
     priority: GaNotePriority | None = None
     is_converted_to_task: bool | None = None
     is_discussed: bool | None = None
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG)$")
+    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|M2|M3)$")
 
 
 class GaNoteTaskDeadlineUpdate(BaseModel):
@@ -89,7 +89,7 @@ class GaNoteTaskAssigneeStateUpdate(BaseModel):
     due_date: datetime | None = None
     finish_period: TaskFinishPeriod | None = None
     one_h_report_slot: str | None = Field(default=None, pattern=r"^(10:00|11:00|11:50|14:20|16:00)$")
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG)$")
+    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|M2|M3)$")
     is_deadline_important: bool = False
     priority: TaskPriority = TaskPriority.NORMAL
     is_bllok: bool = False
@@ -104,7 +104,7 @@ class GaNoteTaskBundleUpdate(BaseModel):
     content: str | None = None
     description: str | None = None
     project_id: uuid.UUID | None = None
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG)$")
+    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|M2|M3)$")
     assignee_ids: list[uuid.UUID] | None = None
     assignee_states: list[GaNoteTaskAssigneeStateUpdate] | None = None
     expected_updated_at: datetime | None = None

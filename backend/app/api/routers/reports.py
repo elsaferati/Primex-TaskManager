@@ -23,6 +23,7 @@ from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.services.one_h_slots import effective_slot_date
+from app.services.task_marker import active_one_h_marker
 from app.models.task_user_comment import TaskUserComment
 from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.realization import RealizationDailyCloseEvent, RealizationPeriod
@@ -180,6 +181,7 @@ def _task_to_out(
     assignees: list[TaskAssigneeOut],
     user_comment: str | None = None,
     one_h_report_slot: str | None | object = _ONE_H_SLOT_UNSET,
+    marker_report_date: date | None = None,
 ) -> TaskOut:
     # Reuse TaskOut model shape; keep it minimal for reporting.
     return TaskOut(
@@ -208,7 +210,7 @@ def _task_to_out(
         is_bllok=t.is_bllok,
         is_1h_report=t.is_1h_report,
         one_h_report_slot=t.one_h_report_slot if one_h_report_slot is _ONE_H_SLOT_UNSET else one_h_report_slot,
-        one_h_marker=t.one_h_marker,
+        one_h_marker=active_one_h_marker(t, marker_report_date),
         is_r1=t.is_r1,
         is_personal=t.is_personal,
         is_active=t.is_active,
@@ -430,6 +432,7 @@ async def daily_report(
                         assignee_out_map.get(t.id, []),
                         user_comment=comment_map.get(t.id),
                         one_h_report_slot=one_h_slot_map.get(t.id),
+                        marker_report_date=day,
                     ),
                     project_title=project_title_by_id.get(t.project_id) if t.project_id else None,
                     planned_start=planned_start,
@@ -450,6 +453,7 @@ async def daily_report(
                         assignee_out_map.get(t.id, []),
                         user_comment=comment_map.get(t.id),
                         one_h_report_slot=one_h_slot_map.get(t.id),
+                        marker_report_date=day,
                     ),
                     project_title=project_title_by_id.get(t.project_id) if t.project_id else None,
                     planned_start=planned_start,
@@ -471,6 +475,7 @@ async def daily_report(
                         assignee_out_map.get(t.id, []),
                         user_comment=comment_map.get(t.id),
                         one_h_report_slot=one_h_slot_map.get(t.id),
+                        marker_report_date=day,
                     ),
                     project_title=project_title_by_id.get(t.project_id) if t.project_id else None,
                     planned_start=planned_start,
@@ -586,6 +591,7 @@ async def daily_report(
                     task,
                     system_assignee_out_map.get(task.id, []),
                     user_comment=system_comment_map.get(task.id),
+                    marker_report_date=day,
                 ),
                 template_id=tmpl.id,
                 title=tmpl.title,
@@ -613,6 +619,7 @@ async def daily_report(
                     task,
                     system_assignee_out_map.get(task.id, []),
                     user_comment=system_comment_map.get(task.id),
+                    marker_report_date=day,
                 ),
                 template_id=tmpl.id,
                 title=tmpl.title,

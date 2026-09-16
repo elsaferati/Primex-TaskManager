@@ -42,7 +42,9 @@ def test_task_marker_legend_explains_the_report_symbols() -> None:
     assert "⚑</strong> - PYETJE/SQARIM ME GA" in legend_html
     assert "KA</strong> - PYETJE/SQARIM ME KA" in legend_html
     assert "GENT</strong> - PYETJE/SQARIM ME GENTIN" in legend_html
-    assert legend_html.count('aria-hidden="true"') == 4
+    assert "M2</strong> - DOREZIM DERI NE PAUZE" in legend_html
+    assert "M3</strong> - DOREZIM DERI NE FUND TE DITES" in legend_html
+    assert legend_html.count('aria-hidden="true"') == 6
 
 
 def test_missing_one_h_users_exclude_leave_admin_and_management_initials() -> None:

@@ -40,9 +40,10 @@ from app.services.ga_note_task_instances import (
     apply_ga_note_shared_task_fields,
     reconcile_plan_note_task_assignees,
 )
+from app.services.one_h_slots import current_effective_slot_date
 from app.services.task_strike_events import record_description_strike_events, record_title_strike_events
 from app.services.task_daily_progress import upsert_explicit_task_daily_status
-from app.services.task_marker import note_bundle_marker_update, sync_note_task_marker
+from app.services.task_marker import active_one_h_marker, note_bundle_marker_update, sync_note_task_marker
 from app.services.notifications import (
     add_notification,
     notification_task_preview,
@@ -106,7 +107,7 @@ def _note_out(
         completed_at=note.completed_at,
         is_converted_to_task=note.is_converted_to_task,
         is_discussed=note.is_discussed,
-        one_h_marker=note.one_h_marker,
+        one_h_marker=active_one_h_marker(note),
         next_week=note.next_week,
         project_id=note.project_id,
         department_id=note.department_id,
@@ -309,6 +310,7 @@ async def create_plan_note(
         is_converted_to_task=payload.is_converted_to_task or False,
         is_discussed=payload.is_discussed or False,
         one_h_marker=payload.one_h_marker,
+        one_h_marker_date=current_effective_slot_date() if payload.one_h_marker else None,
         next_week=payload.next_week or False,
         project_id=payload.project_id,
         department_id=department_id,

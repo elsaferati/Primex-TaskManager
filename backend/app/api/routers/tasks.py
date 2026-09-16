@@ -34,7 +34,7 @@ from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_planner_exclusion import TaskPlannerExclusion
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
-from app.services.one_h_slots import effective_slot_date
+from app.services.one_h_slots import current_effective_slot_date, effective_slot_date
 from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.user import User
 from app.schemas.task import (
@@ -52,7 +52,7 @@ from app.services.notifications import add_notification, notification_task_previ
 from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
 from app.services.task_daily_progress import upsert_explicit_task_daily_status, upsert_task_daily_progress
 from app.services.task_date_window import task_date_window_filter
-from app.services.task_marker import sync_task_marker
+from app.services.task_marker import active_one_h_marker, sync_task_marker
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
 from app.services.daily_report_logic import business_days_between, parse_ko_user_id
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
@@ -983,7 +983,7 @@ def _task_to_out(
         is_bllok=task.is_bllok,
         is_1h_report=task.is_1h_report,
         one_h_report_slot=task.one_h_report_slot,
-        one_h_marker=task.one_h_marker,
+        one_h_marker=active_one_h_marker(task),
         is_r1=task.is_r1,
         is_personal=task.is_personal,
         fast_task_order=task.fast_task_order,
@@ -2189,6 +2189,7 @@ async def create_task(
                     is_1h_report=payload.is_1h_report or False,
                     one_h_report_slot=payload.one_h_report_slot if (payload.is_1h_report or payload.is_r1) else None,
                     one_h_marker=payload.one_h_marker,
+                    one_h_marker_date=current_effective_slot_date() if payload.one_h_marker else None,
                     is_r1=payload.is_r1 or False,
                     is_personal=payload.is_personal or False,
                     fast_task_order=fast_task_order_value,
@@ -2319,6 +2320,7 @@ async def create_task(
                             is_1h_report=payload.is_1h_report or False,
                             one_h_report_slot=payload.one_h_report_slot if (payload.is_1h_report or payload.is_r1) else None,
                             one_h_marker=payload.one_h_marker,
+                            one_h_marker_date=current_effective_slot_date() if payload.one_h_marker else None,
                             is_r1=payload.is_r1 or False,
                             is_personal=payload.is_personal or False,
                             fast_task_order=fast_task_order_value,
@@ -2432,6 +2434,7 @@ async def create_task(
                 is_1h_report=payload.is_1h_report or False,
                 one_h_report_slot=payload.one_h_report_slot if (payload.is_1h_report or payload.is_r1) else None,
                 one_h_marker=payload.one_h_marker,
+                one_h_marker_date=current_effective_slot_date() if payload.one_h_marker else None,
                 is_r1=payload.is_r1 or False,
                 is_personal=payload.is_personal or False,
                 fast_task_order=fast_task_order_value,
@@ -2534,6 +2537,7 @@ async def create_task(
                 is_1h_report=payload.is_1h_report or False,
                 one_h_report_slot=payload.one_h_report_slot if (payload.is_1h_report or payload.is_r1) else None,
                 one_h_marker=payload.one_h_marker,
+                one_h_marker_date=current_effective_slot_date() if payload.one_h_marker else None,
                 is_r1=payload.is_r1 or False,
                 is_personal=payload.is_personal or False,
                 fast_task_order=fast_task_order_value,
@@ -2633,6 +2637,7 @@ async def create_task(
         is_1h_report=payload.is_1h_report or False,
         one_h_report_slot=payload.one_h_report_slot if (payload.is_1h_report or payload.is_r1) else None,
         one_h_marker=payload.one_h_marker,
+        one_h_marker_date=current_effective_slot_date() if payload.one_h_marker else None,
         is_r1=payload.is_r1 or False,
         is_personal=payload.is_personal or False,
         fast_task_order=fast_task_order_value,
@@ -3503,6 +3508,7 @@ async def update_task(
             shared_values["one_h_report_slot"] = task.one_h_report_slot
         if one_h_marker_set or payload.is_1h_report is not None:
             shared_values["one_h_marker"] = task.one_h_marker
+            shared_values["one_h_marker_date"] = task.one_h_marker_date
         if payload.is_personal is not None:
             shared_values["is_personal"] = task.is_personal
         if fast_task_order_set:
@@ -3779,7 +3785,7 @@ class TaskOneHReportSlotUpdate(BaseModel):
 
 
 class TaskOneHMarkerUpdate(BaseModel):
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG)$")
+    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|M2|M3)$")
 
 
 def _normalize_one_h_report_slot(value: str | None) -> str | None:
@@ -3818,7 +3824,7 @@ async def update_task_one_h_report_slot(
         is_system_task=(task.system_template_origin_id is not None or task.system_task_slot_id is not None),
     )
 
-    # Current-day slots roll over to the next working day at 15:59.
+    # Current-day slots roll over to the next working day at 16:00.
     slot_date = effective_slot_date(payload.report_date)
 
     task.one_h_report_slot = next_slot

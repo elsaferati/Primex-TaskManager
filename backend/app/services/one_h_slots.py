@@ -1,6 +1,6 @@
 """Effective-date logic for 1H report slots.
 
-The slot workday ends at 15:59 in the app timezone. From 15:59 onward, the
+The slot workday ends at 16:00 in the app timezone. From 16:00 onward, the
 slot column for today targets the next working day. Other selected dates keep
 their own date.
 """
@@ -8,7 +8,7 @@ their own date.
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-SLOT_ROLLOVER_TIME = time(15, 59)
+SLOT_ROLLOVER_TIME = time(16, 0)
 
 
 def _next_working_day(day: date) -> date:
@@ -29,3 +29,11 @@ def effective_slot_date(view_date: date, now: datetime | None = None) -> date:
     if current.time() < SLOT_ROLLOVER_TIME:
         return view_date
     return _next_working_day(view_date)
+
+
+def current_effective_slot_date(now: datetime | None = None) -> date:
+    if now is None:
+        from app.config import settings
+
+        now = datetime.now(ZoneInfo(settings.APP_TIMEZONE))
+    return effective_slot_date(now.date(), now)

@@ -16,6 +16,8 @@ const OPTIONS: Array<{ value: TaskMarker; label: string }> = [
   { value: "QUESTION", label: "?" },
   { value: "KA", label: "KA" },
   { value: "GENT", label: "GENT" },
+  { value: "M2", label: "M2" },
+  { value: "M3", label: "M3" },
   { value: "FLAG", label: "⚑" },
 ]
 

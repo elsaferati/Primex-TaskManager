@@ -32,7 +32,7 @@ import type { Department, GaNote, GaNoteAttachment, PlanNote, Project, SkillCate
 
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
-type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG"
+type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3"
 type OneHMarkerFilter = "all" | "with" | "none" | OneHMarker
 const ONE_H_MARKER_NONE = "__none__"
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
@@ -40,6 +40,8 @@ const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "QUESTION", label: "?" },
   { value: "KA", label: "KA" },
   { value: "GENT", label: "GENT" },
+  { value: "M2", label: "M2" },
+  { value: "M3", label: "M3" },
   { value: "FLAG", label: "⚑" },
 ]
 const oneHMarkerLabel = (value?: OneHMarker | null) =>
@@ -3270,6 +3272,10 @@ export default function GaKaNotesPage() {
             <span><b className="text-xs font-black">KA</b> - PYETJE/SQARIM ME KA</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
             <span><b className="text-xs font-black">GENT</b> - PYETJE/SQARIM ME GENTIN</span>
+            <span aria-hidden="true">/</span>
+            <span><b className="text-xs font-black">M2</b> - DOREZIM DERI NE PAUZE</span>
+            <span aria-hidden="true">/</span>
+            <span><b className="text-xs font-black">M3</b> - DOREZIM DERI NE FUND TE DITES</span>
           </div>
           {showLegend ? (
             <div className="rounded-md border bg-white">
@@ -3292,6 +3298,8 @@ export default function GaKaNotesPage() {
                       ["⚑", "PYETJE/SQARIM ME GA"],
                       ["KA", "PYETJE/SQARIM ME KA"],
                       ["GENT", "PYETJE/SQARIM ME GENTIN"],
+                      ["M2", "DOREZIM DERI NE PAUZE"],
+                      ["M3", "DOREZIM DERI NE FUND TE DITES"],
                     ].map(([symbol, meaning]) => (
                       <TableRow key={symbol} className="h-8">
                         <TableCell className="p-1 text-center text-lg font-black text-[#0F2A5F]">{symbol}</TableCell>

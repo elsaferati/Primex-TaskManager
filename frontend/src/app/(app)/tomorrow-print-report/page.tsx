@@ -30,7 +30,7 @@ type Delivery = {
   last_error?: string | null
 }
 type Preview = { subject: string; target_date: string; html: string }
-type TaskMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG"
+type TaskMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3"
 type TaskMarkerFilter = "all" | "with" | "none" | TaskMarker
 
 const taskMarkerOptions: Array<{ value: TaskMarker; label: string }> = [
@@ -38,6 +38,8 @@ const taskMarkerOptions: Array<{ value: TaskMarker; label: string }> = [
   { value: "QUESTION", label: "?" },
   { value: "KA", label: "KA" },
   { value: "GENT", label: "GENT" },
+  { value: "M2", label: "M2" },
+  { value: "M3", label: "M3" },
   { value: "FLAG", label: "⚑" },
 ]
 

@@ -13,6 +13,7 @@ from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.user import User
 from app.models.enums import TaskFinishPeriod, TaskPriority, TaskStatus
+from app.services.one_h_slots import current_effective_slot_date
 
 
 @dataclass(slots=True)
@@ -108,6 +109,7 @@ def _copy_for_new_assignee(
         is_1h_report=template.is_1h_report,
         one_h_report_slot=None,
         one_h_marker=template.one_h_marker,
+        one_h_marker_date=template.one_h_marker_date,
         is_r1=template.is_r1,
         is_personal=template.is_personal,
         fast_task_order=None,
@@ -151,6 +153,7 @@ def _copy_for_new_plan_assignee(
         is_1h_report=template.is_1h_report,
         one_h_report_slot=None,
         one_h_marker=template.one_h_marker,
+        one_h_marker_date=template.one_h_marker_date,
         is_r1=template.is_r1,
         is_personal=template.is_personal,
         fast_task_order=None,
@@ -453,9 +456,12 @@ def apply_ga_note_assignee_execution_states(
         if state.one_h_report_slot_is_set and task.one_h_report_slot != state.one_h_report_slot:
             task.one_h_report_slot = state.one_h_report_slot
             changed = True
-        if state.one_h_marker_is_set and task.one_h_marker != state.one_h_marker:
-            task.one_h_marker = state.one_h_marker
-            changed = True
+        if state.one_h_marker_is_set:
+            marker_date = current_effective_slot_date() if state.one_h_marker else None
+            if task.one_h_marker != state.one_h_marker or task.one_h_marker_date != marker_date:
+                task.one_h_marker = state.one_h_marker
+                task.one_h_marker_date = marker_date
+                changed = True
         if task.is_deadline_important != state.is_deadline_important:
             task.is_deadline_important = state.is_deadline_important
             changed = True

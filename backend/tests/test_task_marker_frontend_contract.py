@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_daily_report_api_returns_the_saved_task_marker():
     source = (ROOT / "backend/app/api/routers/reports.py").read_text(encoding="utf-8")
-    assert "one_h_marker=t.one_h_marker" in source
+    assert "one_h_marker=active_one_h_marker(t, marker_report_date)" in source
 
 
 def test_every_department_my_view_renders_the_same_task_marker():
@@ -47,6 +47,21 @@ def test_symbol_filters_include_all_marked_tasks_in_1h_and_px_notes():
         assert '"with" ? Boolean(marker)' in source or 'oneHMarkerFilter === "with"' in source
 
 
+def test_m2_and_m3_symbols_are_available_in_shared_editors_and_legends():
+    paths = (
+        "frontend/src/components/task-one-h-marker-editor.tsx",
+        "frontend/src/app/(app)/common/page.tsx",
+        "frontend/src/app/(app)/ga-ka-notes/page.tsx",
+        "frontend/src/app/(app)/tomorrow-print-report/page.tsx",
+        "backend/app/services/primeflow_report.py",
+        "backend/app/services/tomorrow_print_report.py",
+    )
+    for relative_path in paths:
+        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert "M2" in source, relative_path
+        assert "M3" in source, relative_path
+
+
 def test_report_generation_buttons_show_progress():
     report_pages = (
         "frontend/src/app/(app)/tomorrow-print-report/page.tsx",
@@ -83,12 +98,12 @@ def test_task_search_returns_the_saved_marker():
     schema = (ROOT / "backend/app/schemas/search.py").read_text(encoding="utf-8")
     router = (ROOT / "backend/app/api/routers/search.py").read_text(encoding="utf-8")
     assert "one_h_marker: str | None = None" in schema
-    assert "one_h_marker=t.one_h_marker" in router
+    assert "one_h_marker=active_one_h_marker(t)" in router
 
 
 def test_m1_m2_m3_task_tables_render_the_saved_marker():
     source = (ROOT / "backend/app/services/meetings_report.py").read_text(encoding="utf-8")
-    assert "one_h_marker_symbol(getattr(task, \"one_h_marker\", None))" in source
+    assert "one_h_marker_symbol(active_one_h_marker(task))" in source
 
 
 def test_common_view_personal_owner_priority_is_genti_then_ka_then_ga():
