@@ -352,6 +352,11 @@ type LeaveItem = {
   userId?: string
 }
 type ExternalHolidayItem = { entryId?: string; title: string; date: string; note?: string }
+type InternalMeetingParticipantConflict = {
+  userId: string
+  userName: string
+  reasons: string[]
+}
 type FastTaskItemMeta = {
   taskId?: string
   userId?: string
@@ -2676,6 +2681,11 @@ export default function CommonViewPage() {
     Boolean(internalMeetingTitle.trim())
     && Boolean(internalMeetingDepartmentId)
     && internalMeetingParticipantIds.length > 0
+    && (
+      internalMeetingRecurrenceType === "none"
+        ? Boolean(internalMeetingStartsAt)
+        : Boolean(internalMeetingStartTime)
+    )
 
   const reloadMeetingTemplates = React.useCallback(async () => {
     try {
@@ -4170,17 +4180,16 @@ export default function CommonViewPage() {
   React.useEffect(() => {
     if (!internalMeetingsOpen) return
     const run = async () => {
-      const meetingsBase = commonDepartmentId
-        ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
-        : "/meetings?include_all_departments=true"
-      const meetingsRes = await apiFetch(`${meetingsBase}&meeting_type=internal`)
+      const meetingsRes = await apiFetch(
+        "/meetings?include_all_departments=true&meeting_type=internal"
+      )
       if (meetingsRes?.ok) {
         const meetings = (await meetingsRes.json()) as Meeting[]
         setInternalMeetings(meetings)
       }
     }
     void run()
-  }, [internalMeetingsOpen, apiFetch, commonDepartmentId])
+  }, [internalMeetingsOpen, apiFetch])
 
   // Filter helpers
   const inSelectedDates = (dateStr: string) => !selectedDates.size || selectedDates.has(dateStr)
@@ -6679,6 +6688,161 @@ export default function CommonViewPage() {
   )
 
 
+  const findInternalMeetingParticipantConflicts = React.useCallback(
+    (proposedStart: Date): InternalMeetingParticipantConflict[] => {
+      if (Number.isNaN(proposedStart.getTime())) return []
+
+      const meetingDurationMinutes = 30
+      const proposedEnd = new Date(proposedStart.getTime() + meetingDurationMinutes * 60 * 1000)
+      const dateKey = (value: Date) =>
+        `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`
+      const targetDate = dateKey(proposedStart)
+      const meetingMinute = proposedStart.getHours() * 60 + proposedStart.getMinutes()
+      const meetingEndMinute = meetingMinute + meetingDurationMinutes
+      const selectedParticipantIds = new Set(internalMeetingParticipantIds)
+      const conflicts = new Map<string, InternalMeetingParticipantConflict>()
+
+      const displayName = (participant: User) =>
+        participant.full_name || participant.username || participant.email || "Unknown user"
+      const selectedUsers = internalMeetingParticipantIds
+        .map((participantId) => users.find((candidate) => candidate.id === participantId))
+        .filter((participant): participant is User => Boolean(participant))
+      const addConflict = (participant: User, reason: string) => {
+        const current = conflicts.get(participant.id) || {
+          userId: participant.id,
+          userName: displayName(participant),
+          reasons: [],
+        }
+        if (!current.reasons.includes(reason)) current.reasons.push(reason)
+        conflicts.set(participant.id, current)
+      }
+      const entryMatchesUser = (
+        entry: { userId?: string; person?: string },
+        participant: User
+      ) => {
+        if (entry.userId && entry.userId === participant.id) return true
+        const person = (entry.person || "").trim().toLocaleLowerCase()
+        if (!person) return false
+        return [participant.full_name, participant.username, participant.email]
+          .some((value) => (value || "").trim().toLocaleLowerCase() === person)
+      }
+      const timeRangeCovers = (
+        from: string | undefined,
+        to: string | undefined,
+        defaultFrom: string,
+        defaultTo: string
+      ) => {
+        const fromMinute = parseTimeToMinutes(from) ?? parseTimeToMinutes(defaultFrom)
+        const toMinute = parseTimeToMinutes(to) ?? parseTimeToMinutes(defaultTo)
+        if (fromMinute == null || toMinute == null) return true
+        return fromMinute < meetingEndMinute && meetingMinute < toMinute
+      }
+      const rangeLabel = (from?: string, to?: string) =>
+        from && to ? `${from}–${to}` : "gjithë ditën"
+      const clockLabel = (value: Date) =>
+        `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`
+
+      for (const participant of selectedUsers) {
+        for (const leave of commonData.leave) {
+          if (targetDate < leave.startDate || targetDate > leave.endDate) continue
+          if (!leave.isAllUsers && !entryMatchesUser(leave, participant)) continue
+          if (
+            leave.fullDay
+            || timeRangeCovers(leave.from, leave.to, "00:00", "23:59")
+          ) {
+            addConflict(
+              participant,
+              `PV/FESTË — ${leave.fullDay ? "gjithë ditën" : rangeLabel(leave.from, leave.to)}`
+            )
+          }
+        }
+        for (const absence of commonData.absent) {
+          if (absence.date !== targetDate || !entryMatchesUser(absence, participant)) continue
+          if (timeRangeCovers(absence.from, absence.to, "08:00", "23:00")) {
+            addConflict(participant, `Mungesë — ${rangeLabel(absence.from, absence.to)}`)
+          }
+        }
+        for (const late of commonData.late) {
+          if (late.date !== targetDate || !entryMatchesUser(late, participant)) continue
+          if (timeRangeCovers(late.start, late.until, "08:00", "09:00")) {
+            addConflict(participant, `Vonesë — deri në ${late.until || "09:00"}`)
+          }
+        }
+        for (const holiday of commonData.externalHoliday) {
+          if (holiday.date === targetDate) {
+            addConflict(participant, `Festë zyrtare — ${holiday.title}`)
+          }
+        }
+      }
+
+      for (const meeting of internalMeetings) {
+        if (
+          !meeting.starts_at
+          || meeting.calendar_sync_status === "cancelled"
+          || !(meeting.participant_ids || []).some((participantId) => selectedParticipantIds.has(participantId))
+        ) {
+          continue
+        }
+        const sourceStart = new Date(meeting.starts_at)
+        if (Number.isNaN(sourceStart.getTime())) continue
+        const recurrence = (meeting.recurrence_type || "none").toLocaleLowerCase()
+        const mondayBasedWeekday = (proposedStart.getDay() + 6) % 7
+        const occursOnDate = recurrence === "weekly"
+          ? Boolean(meeting.recurrence_days_of_week?.includes(mondayBasedWeekday))
+          : recurrence === "monthly"
+            ? Boolean(meeting.recurrence_days_of_month?.includes(proposedStart.getDate()))
+            : recurrence === "yearly"
+              ? sourceStart.getMonth() === proposedStart.getMonth()
+                && (meeting.recurrence_days_of_month?.[0] || sourceStart.getDate()) === proposedStart.getDate()
+              : dateKey(sourceStart) === targetDate
+        if (!occursOnDate) continue
+
+        const occurrenceStart = new Date(
+          proposedStart.getFullYear(),
+          proposedStart.getMonth(),
+          proposedStart.getDate(),
+          sourceStart.getHours(),
+          sourceStart.getMinutes(),
+          0,
+          0
+        )
+        const durationMs = meetingDurationMinutes * 60 * 1000
+        const occurrenceEnd = new Date(occurrenceStart.getTime() + durationMs)
+        if (!(proposedStart < occurrenceEnd && occurrenceStart < proposedEnd)) continue
+        if (meetingOccurrenceStatuses.get(occurrenceStatusKey(meeting.id, targetDate))?.status === "canceled") {
+          continue
+        }
+
+        for (const participantId of meeting.participant_ids || []) {
+          if (!selectedParticipantIds.has(participantId)) continue
+          const participant = users.find((candidate) => candidate.id === participantId)
+          if (!participant) continue
+          addConflict(
+            participant,
+            `Në TAK INT “${meeting.title}” (${clockLabel(occurrenceStart)}–${clockLabel(occurrenceEnd)})`
+          )
+        }
+      }
+
+      return internalMeetingParticipantIds
+        .map((participantId) => conflicts.get(participantId))
+        .filter((conflict): conflict is InternalMeetingParticipantConflict => Boolean(conflict))
+    },
+    [
+      commonData.absent,
+      commonData.externalHoliday,
+      commonData.late,
+      commonData.leave,
+      internalMeetingParticipantIds,
+      internalMeetings,
+      meetingOccurrenceStatuses,
+      occurrenceStatusKey,
+      parseTimeToMinutes,
+      users,
+    ]
+  )
+
+
   const submitInternalMeeting = React.useCallback(async () => {
     if (!internalMeetingTitle.trim()) return
     if (!internalMeetingParticipantIds.length) {
@@ -6694,7 +6858,11 @@ export default function CommonViewPage() {
     try {
       let startsAt: string | null = null
       if (internalMeetingRecurrenceType === "none") {
-        startsAt = internalMeetingStartsAt ? new Date(internalMeetingStartsAt).toISOString() : null
+        if (!internalMeetingStartsAt) {
+          toast.error("Date and time are required for the meeting.")
+          return
+        }
+        startsAt = new Date(internalMeetingStartsAt).toISOString()
       } else {
         if (!internalMeetingStartTime) {
           toast.error("Time is required for recurring meetings.")
@@ -6732,6 +6900,38 @@ export default function CommonViewPage() {
           return
         }
         startsAt = next.toISOString()
+      }
+      const participantConflicts = findInternalMeetingParticipantConflicts(new Date(startsAt))
+      if (participantConflicts.length) {
+        const approved = await confirm({
+          title: "Konflikte për pjesëmarrësit",
+          description: (
+            <span className="block space-y-3 text-left">
+              <span className="block">
+                Personat e mëposhtëm nuk janë të lirë në orarin e zgjedhur. Kontrolloji para se të vazhdosh.
+              </span>
+              {participantConflicts.map((conflict) => (
+                <span
+                  key={conflict.userId}
+                  className="block rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-950"
+                >
+                  <strong className="block">{conflict.userName}</strong>
+                  {conflict.reasons.map((reason) => (
+                    <span key={reason} className="mt-1 block text-xs">
+                      • {reason}
+                    </span>
+                  ))}
+                </span>
+              ))}
+              <span className="block text-xs text-slate-500">
+                “Aprovo gjithsesi” e krijon takimin me këta persona; “Ndrysho” e mban formularin hapur.
+              </span>
+            </span>
+          ),
+          confirmLabel: "Aprovo gjithsesi",
+          cancelLabel: "Ndrysho",
+        })
+        if (!approved) return
       }
       const payload = {
         title: internalMeetingTitle.trim(),
@@ -6808,7 +7008,9 @@ export default function CommonViewPage() {
     internalMeetingDepartmentId,
     internalMeetingParticipantIds,
     internalMeetingPairExternalId,
+    confirm,
     externalMeetings,
+    findInternalMeetingParticipantConflicts,
     user?.department_id,
     user?.email,
     user?.full_name,

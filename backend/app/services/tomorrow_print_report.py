@@ -129,6 +129,8 @@ PERSONAL_TIME_STYLE = "font-size:13px;line-height:1.2;font-weight:800;white-spac
 DEADLINE_COLOR = "#DC2626"
 EIGHT_AM_BORDER_COLOR = "#DC2626"
 NON_ROUTINE_MEETING_BORDER_COLOR = "#2563EB"
+CALENDAR_INTERNAL_TEXT_COLOR = "#64748B"
+PERSONAL_TASK_INITIALS = re.compile(r"^[A-Z]{1,5}(?:\s*[:/]\s*[A-Z]{1,5})*(?=\s|:|/|$)", re.I)
 NOTE_MARKERS_RE = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.I)
 WFC_TOKEN_RE = re.compile(r"\bWFC\b", re.I)
 STATUS_COLORS = {
@@ -564,6 +566,25 @@ def _excel_task_title(
     return CellRichText(parts)
 
 
+def _excel_meeting_user_initials(
+    item: dict[str, Any], *, default_color: str = "000000"
+) -> str | CellRichText:
+    users = _meeting_users(item)
+    if not users:
+        return "-"
+    unavailable = {str(value) for value in item.get("_unavailableUserInitials") or []}
+    if not unavailable:
+        return "/".join(label for label, _ in users)
+
+    parts: list[str | TextBlock] = []
+    for index, (label, _) in enumerate(users):
+        if index:
+            parts.append(TextBlock(InlineFont(b=True, color=default_color), "/"))
+        color = DEADLINE_COLOR.removeprefix("#") if label in unavailable else default_color
+        parts.append(TextBlock(InlineFont(b=True, color=color), label))
+    return CellRichText(parts)
+
+
 def _is_eight_am_task(item: dict[str, Any]) -> bool:
     title = " ".join(str(item.get(key) or "") for key in ("title", "task_title"))
     if title_has_eight_am_indicator(title, is_system_task=_is_system_task_item(item)):
@@ -823,6 +844,146 @@ def _is_calendar_meeting(item: dict[str, Any], *, meeting_type: str) -> bool:
     )
 
 
+def _is_faded_calendar_internal(item: dict[str, Any], *, meeting_type: str) -> bool:
+    return meeting_type == "internal" and _is_calendar_meeting(
+        item, meeting_type=meeting_type
+    )
+
+
+def _meeting_user_initials(item: dict[str, Any]) -> str:
+    return "/".join(label for label, _ in _meeting_users(item)) or "-"
+
+
+def _meeting_users(item: dict[str, Any]) -> list[tuple[str, str | None]]:
+    raw = item.get("assignees") or item.get("participantNames") or item.get("participant_names") or []
+    raw_ids = (
+        item.get("assigneeUserIds")
+        or item.get("assignee_user_ids")
+        or item.get("participantUserIds")
+        or item.get("participant_user_ids")
+        or []
+    )
+    if isinstance(raw, str):
+        raw = raw.split(",")
+    if isinstance(raw_ids, str):
+        raw_ids = [raw_ids]
+    if not isinstance(raw, (list, tuple, set)):
+        return []
+    ids = list(raw_ids) if isinstance(raw_ids, (list, tuple, set)) else []
+
+    result: list[tuple[str, str | None]] = []
+    seen: set[str] = set()
+    for index, value in enumerate(raw):
+        if isinstance(value, dict):
+            user_id = value.get("id") or value.get("userId") or value.get("user_id")
+            value = value.get("full_name") or value.get("username") or value.get("email") or ""
+        else:
+            user_id = ids[index] if index < len(ids) else None
+        label = _initials(str(value or ""))
+        if label and label not in seen:
+            seen.add(label)
+            result.append((label, str(user_id) if user_id else None))
+    return result
+
+
+def _clock_minutes(value: Any) -> int | None:
+    match = re.search(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)", str(value or ""))
+    if not match:
+        return None
+    hour, minute = int(match.group(1)), int(match.group(2))
+    return hour * 60 + minute if hour < 24 and minute < 60 else None
+
+
+def _meeting_unavailable_initials(
+    item: dict[str, Any], items: dict[str, Any], target_date: date
+) -> set[str]:
+    users = _meeting_users(item)
+    if not users:
+        return set()
+    meeting_minutes = _clock_minutes(item.get("time"))
+    target_iso = target_date.isoformat()
+
+    def row_matches_user(row: dict[str, Any], label: str, user_id: str | None) -> bool:
+        row_user_id = row.get("userId") or row.get("user_id")
+        if user_id and row_user_id and str(user_id) == str(row_user_id):
+            return True
+        return _initials(str(row.get("person") or "")) == label
+
+    def range_covers(
+        start: Any, end: Any, *, default_start: str, default_end: str
+    ) -> bool:
+        if meeting_minutes is None:
+            return True
+        start_minutes = _clock_minutes(start)
+        end_minutes = _clock_minutes(end)
+        if start_minutes is None:
+            start_minutes = _clock_minutes(default_start)
+        if end_minutes is None:
+            end_minutes = _clock_minutes(default_end)
+        return bool(
+            start_minutes is not None
+            and end_minutes is not None
+            and start_minutes <= meeting_minutes <= end_minutes
+        )
+
+    if any(
+        isinstance(row, dict) and str(row.get("date") or "")[:10] == target_iso
+        for row in items.get("externalHoliday") or []
+    ):
+        return {label for label, _ in users}
+
+    unavailable: set[str] = set()
+    for label, user_id in users:
+        for row in items.get("leave") or []:
+            if not isinstance(row, dict):
+                continue
+            start_date = str(row.get("startDate") or row.get("start_date") or "")[:10]
+            end_date = str(row.get("endDate") or row.get("end_date") or start_date)[:10]
+            if not start_date or not (start_date <= target_iso <= end_date):
+                continue
+            if not (row.get("isAllUsers") or row.get("is_all_users")) and not row_matches_user(
+                row, label, user_id
+            ):
+                continue
+            full_day = row.get("fullDay") if "fullDay" in row else row.get("full_day")
+            if full_day is not False or range_covers(
+                row.get("from"), row.get("to"), default_start="00:00", default_end="23:59"
+            ):
+                unavailable.add(label)
+                break
+        if label in unavailable:
+            continue
+        for row in items.get("absent") or []:
+            if not isinstance(row, dict) or str(row.get("date") or "")[:10] != target_iso:
+                continue
+            if row_matches_user(row, label, user_id) and range_covers(
+                row.get("from"), row.get("to"), default_start="08:00", default_end="23:00"
+            ):
+                unavailable.add(label)
+                break
+        if label in unavailable:
+            continue
+        for row in items.get("late") or []:
+            if not isinstance(row, dict) or str(row.get("date") or "")[:10] != target_iso:
+                continue
+            if not row_matches_user(row, label, user_id):
+                continue
+            start_minutes = _clock_minutes(row.get("start"))
+            until_minutes = _clock_minutes(row.get("until"))
+            if start_minutes is None:
+                start_minutes = _clock_minutes("08:00")
+            if until_minutes is None:
+                until_minutes = _clock_minutes("09:00")
+            if meeting_minutes is None or (
+                start_minutes is not None
+                and until_minutes is not None
+                and start_minutes <= meeting_minutes < until_minutes
+            ):
+                unavailable.add(label)
+                break
+    return unavailable
+
+
 def _is_manual_internal_meeting(item: dict[str, Any], *, meeting_type: str) -> bool:
     return meeting_type == "internal" and not any(
         item.get(field)
@@ -847,7 +1008,15 @@ def _meeting_time_display(item: dict[str, Any], *, meeting_type: str) -> str:
 def _meeting_rows(items: dict[str, Any], target_date: date) -> list[tuple[str, list[dict[str, Any]]]]:
     rows: list[tuple[str, list[dict[str, Any]]]] = []
     for bucket, label in MEETING_ROWS:
-        values = [item for item in items.get(bucket, []) if isinstance(item, dict) and _item_date(item) == target_date]
+        values = []
+        for item in items.get(bucket, []):
+            if not isinstance(item, dict) or _item_date(item) != target_date:
+                continue
+            report_item = dict(item)
+            report_item["_unavailableUserInitials"] = sorted(
+                _meeting_unavailable_initials(item, items, target_date)
+            )
+            values.append(report_item)
         values.sort(key=_meeting_time_sort_key)
         rows.append((label, values))
     return rows
@@ -1136,12 +1305,31 @@ def _dated_meetings_html(
         if item is None:
             return (
                 f'<td data-meeting-time="true" style="{CELL_STYLE};{divider}">&nbsp;</td>'
+                f'<td data-meeting-users="true" style="{CELL_STYLE};{divider}">&nbsp;</td>'
                 f'<td data-meeting-cell="true" style="{CELL_STYLE};{divider}">&nbsp;</td>'
             )
         meeting_time = str(item.get("time") or "-").strip() or "-"
+        meeting_users = _meeting_users(item)
+        unavailable_users = {
+            str(value) for value in item.get("_unavailableUserInitials") or []
+        }
+        meeting_users_html = "/".join(
+            (
+                f'<span data-unavailable-meeting-user="true" style="color:{DEADLINE_COLOR};font-weight:800">'
+                f'{html.escape(label)}</span>'
+                if label in unavailable_users
+                else html.escape(label)
+            )
+            for label, _ in meeting_users
+        ) or "-"
         value = _report_text(_first_line(item.get("title")))
         meeting_type = "internal" if "INT" in label.upper() else "external"
         color = meeting_report_color(item, meeting_type=meeting_type)
+        text_color = (
+            f";color:{CALENDAR_INTERNAL_TEXT_COLOR}"
+            if _is_faded_calendar_internal(item, meeting_type=meeting_type)
+            else ""
+        )
         calendar_badge = (
             ' <span data-calendar-meeting="true" style="display:inline-block;padding:1px 5px;'
             'border-radius:999px;background:#0D9488;color:#FFFFFF;font-size:9px;font-weight:700">CAL</span>'
@@ -1162,10 +1350,12 @@ def _dated_meetings_html(
             else ""
         )
         return (
-            f'<td data-meeting-time="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};white-space:nowrap">'
+            f'<td data-meeting-time="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};white-space:nowrap{text_color}">'
             f'{html.escape(meeting_time)}{calendar_badge}{manual_badge}</td>'
+            f'<td data-meeting-users="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};'
+            f'white-space:nowrap;font-weight:700{text_color}">{meeting_users_html}</td>'
             f'<td data-meeting-cell="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};'
-            f'{"font-weight:800" if manual_badge else ""}">'
+            f'{"font-weight:800" if meeting_type == "external" or manual_badge else ""}{text_color}">'
             f"{index}. {html.escape(value)}</td>"
         )
 
@@ -1224,18 +1414,21 @@ def _dated_meetings_html(
     return (
         '<table data-side-by-side-meetings="true" role="presentation" width="100%" border="1" '
         f'cellpadding="0" cellspacing="0" style="{TABLE_STYLE};margin-top:18px;{MEETING_TABLE_FRAME_STYLE}">'
-        '<colgroup><col width="8%"><col width="7%"><col width="35%"><col width="8%"><col width="7%"><col width="35%"></colgroup>'
+        '<colgroup><col width="8%"><col width="7%"><col width="7%"><col width="28%">'
+        '<col width="8%"><col width="7%"><col width="7%"><col width="28%"></colgroup>'
         '<thead><tr>'
-        f'<th colspan="3" style="{HEADER_STYLE};background-color:#EEF2FF;{MEETING_HEADER_FRAME_STYLE};border-left:5px solid #2563EB;'
+        f'<th colspan="4" style="{HEADER_STYLE};background-color:#EEF2FF;{MEETING_HEADER_FRAME_STYLE};border-left:5px solid #2563EB;'
         f'font-size:15px;">{day_header(left)}</th>'
-        f'<th colspan="3" style="{HEADER_STYLE};background-color:#EEF2FF;{MEETING_HEADER_FRAME_STYLE};{divider_style};font-size:15px;">'
+        f'<th colspan="4" style="{HEADER_STYLE};background-color:#EEF2FF;{MEETING_HEADER_FRAME_STYLE};{divider_style};font-size:15px;">'
         f'{day_header(right)}</th></tr>'
         '<tr>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">LLOJI</th>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">KOHA</th>'
+        f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">USER</th>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">TAKIMET</th>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE};{divider_style}">LLOJI</th>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">KOHA</th>'
+        f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">USER</th>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">TAKIMET</th>'
         f"</tr></thead><tbody>{body}</tbody></table>"
     )
@@ -1751,8 +1944,8 @@ def _excel_table_attachment(
         rows: list[tuple[str, list[dict[str, Any]], bool]], row_number: int
     ) -> int:
         sheet.merge_cells(start_row=row_number, start_column=1, end_row=row_number, end_column=2)
-        sheet.merge_cells(start_row=row_number, start_column=4, end_row=row_number, end_column=8)
-        for column, value in ((1, "LLOJI"), (3, "KOHA"), (4, "TAKIMET")):
+        sheet.merge_cells(start_row=row_number, start_column=5, end_row=row_number, end_column=8)
+        for column, value in ((1, "LLOJI"), (3, "KOHA"), (4, "USER"), (5, "TAKIMET")):
             cell = sheet.cell(row_number, column, value)
             cell.font = Font(bold=True)
             cell.fill = header_fill
@@ -1763,16 +1956,22 @@ def _excel_table_attachment(
                 category_start=True,
                 category_end=True,
                 outer_left=column == 1,
-                outer_right=column in (4, 8),
+                outer_right=column in (5, 8),
             )
         row_number += 1
 
         meeting_values = _flatten_meeting_rows(rows) or [("-", None)]
         for index, (label, item) in enumerate(meeting_values, 1):
             sheet.merge_cells(start_row=row_number, start_column=1, end_row=row_number, end_column=2)
-            sheet.merge_cells(start_row=row_number, start_column=4, end_row=row_number, end_column=8)
+            sheet.merge_cells(start_row=row_number, start_column=5, end_row=row_number, end_column=8)
             sheet.cell(row_number, 1, label)
             meeting_type = "internal" if "INT" in label.upper() else "external"
+            meeting_text_color = (
+                CALENDAR_INTERNAL_TEXT_COLOR.removeprefix("#")
+                if item is not None
+                and _is_faded_calendar_internal(item, meeting_type=meeting_type)
+                else "000000"
+            )
             sheet.cell(
                 row_number,
                 3,
@@ -1781,6 +1980,12 @@ def _excel_table_attachment(
             sheet.cell(
                 row_number,
                 4,
+                _excel_meeting_user_initials(item, default_color=meeting_text_color)
+                if item else "-",
+            )
+            sheet.cell(
+                row_number,
+                5,
                 f"{index}. {_report_text(_first_line(item.get('title')))}" if item else "-",
             )
             highlighted = item is not None and (
@@ -1802,8 +2007,18 @@ def _excel_table_attachment(
                 if meeting_fill is not None and column >= 3:
                     cell.fill = meeting_fill
             sheet.cell(row_number, 1).font = Font(bold=True)
-            if item is not None and _is_manual_internal_meeting(item, meeting_type=meeting_type):
-                sheet.cell(row_number, 4).font = Font(bold=True)
+            sheet.cell(row_number, 4).font = Font(bold=True)
+            if item is not None and (
+                meeting_type == "external"
+                or _is_manual_internal_meeting(item, meeting_type=meeting_type)
+            ):
+                sheet.cell(row_number, 5).font = Font(bold=True)
+            if item is not None and _is_faded_calendar_internal(item, meeting_type=meeting_type):
+                for column in (3, 4, 5):
+                    sheet.cell(row_number, column).font = Font(
+                        bold=column == 4,
+                        color=CALENDAR_INTERNAL_TEXT_COLOR.removeprefix("#"),
+                    )
             row_number += 1
         return row_number
 
@@ -1907,6 +2122,28 @@ def _docx_table_attachment(
         run.font.size = Pt(7.5)
         run.bold = bold
         run.font.color.rgb = RGBColor.from_string(color.removeprefix("#"))
+
+    def set_meeting_user_cell(cell: Any, item: dict[str, Any], *, color: str) -> None:
+        cell.text = ""
+        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+        paragraph = cell.paragraphs[0]
+        paragraph.paragraph_format.space_after = Pt(0)
+        users = _meeting_users(item)
+        unavailable = {str(value) for value in item.get("_unavailableUserInitials") or []}
+        for index, (label, _) in enumerate(users or [("-", None)]):
+            if index:
+                separator = paragraph.add_run("/")
+                separator.font.name = "Arial"
+                separator.font.size = Pt(7.5)
+                separator.bold = True
+                separator.font.color.rgb = RGBColor.from_string(color.removeprefix("#"))
+            run = paragraph.add_run(label)
+            run.font.name = "Arial"
+            run.font.size = Pt(7.5)
+            run.bold = True
+            run.font.color.rgb = RGBColor.from_string(
+                DEADLINE_COLOR.removeprefix("#") if label in unavailable else color.removeprefix("#")
+            )
 
     def set_task_cell(cell: Any, item: dict[str, Any], number: int, *, personal: bool, bold: bool, color: str) -> None:
         cell.text = ""
@@ -2091,10 +2328,10 @@ def _docx_table_attachment(
 
     for meeting_date, relative, dated_rows in meeting_sections or []:
         heading(f"TAKIMET {relative} - {meeting_date:%d.%m.%Y}", size=10)
-        meeting_table = document.add_table(rows=1, cols=3)
+        meeting_table = document.add_table(rows=1, cols=4)
         meeting_table.style = "Table Grid"
-        set_widths(meeting_table, [1.4, 1.0, 7.7])
-        for index, value in enumerate(["LLOJI", "KOHA", "TAKIMET"]):
+        set_widths(meeting_table, [1.4, 1.0, 1.1, 6.6])
+        for index, value in enumerate(["LLOJI", "KOHA", "USER", "TAKIMET"]):
             set_cell(meeting_table.rows[0].cells[index], value, bold=True, center=True)
         style_header(meeting_table.rows[0])
         flattened_meetings = _flatten_meeting_rows(dated_rows)
@@ -2105,11 +2342,23 @@ def _docx_table_attachment(
             meeting_fill = meeting_report_color(item, meeting_type=meeting_type)
             shade(row.cells[1], meeting_fill)
             shade(row.cells[2], meeting_fill)
-            set_cell(row.cells[1], _meeting_time_display(item, meeting_type=meeting_type))
+            shade(row.cells[3], meeting_fill)
+            text_color = (
+                CALENDAR_INTERNAL_TEXT_COLOR
+                if _is_faded_calendar_internal(item, meeting_type=meeting_type)
+                else "000000"
+            )
             set_cell(
-                row.cells[2],
+                row.cells[1],
+                _meeting_time_display(item, meeting_type=meeting_type),
+                color=text_color,
+            )
+            set_meeting_user_cell(row.cells[2], item, color=text_color)
+            set_cell(
+                row.cells[3],
                 f"{index}. {_report_text(_first_line(item.get('title')))}",
-                bold=_is_manual_internal_meeting(item, meeting_type=meeting_type),
+                bold=meeting_type == "external" or _is_manual_internal_meeting(item, meeting_type=meeting_type),
+                color=text_color,
             )
             previous_label = flattened_meetings[index - 2][0] if index > 1 else ""
             if "INT" in label.upper() and "INT" not in previous_label.upper():
@@ -2202,7 +2451,10 @@ def _core_png_table_attachment(
     meeting_half_width = (width - (margin * 2)) // 2
     meeting_label_width = 125
     meeting_time_width = 85
-    meeting_content_width = meeting_half_width - meeting_label_width - meeting_time_width
+    meeting_user_width = 90
+    meeting_content_width = (
+        meeting_half_width - meeting_label_width - meeting_time_width - meeting_user_width
+    )
     meeting_layout: list[
         tuple[tuple[str, dict[str, Any]] | None, tuple[str, dict[str, Any]] | None, int]
     ] = []
@@ -2444,12 +2696,16 @@ def _core_png_table_attachment(
         meeting_column_widths = [
             meeting_label_width,
             meeting_time_width,
+            meeting_user_width,
             meeting_content_width,
             meeting_label_width,
             meeting_time_width,
+            meeting_user_width,
             meeting_content_width,
         ]
-        for column, label in enumerate(["LLOJI", "KOHA", "TAKIMET", "LLOJI", "KOHA", "TAKIMET"]):
+        for column, label in enumerate(
+            ["LLOJI", "KOHA", "USER", "TAKIMET", "LLOJI", "KOHA", "USER", "TAKIMET"]
+        ):
             right = x + meeting_column_widths[column]
             draw.rectangle((x, y, right, y + 38), fill="#F8FAFC", outline="#111827", width=3)
             draw.text((x + 6, y + 9), label, fill="#111827", font=bold)
@@ -2478,12 +2734,19 @@ def _core_png_table_attachment(
                 draw.rectangle((x, y, label_right, row_bottom), fill="#FFFFFF", outline="#111827")
                 draw.text((x + 6, y + 8), label, fill="#111827", font=bold)
                 time_right = label_right + meeting_time_width
-                content_right = time_right + meeting_content_width
+                user_right = time_right + meeting_user_width
+                content_right = user_right + meeting_content_width
                 draw.rectangle((label_right, y, time_right, row_bottom), fill="#FFFFFF", outline="#111827")
-                draw.rectangle((time_right, y, content_right, row_bottom), fill="#FFFFFF", outline="#111827")
+                draw.rectangle((time_right, y, user_right, row_bottom), fill="#FFFFFF", outline="#111827")
+                draw.rectangle((user_right, y, content_right, row_bottom), fill="#FFFFFF", outline="#111827")
                 if item is not None:
                     meeting_type = "internal" if "INT" in label.upper() else "external"
                     meeting_fill = meeting_report_color(item, meeting_type=meeting_type)
+                    text_color = (
+                        CALENDAR_INTERNAL_TEXT_COLOR
+                        if _is_faded_calendar_internal(item, meeting_type=meeting_type)
+                        else "#111827"
+                    )
                     outline = (
                         NON_ROUTINE_MEETING_BORDER_COLOR
                         if _is_non_routine_meeting(item)
@@ -2498,7 +2761,13 @@ def _core_png_table_attachment(
                         width=outline_width,
                     )
                     draw.rectangle(
-                        (time_right, y, content_right, row_bottom),
+                        (time_right, y, user_right, row_bottom),
+                        fill=meeting_fill,
+                        outline=outline,
+                        width=outline_width,
+                    )
+                    draw.rectangle(
+                        (user_right, y, content_right, row_bottom),
                         fill=meeting_fill,
                         outline=outline,
                         width=outline_width,
@@ -2506,17 +2775,32 @@ def _core_png_table_attachment(
                     draw.text(
                         (label_right + 6, y + 8),
                         _meeting_time_display(item, meeting_type=meeting_type),
-                        fill="#111827",
+                        fill=text_color,
                         font=regular,
                     )
+                    user_x = time_right + 6
+                    unavailable_users = {
+                        str(value) for value in item.get("_unavailableUserInitials") or []
+                    }
+                    for user_index, (user_label, _) in enumerate(
+                        _meeting_users(item) or [("-", None)]
+                    ):
+                        token = f"/{user_label}" if user_index else user_label
+                        token_color = (
+                            DEADLINE_COLOR if user_label in unavailable_users else text_color
+                        )
+                        draw.text(
+                            (user_x, y + 8), token, fill=token_color, font=bold
+                        )
+                        user_x += measure.textlength(token, font=bold)
                     value = f"{meeting_index}. {_report_text(_first_line(item.get('title')))}"
                     lines = wrap(value, regular, meeting_content_width - 18)
                     for line_index, line in enumerate(lines):
                         draw.text(
-                            (time_right + 9, y + 8 + line_index * 20),
+                            (user_right + 9, y + 8 + line_index * 20),
                             line,
-                            fill="#111827",
-                            font=(bold if _is_manual_internal_meeting(item, meeting_type=meeting_type) else regular),
+                            fill=text_color,
+                            font=(bold if meeting_type == "external" or _is_manual_internal_meeting(item, meeting_type=meeting_type) else regular),
                         )
                 x = content_right
             draw.line((center, y, center, row_bottom), fill=NON_ROUTINE_MEETING_BORDER_COLOR, width=5)
@@ -2811,6 +3095,7 @@ async def _build_print_report(
             for label, values, _ in dated_rows:
                 plain_rows.append(
                     f"{label}: " + "; ".join(
+                        f"[{_meeting_user_initials(item)}] "
                         f"{_report_text(_first_line(item.get('title')))} {item.get('time') or ''}".strip()
                         for item in values
                     )

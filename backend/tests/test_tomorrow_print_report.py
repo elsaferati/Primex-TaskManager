@@ -11,6 +11,7 @@ from app.services.tomorrow_print_report import (
     _comment_user_initials,
     _comments_table_html,
     _dated_meetings_html,
+    _docx_table_attachment,
     _excel_table_attachment,
     _html_table,
     _meeting_rows,
@@ -1105,17 +1106,19 @@ def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
     assert "TAKIMET NESER - 26.08.2026" in report_html
     assert report_html.count(">LLOJI</th>") == 2
     assert report_html.count(">KOHA</th>") == 2
+    assert report_html.count(">USER</th>") == 2
     assert report_html.count(">TAKIMET</th>") == 2
     assert report_html.count('data-meeting-time="true"') == 6
+    assert report_html.count('data-meeting-users="true"') == 6
     assert ">10:00</td>" in report_html
     assert "Today one-off 10:00" not in report_html
     assert "border-left:4px solid #2563EB" in report_html
-    assert report_html.count("border:2px solid #2563EB") == 4
-    assert report_html.count("border-top:4px solid #111827") == 6
+    assert report_html.count("border:2px solid #2563EB") == 6
+    assert report_html.count("border-top:4px solid #111827") == 8
     assert report_html.count('data-meeting-row="true"') == 3
     assert report_html.count('rowspan="2"') == 2
     assert 'bgcolor="#DCECFF"' in report_html
-    assert report_html.count('bgcolor="#DCECFF"') >= 4
+    assert report_html.count('bgcolor="#DCECFF"') >= 3
     assert 'data-manual-internal-meeting="true"' in report_html
     assert report_html.count('bgcolor="#C9A98A"') >= 4
     assert report_html.index("Today one-off") < report_html.index("Today early internal")
@@ -1143,6 +1146,7 @@ def test_calendar_linked_internal_meeting_inherits_external_tone_and_cal_badge()
             ("TAK EXT", [{
                 "title": "Calendar external",
                 "time": "10:00",
+                "assignees": ["Luan Gashi"],
                 "calendarImported": True,
                 "calendarCategories": ["Event"],
             }], False),
@@ -1158,8 +1162,13 @@ def test_calendar_linked_internal_meeting_inherits_external_tone_and_cal_badge()
                     "linkedExternalCalendarImported": True,
                     "linked_external_calendar_categories": [],
                     "linkedExternalCalendarCategories": ["Event"],
+                    "assignees": ["Arben Krasniqi", "Dren Veliu"],
                 },
-                {"title": "Manual internal", "time": "11:00"},
+                {
+                    "title": "Manual internal",
+                    "time": "11:00",
+                    "assignees": ["Gane Arifaj"],
+                },
             ], False),
         ],
     )]
@@ -1167,8 +1176,16 @@ def test_calendar_linked_internal_meeting_inherits_external_tone_and_cal_badge()
     report_html = _dated_meetings_html(sections)
 
     assert report_html.count('data-calendar-meeting="true"') == 2
-    assert report_html.count('bgcolor="#CCEFF1"') == 4
-    assert report_html.count('bgcolor="#DCECFF"') == 2
+    assert report_html.count('bgcolor="#CCEFF1"') == 6
+    assert report_html.count('bgcolor="#DCECFF"') == 3
+    assert report_html.count('data-meeting-users="true"') == 6
+    assert report_html.count(">USER</th>") == 2
+    assert "AK/DV" in report_html
+    assert report_html.count("color:#64748B") == 3
+    external_title_cell = report_html.split('1. Calendar external</td>')[0].rsplit('<td ', 1)[1]
+    linked_internal_title_cell = report_html.split('1. Linked calendar internal</td>')[0].rsplit('<td ', 1)[1]
+    assert "font-weight:800" in external_title_cell
+    assert "font-weight:800" not in linked_internal_title_cell
     assert report_html.count('data-manual-internal-meeting="true"') == 1
     assert "10:00" in report_html and "10:30" in report_html
     assert "11:00" in report_html
@@ -1185,10 +1202,95 @@ def test_calendar_linked_internal_meeting_inherits_external_tone_and_cal_badge()
     }
     assert set(time_cells) == {"10:00 CAL", "10:30 CAL", "11:00 MANUAL"}
     assert time_cells["10:00 CAL"].fill.fgColor.rgb.endswith("CCEFF1")
+    assert sheet.cell(time_cells["10:00 CAL"].row, 5).font.bold
+    assert not sheet.cell(time_cells["10:30 CAL"].row, 5).font.bold
     assert time_cells["10:30 CAL"].fill.fgColor.rgb.endswith("CCEFF1")
+    assert time_cells["10:30 CAL"].font.color.rgb.endswith("64748B")
+    assert sheet.cell(time_cells["10:30 CAL"].row, 4).value == "AK/DV"
+    assert sheet.cell(time_cells["10:30 CAL"].row, 4).font.color.rgb.endswith("64748B")
     assert time_cells["10:30 CAL"].border.top.style == "thick"
     assert time_cells["10:30 CAL"].border.top.color.rgb.endswith("111827")
     assert time_cells["11:00 MANUAL"].fill.fgColor.rgb.endswith("DCECFF")
+
+
+def test_unavailable_meeting_users_are_red_only_when_the_status_covers_meeting_time() -> None:
+    target_date = date(2026, 9, 16)
+    items = {
+        "external": [],
+        "internal": [
+            {
+                "title": "Morning internal",
+                "date": target_date.isoformat(),
+                "time": "11:00",
+                "assignees": ["Luan Hoxha", "Arben Berisha", "Dren Veliu"],
+                "assigneeUserIds": ["lh-id", "ab-id", "dv-id"],
+            },
+            {
+                "title": "Afternoon internal",
+                "date": target_date.isoformat(),
+                "time": "14:00",
+                "assignees": ["Luan Hoxha"],
+                "assigneeUserIds": ["lh-id"],
+            },
+        ],
+        "leave": [
+            {
+                "person": "Luan Hoxha",
+                "userId": "lh-id",
+                "startDate": target_date.isoformat(),
+                "endDate": target_date.isoformat(),
+                "fullDay": False,
+                "from": "08:00",
+                "to": "12:00",
+            }
+        ],
+        "absent": [
+            {
+                "person": "Arben Berisha",
+                "userId": "ab-id",
+                "date": target_date.isoformat(),
+                "from": "10:30",
+                "to": "11:30",
+            }
+        ],
+        "late": [],
+        "externalHoliday": [],
+    }
+
+    rows = [(label, values, False) for label, values in _meeting_rows(items, target_date)]
+    report_html = _dated_meetings_html([(target_date, "SOT", rows)])
+
+    assert report_html.count('data-unavailable-meeting-user="true"') == 2
+    assert 'color:#DC2626;font-weight:800">LH</span>' in report_html
+    assert 'color:#DC2626;font-weight:800">AB</span>' in report_html
+    assert 'color:#DC2626;font-weight:800">DV</span>' not in report_html
+    assert report_html.count(">LH</span>") == 1
+
+
+def test_word_export_preserves_task_markers_and_unavailable_meeting_users() -> None:
+    from docx import Document
+
+    target_date = date(2026, 9, 16)
+    _, content, _ = _docx_table_attachment(
+        [("1H", [{"title": "Task with marker", "oneHMarker": "QUESTION"}], False)],
+        target_date,
+        meeting_sections=[(target_date, "SOT", [("TAK INT", [{
+            "title": "Internal meeting",
+            "time": "11:00",
+            "assignees": ["Luan Hoxha", "Dren Veliu"],
+            "_unavailableUserInitials": ["LH"],
+        }], False)])],
+    )
+    document = Document(BytesIO(content))
+    cells = [cell for table in document.tables for row in table.rows for cell in row.cells]
+    task_cell = next(cell for cell in cells if "Task with marker" in cell.text)
+    marker_run = next(run for paragraph in task_cell.paragraphs for run in paragraph.runs if "[?]" in run.text)
+    assert marker_run.bold
+    assert str(marker_run.font.color.rgb) == "0F2A5F"
+    user_cell = next(cell for cell in cells if cell.text == "LH/DV")
+    user_runs = {run.text: run for paragraph in user_cell.paragraphs for run in paragraph.runs}
+    assert str(user_runs["LH"].font.color.rgb) == "DC2626"
+    assert str(user_runs["DV"].font.color.rgb) == "000000"
 
 
 def test_meetings_are_ordered_chronologically_even_without_leading_zero() -> None:
