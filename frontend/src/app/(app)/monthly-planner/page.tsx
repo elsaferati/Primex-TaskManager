@@ -4,6 +4,7 @@ import * as React from "react"
 import Link from "next/link"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { TaskOneHMarker } from "@/components/task-one-h-marker"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -238,7 +239,10 @@ export default function MonthlyPlannerPage() {
                             href={`/tasks/${t.id}`}
                             className="block px-3 py-2.5 text-sm text-slate-700 transition-colors hover:bg-blue-50 hover:text-blue-700"
                           >
-                            {t.title}
+                            <span className="flex items-start gap-1.5">
+                              <TaskOneHMarker marker={t.one_h_marker} />
+                              <span>{t.title}</span>
+                            </span>
                           </Link>
                         ))}
                       </div>

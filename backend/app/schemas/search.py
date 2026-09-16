@@ -10,6 +10,7 @@ class SearchTaskResult(BaseModel):
     title: str
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
+    one_h_marker: str | None = None
 
 
 class SearchProjectResult(BaseModel):

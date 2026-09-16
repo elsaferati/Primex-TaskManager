@@ -933,12 +933,12 @@ class PrimeFlowReportTests(unittest.TestCase):
         ).decode("utf-8")
         self.assertIn("LEGJENDA:", plain)
         self.assertIn("? Task with expected problem", plain)
-        self.assertIn("Detyrë që parashihet me problem", plain)
+        self.assertIn("PAQARTESI", plain)
         self.assertIn('data-report-symbol-legend="true"', html)
         self.assertIn('data-task-symbol="true"', html)
-        self.assertIn("Detyrë që parashihet me problem", html)
+        self.assertIn("PAQARTESI", html)
         self.assertIn("LEGJENDA:", word_xml)
-        self.assertIn("Detyrë që parashihet me problem", word_xml)
+        self.assertIn("PAQARTESI", word_xml)
 
         from PIL import ImageDraw
 
@@ -961,7 +961,7 @@ class PrimeFlowReportTests(unittest.TestCase):
 
         self.assertTrue(png.startswith(b"\x89PNG"))
         self.assertIn(
-            "LEGJENDA: ? - Detyrë që parashihet me problem / ! - Kërkon monitorim / përcjellje nga dikush tjetër / ⚑ - Monitorim nga GA / KA - Monitorim nga KA / GENT - Monitorim nga Genti",
+            "LEGJENDA: ? - PAQARTESI / ! - KËRKON MONITORIM NGA DIKUSH TJETËR / ⚑ - PYETJE/SQARIM ME GA / KA - PYETJE/SQARIM ME KA / GENT - PYETJE/SQARIM ME GENTIN",
             drawn_text,
         )
         self.assertIn("?", drawn_text)

@@ -365,8 +365,8 @@ export default function WeeklyPlanningAuditPage() {
               </Select>
             </div>
             <Button variant="outline" onClick={() => void previewReport()} disabled={loading}><Search className="mr-2 h-4 w-4" /> Preview</Button>
-            <Button variant="outline" onClick={() => void runAction("generate")} disabled={loading}><FileSpreadsheet className="mr-2 h-4 w-4" /> Generate Excel</Button>
-            {canManage ? <Button onClick={() => void runAction("generate-and-send")} disabled={loading}><Send className="mr-2 h-4 w-4" /> Generate and Send</Button> : null}
+            <Button variant="outline" onClick={() => void runAction("generate")} disabled={loading}>{loading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />} {loading ? "Generating..." : "Generate Excel"}</Button>
+            {canManage ? <Button onClick={() => void runAction("generate-and-send")} disabled={loading}>{loading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />} {loading ? "Generating..." : "Generate and Send"}</Button> : null}
           </div>
           <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
             Java që do të auditohet: <strong>{weekStart} – {reportingFriday(weekStart)}</strong>

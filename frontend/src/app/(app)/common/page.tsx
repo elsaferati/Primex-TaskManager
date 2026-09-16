@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import { toast } from "sonner"
 
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
@@ -48,7 +49,7 @@ function canCreatePimImageTestTaskForMeeting(meeting: Meeting): boolean {
 type PersonalTaskGroup = "GA" | "KA" | "GENT" | "PX"
 type PersonalRowId = "personalGA" | "personalKA" | "personalGENT" | "personalPX"
 type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG"
-type OneHMarkerFilter = "all" | "none" | OneHMarker
+type OneHMarkerFilter = "all" | "with" | "none" | OneHMarker
 
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "EXCLAMATION", label: "!" },
@@ -277,7 +278,7 @@ const oneHPrintChecklistsHtml = (reportDay: Date) =>
   ).join("")}</section>`
 
 const oneHMarkerLegendHtml = () =>
-  `<div class="one-h-marker-legend"><strong>LEGJENDA:</strong><span><b>?</b> - Detyrë që parashihet me problem</span><i aria-hidden="true">/</i><span><b>!</b> - Kërkon monitorim / përcjellje nga dikush tjetër</span><i aria-hidden="true">/</i><span><b>⚑</b> - Monitorim nga GA</span><i aria-hidden="true">/</i><span><b>KA</b> - Monitorim nga KA</span><i aria-hidden="true">/</i><span><b>GENT</b> - Monitorim nga Genti</span></div>`
+  `<div class="one-h-marker-legend"><strong>LEGJENDA:</strong><span><b>?</b> - PAQARTESI</span><i aria-hidden="true">/</i><span><b>!</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span><i aria-hidden="true">/</i><span><b>⚑</b> - PYETJE/SQARIM ME GA</span><i aria-hidden="true">/</i><span><b class="compact-marker">KA</b> - PYETJE/SQARIM ME KA</span><i aria-hidden="true">/</i><span><b class="compact-marker">GENT</b> - PYETJE/SQARIM ME GENTIN</span></div>`
 
 function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
   return (
@@ -317,15 +318,15 @@ function OneHMarkerLegend() {
   return (
     <div className="one-h-marker-legend">
       <strong>LEGJENDA:</strong>
-      <span><b>?</b> - Detyrë që parashihet me problem</span>
+      <span><b>?</b> - PAQARTESI</span>
       <i aria-hidden="true">/</i>
-      <span><b>!</b> - Kërkon monitorim / përcjellje nga dikush tjetër</span>
+      <span><b>!</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span>
       <i aria-hidden="true">/</i>
-      <span><b>⚑</b> - Monitorim nga GA</span>
+      <span><b>⚑</b> - PYETJE/SQARIM ME GA</span>
       <i aria-hidden="true">/</i>
-      <span><b>KA</b> - Monitorim nga KA</span>
+      <span><b className="compact-marker">KA</b> - PYETJE/SQARIM ME KA</span>
       <i aria-hidden="true">/</i>
-      <span><b>GENT</b> - Monitorim nga Genti</span>
+      <span><b className="compact-marker">GENT</b> - PYETJE/SQARIM ME GENTIN</span>
     </div>
   )
 }
@@ -366,6 +367,7 @@ type FastTaskItemMeta = {
   dateIsToday?: boolean
   confirmationOwner?: "KA" | "GENT" | null
   isPersonalTask?: boolean
+  isSystemTask?: boolean
 }
 type BlockedItem = {
   title: string
@@ -783,6 +785,7 @@ type SwimlaneCell = {
   dateIsToday?: boolean
   recurrenceType?: string | null
   meetingId?: string
+  isSystemTask?: boolean
 }
 type SwimlaneRow = {
   id: CommonType
@@ -1005,9 +1008,9 @@ const getPersonalTaskGroup = (entry: { title: string }): PersonalTaskGroup => {
   const titlePrefix = commonPrintPersonalTaskTitle(entry).trim().toUpperCase()
   const match = titlePrefix.match(/^[A-Z]{1,5}(?:\s*[:/]\s*[A-Z]{1,5})*(?=\s|:|\/|$)/)
   const participants = (match?.[0] || "").split(/[:/]/).map((value) => value.trim())
-  if (participants.includes("GA")) return "GA"
-  if (participants.includes("KA")) return "KA"
   if (participants.some((value) => ["GENT", "GENTI", "GT"].includes(value))) return "GENT"
+  if (participants.includes("KA")) return "KA"
+  if (participants.includes("GA")) return "GA"
   return "PX"
 }
 const getPersonalRowGroup = (rowId: PersonalRowId): PersonalTaskGroup =>
@@ -1243,8 +1246,8 @@ const getFastTaskDisplayNumber = (
   return currentIndex >= 0 ? currentIndex + 1 : 1
 }
 
-const hasEightAmIndicator = (title?: string | null) =>
-  /\b0?8:00\b/.test(title || "") || /\bEM\b/i.test(title || "")
+const hasEightAmIndicator = (title?: string | null, isSystemTask = false) =>
+  /\b0?8:00\b/.test(title || "") || (!isSystemTask && /\bEM\b/i.test(title || ""))
 const getFinishPeriodIndicatorLabel = (finishPeriod?: string | null) => {
   const normalized = (finishPeriod || "").trim().toUpperCase()
   return normalized === "AM" || normalized === "PM" ? normalized : ""
@@ -1860,6 +1863,7 @@ export default function CommonViewPage() {
         isDeadlineImportant?: boolean
         dueDate?: string | null
         oneHReportSlot?: string | null
+        isSystemTask?: boolean
       },
       b: {
         status?: string
@@ -1874,6 +1878,7 @@ export default function CommonViewPage() {
         isDeadlineImportant?: boolean
         dueDate?: string | null
         oneHReportSlot?: string | null
+        isSystemTask?: boolean
       }
     ) => {
       const isDoneA = Boolean(a.isDone)
@@ -1897,8 +1902,8 @@ export default function CommonViewPage() {
       const importantA = Boolean(a.isDeadlineImportant)
       const importantB = Boolean(b.isDeadlineImportant)
       if (importantA !== importantB) return importantA ? -1 : 1
-      const eightAmA = hasEightAmIndicator(a.title)
-      const eightAmB = hasEightAmIndicator(b.title)
+      const eightAmA = hasEightAmIndicator(a.title, a.isSystemTask)
+      const eightAmB = hasEightAmIndicator(b.title, b.isSystemTask)
       if (eightAmA !== eightAmB) return eightAmA ? -1 : 1
       const orderA = a.fastTaskOrder ?? Number.MAX_SAFE_INTEGER
       const orderB = b.fastTaskOrder ?? Number.MAX_SAFE_INTEGER
@@ -1925,6 +1930,7 @@ export default function CommonViewPage() {
       isDeadlineImportant?: boolean
       dueDate?: string | null
       oneHReportSlot?: string | null
+      isSystemTask?: boolean
     }>(
       items: T[],
       multiDate: boolean
@@ -1953,6 +1959,7 @@ export default function CommonViewPage() {
         fastTaskOrder?: number | null
         isDeadlineImportant?: boolean
         createdAt?: string | null
+        isSystemTask?: boolean
       },
       b: {
         departmentId?: string
@@ -1964,6 +1971,7 @@ export default function CommonViewPage() {
         fastTaskOrder?: number | null
         isDeadlineImportant?: boolean
         createdAt?: string | null
+        isSystemTask?: boolean
       }
     ) => {
       // Keep print-only task ordering aligned with M1/M2/M3's
@@ -1984,8 +1992,8 @@ export default function CommonViewPage() {
       if (Boolean(a.isDeadlineImportant) !== Boolean(b.isDeadlineImportant)) {
         return a.isDeadlineImportant ? -1 : 1
       }
-      if (hasEightAmIndicator(a.title) !== hasEightAmIndicator(b.title)) {
-        return hasEightAmIndicator(a.title) ? -1 : 1
+      if (hasEightAmIndicator(a.title, a.isSystemTask) !== hasEightAmIndicator(b.title, b.isSystemTask)) {
+        return hasEightAmIndicator(a.title, a.isSystemTask) ? -1 : 1
       }
       const ownerA = getPersonSortKey(a)
       const ownerB = getPersonSortKey(b)
@@ -2011,6 +2019,7 @@ export default function CommonViewPage() {
       fastTaskOrder?: number | null
       isDeadlineImportant?: boolean
       createdAt?: string | null
+      isSystemTask?: boolean
     }>(items: T[]) => [...items].sort(compareReportPrintOrder),
     [compareReportPrintOrder]
   )
@@ -2966,6 +2975,7 @@ export default function CommonViewPage() {
           completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
           confirmationOwner: item.confirmationOwner || item.confirmation_owner || null,
+          isSystemTask: Boolean(item.isSystemTask ?? item.is_system_task),
           status,
           isDone: isCommonTaskDone(status, item.isDone),
         }
@@ -2990,6 +3000,7 @@ export default function CommonViewPage() {
           completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
           confirmationOwner: item.confirmationOwner || item.confirmation_owner || null,
+          isSystemTask: Boolean(item.isSystemTask ?? item.is_system_task),
           status,
           isDone: isCommonTaskDone(status, item.isDone),
         }
@@ -3013,6 +3024,7 @@ export default function CommonViewPage() {
           completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
           confirmationOwner: item.confirmationOwner || item.confirmation_owner || null,
+          isSystemTask: Boolean(item.isSystemTask ?? item.is_system_task),
           isPersonalTask: item.isPersonalTask ?? item.is_personal_task ?? true,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
@@ -3038,6 +3050,7 @@ export default function CommonViewPage() {
           completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
           confirmationOwner: item.confirmationOwner || item.confirmation_owner || null,
+          isSystemTask: Boolean(item.isSystemTask ?? item.is_system_task),
           status,
           isDone: isCommonTaskDone(status, item.isDone),
         }
@@ -3673,6 +3686,7 @@ export default function CommonViewPage() {
                   createdAt: t.created_at || null,
                   completedAt: t.completed_at || null,
                   confirmationOwner,
+                  isSystemTask: Boolean(t.system_template_origin_id || t.system_task_slot_id),
                 })
               }
               if (t.is_1h_report) {
@@ -3696,6 +3710,7 @@ export default function CommonViewPage() {
                   createdAt: t.created_at || null,
                   completedAt: t.completed_at || null,
                   confirmationOwner,
+                  isSystemTask: Boolean(t.system_template_origin_id || t.system_task_slot_id),
                 })
               }
               if (t.is_personal) {
@@ -3719,6 +3734,7 @@ export default function CommonViewPage() {
                   createdAt: t.created_at || null,
                   completedAt: t.completed_at || null,
                   confirmationOwner,
+                  isSystemTask: Boolean(t.system_template_origin_id || t.system_task_slot_id),
                   isPersonalTask: true,
                 })
               }
@@ -3743,6 +3759,7 @@ export default function CommonViewPage() {
                   createdAt: t.created_at || null,
                   completedAt: t.completed_at || null,
                   confirmationOwner,
+                  isSystemTask: Boolean(t.system_template_origin_id || t.system_task_slot_id),
                 })
               }
               if (
@@ -3772,6 +3789,7 @@ export default function CommonViewPage() {
                   createdAt: t.created_at || null,
                   completedAt: null,
                   confirmationOwner,
+                  isSystemTask: Boolean(t.system_template_origin_id || t.system_task_slot_id),
                   isPersonalTask: false,
                 })
               }
@@ -4084,6 +4102,10 @@ export default function CommonViewPage() {
       mounted = false
     }
   }, [apiFetch, authLoading, userId, user?.role, user?.department_id, weekStart, commonViewAggregateEnabled, commonViewIncludeStages, fetchCommonViewStage])
+
+  useVisibleRefresh(async () => {
+    await fetchCommonViewStage(toISODate(weekStart), ["tasks"])
+  }, !authLoading && Boolean(userId) && !savingOneHMarkerTaskId)
 
   const reloadMeetingLists = React.useCallback(async () => {
     const meetingsBase = commonDepartmentId
@@ -4488,6 +4510,7 @@ export default function CommonViewPage() {
     const matchesOneHMarkerFilter = (entry: FastTaskEntry) => {
       const marker = entry.oneHMarker || null
       if (oneHMarkerFilter === "all") return true
+      if (oneHMarkerFilter === "with") return marker !== null
       if (oneHMarkerFilter === "none") return marker === null
       return marker === oneHMarkerFilter
     }
@@ -4496,7 +4519,7 @@ export default function CommonViewPage() {
         const category = getCommonTaskNewCategory(entry)
         return Boolean(category && newTaskCategoryFilters.has(category))
       }
-      if (taskFocusFilter === "eightAm") return hasEightAmIndicator(entry.title)
+      if (taskFocusFilter === "eightAm") return hasEightAmIndicator(entry.title, entry.isSystemTask)
       if (taskFocusFilter === "deadline") return Boolean(entry.isDeadlineImportant)
       return true
     }
@@ -5068,6 +5091,7 @@ export default function CommonViewPage() {
                     : item.confirmation_owner === "KA" || item.confirmation_owner === "GENT"
                       ? item.confirmation_owner
                       : null,
+                isSystemTask: Boolean(item.isSystemTask ?? item.is_system_task),
                 isPersonalTask:
                   typeof item.isPersonalTask === "boolean"
                     ? item.isPersonalTask
@@ -5194,9 +5218,10 @@ export default function CommonViewPage() {
   .one-h-print-checklist-day-label { grid-column:1 / -1; margin:0 0 4px; font-weight:800; }
   .one-h-print-checklist-separator { font-size:13px; font-weight:900; line-height:8px; }
   .one-h-print-checklist-description { color:#475569; }
-  .one-h-marker-legend { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 10px; padding:6px 9px; border:1px solid #fca5a5; border-radius:5px; background:#fef2f2; color:#7f1d1d; font-size:9px; font-weight:700; }
-  .one-h-marker-legend b { color:#dc2626; font-size:14px; font-weight:900; }
-  .one-h-marker-legend i { color:#dc2626; font-size:20px; font-style:normal; font-weight:900; line-height:1; }
+  .one-h-marker-legend { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 10px; padding:6px 9px; border:1px solid #93c5fd; border-radius:5px; background:#eff6ff; color:#0f2a5f; font-size:9px; font-weight:700; }
+  .one-h-marker-legend b { color:#0f2a5f; font-size:14px; font-weight:900; }
+  .one-h-marker-legend b.compact-marker { font-size:9px; }
+  .one-h-marker-legend i { color:#0f2a5f; font-size:20px; font-style:normal; font-weight:900; line-height:1; }
   table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9px; line-height: 1.2; }
   table + table { margin-top: 12px; }
   th, td { border: 1px solid #000; padding: 4px 5px; vertical-align: top; overflow-wrap: anywhere; text-align: left; font-weight: 400; }
@@ -5217,7 +5242,7 @@ export default function CommonViewPage() {
   .print-task-badge { display:inline-block; margin:0 4px 3px 0; padding:2px 5px; border-radius:999px; font-size:8px; font-weight:800; line-height:1; white-space:nowrap; }
   .print-task-badge.period { background:#e0f2fe; border:1px solid #bae6fd; color:#0369a1; }
   .print-task-badge.wfc { background:#ffedd5; border:1px solid #fb923c; color:#c2410c; }
-  .print-task-badge.marker { padding:2px 7px; background:#fef2f2; border:1px solid #fca5a5; color:#dc2626; font-size:13px; font-weight:900; }
+  .print-task-badge.marker { padding:2px 7px; background:#eff6ff; border:1px solid #93c5fd; color:#0f2a5f; font-size:14px; font-weight:900; text-shadow:0 0 0 currentColor; }
 </style></head><body>
   <div class="print-header"><div></div><div class="print-title">1H SHTYPI — ${escapePrintHtml(reportDate)}</div><div class="print-date">${escapePrintHtml(formatDateTimeDMY(new Date()))}</div></div>
   ${oneHPrintChecklistsHtml(deliveryDate)}
@@ -5265,21 +5290,21 @@ export default function CommonViewPage() {
       return
     }
 
-    printWindow.document.write("<!doctype html><title>Loading report...</title><p>Loading 1H SHTYPI Today...</p>")
+    printWindow.document.write("<!doctype html><title>Loading report...</title><p>Loading 1H SHTYPI SOT (Shiko simbolet)...</p>")
     printWindow.document.close()
     setPrintingToday(true)
     try {
       const response = await apiFetch(`/today-print-report/print-preview?report_date=${encodeURIComponent(reportDate)}`)
       if (!response?.ok) {
-        throw new Error(`Could not load the 1H SHTYPI Today report (${response?.status || "network error"}).`)
+        throw new Error(`Could not load the 1H SHTYPI SOT (Shiko simbolet) report (${response?.status || "network error"}).`)
       }
       const report = (await response.json()) as { html?: string; subject?: string }
-      if (!report.html) throw new Error("The 1H SHTYPI Today report was empty.")
+      if (!report.html) throw new Error("The 1H SHTYPI SOT (Shiko simbolet) report was empty.")
 
       printWindow.document.open()
       printWindow.document.write(report.html)
       printWindow.document.close()
-      printWindow.document.title = report.subject || `1H SHTYPI - ${reportDate}`
+      printWindow.document.title = report.subject || `1H SHTYPI SOT (Shiko simbolet) - ${reportDate}`
 
       const style = printWindow.document.createElement("style")
       style.textContent = `
@@ -5315,7 +5340,7 @@ export default function CommonViewPage() {
     } catch (error) {
       console.error("Failed to print the canonical Today report", error)
       printWindow.close()
-      toast.error(error instanceof Error ? error.message : "Failed to load the 1H SHTYPI Today report.")
+      toast.error(error instanceof Error ? error.message : "Failed to load the 1H SHTYPI SOT (Shiko simbolet) report.")
       setPrintTotalPages(1)
       applySingleDayPrintFit()
       window.print()
@@ -6661,12 +6686,13 @@ export default function CommonViewPage() {
     (proposedStart: Date): InternalMeetingParticipantConflict[] => {
       if (Number.isNaN(proposedStart.getTime())) return []
 
-      const proposedEnd = new Date(proposedStart.getTime() + 60 * 60 * 1000)
+      const meetingDurationMinutes = 30
+      const proposedEnd = new Date(proposedStart.getTime() + meetingDurationMinutes * 60 * 1000)
       const dateKey = (value: Date) =>
         `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`
       const targetDate = dateKey(proposedStart)
       const meetingMinute = proposedStart.getHours() * 60 + proposedStart.getMinutes()
-      const meetingEndMinute = meetingMinute + 60
+      const meetingEndMinute = meetingMinute + meetingDurationMinutes
       const selectedParticipantIds = new Set(internalMeetingParticipantIds)
       const conflicts = new Map<string, InternalMeetingParticipantConflict>()
 
@@ -6774,10 +6800,7 @@ export default function CommonViewPage() {
           0,
           0
         )
-        const sourceEnd = meeting.ends_at ? new Date(meeting.ends_at) : null
-        const durationMs = sourceEnd && !Number.isNaN(sourceEnd.getTime()) && sourceEnd > sourceStart
-          ? sourceEnd.getTime() - sourceStart.getTime()
-          : 60 * 60 * 1000
+        const durationMs = meetingDurationMinutes * 60 * 1000
         const occurrenceEnd = new Date(occurrenceStart.getTime() + durationMs)
         if (!(proposedStart < occurrenceEnd && occurrenceStart < proposedEnd)) continue
         if (meetingOccurrenceStatuses.get(occurrenceStatusKey(meeting.id, targetDate))?.status === "canceled") {
@@ -7574,6 +7597,7 @@ export default function CommonViewPage() {
       createdAt: x.createdAt,
       completedAt: x.completedAt,
       dateIsToday: isCommonTaskStartingOnDate(x),
+      isSystemTask: x.isSystemTask,
     }))
 
     const oneHSource = includeOneH ? sortTasksByOrder(activeOneH, isMultiDate) : []
@@ -7600,6 +7624,7 @@ export default function CommonViewPage() {
       createdAt: x.createdAt,
       completedAt: x.completedAt,
       dateIsToday: isCommonTaskStartingOnDate(x),
+      isSystemTask: x.isSystemTask,
     }))
 
     const personalSource = sortTasksByOrder(filtered.personal.filter((entry) => !isWaitingClientTask(entry)), isMultiDate)
@@ -7628,6 +7653,7 @@ export default function CommonViewPage() {
         createdAt: x.createdAt,
         completedAt: x.completedAt,
         dateIsToday: isCommonTaskStartingOnDate(x),
+        isSystemTask: x.isSystemTask,
       }))
     }
     const personalItemsByGroup: Record<PersonalTaskGroup, SwimlaneCell[]> = {
@@ -7720,6 +7746,7 @@ export default function CommonViewPage() {
       createdAt: x.createdAt,
       completedAt: x.completedAt,
       dateIsToday: isCommonTaskStartingOnDate(x),
+      isSystemTask: x.isSystemTask,
     }))
 
     const problemSource = isMultiDate
@@ -7798,10 +7825,11 @@ export default function CommonViewPage() {
       createdAt: entry.createdAt,
       completedAt: entry.completedAt,
       dateIsToday: isCommonTaskStartingOnDate(entry),
+      isSystemTask: entry.isSystemTask,
     }))
 
     const buildFastHeaderBreakdown = (items: SwimlaneCell[]) => {
-      const eightAmCount = items.filter((item) => hasEightAmIndicator(item.title)).length
+      const eightAmCount = items.filter((item) => hasEightAmIndicator(item.title, item.isSystemTask)).length
       const deadlineCount = items.filter((item) => item.isDeadlineImportant).length
       return [
         ...(eightAmCount > 0 ? [{ value: eightAmCount, label: "08:00", className: "swimlane-badge-sub swimlane-badge-sub-time" }] : []),
@@ -8831,10 +8859,10 @@ export default function CommonViewPage() {
             flex-wrap: wrap;
             margin: 0 0 8px;
             padding: 5px 7px;
-            border: 1px solid #fca5a5 !important;
+            border: 1px solid #93c5fd !important;
             border-radius: 5px;
-            background: #fef2f2 !important;
-            color: #7f1d1d !important;
+            background: #eff6ff !important;
+            color: #0f2a5f !important;
             font-size: 8px;
             font-weight: 700;
             page-break-inside: avoid;
@@ -8842,12 +8870,15 @@ export default function CommonViewPage() {
             print-color-adjust: exact !important;
           }
           .one-h-marker-legend b {
-            color: #dc2626 !important;
+            color: #0f2a5f !important;
             font-size: 13px;
             font-weight: 900;
           }
+          .one-h-marker-legend b.compact-marker {
+            font-size: 8px;
+          }
           .one-h-marker-legend i {
-            color: #dc2626 !important;
+            color: #0f2a5f !important;
             font-size: 19px;
             font-style: normal;
             font-weight: 900;
@@ -11141,11 +11172,12 @@ export default function CommonViewPage() {
           height: 22px;
           padding: 0 2px;
           border-radius: 999px;
-          background: #fef2f2;
-          border: 1px solid #fca5a5;
-          color: #dc2626;
+          background: #eff6ff;
+          border: 1px solid #93c5fd;
+          color: #0f2a5f;
           font-weight: 900;
           font-size: 16px;
+          text-shadow: 0 0 0 currentColor;
           line-height: 1;
           flex: 0 0 auto;
           cursor: pointer;
@@ -11155,7 +11187,7 @@ export default function CommonViewPage() {
           opacity: 0.65;
         }
         .oneh-marker-select option {
-          color: #dc2626;
+          color: #0f2a5f;
           font-weight: 900;
           font-size: 16px;
         }
@@ -12586,9 +12618,10 @@ export default function CommonViewPage() {
                 value={oneHMarkerFilter}
                 onChange={(event) => setOneHMarkerFilter(event.target.value as OneHMarkerFilter)}
                 aria-label="Filter tasks by symbol"
-                style={{ width: "125px", color: "#dc2626", fontWeight: 800 }}
+                style={{ width: "125px", color: "#0F2A5F", fontWeight: 800 }}
               >
                 <option value="all">All</option>
+                <option value="with">All with symbols</option>
                 <option value="none">No symbol</option>
                 {ONE_H_MARKER_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
@@ -15350,7 +15383,7 @@ export default function CommonViewPage() {
                               "week-table-entry",
                               commonTaskStateClassName(e.status, e.isDone),
                               commonTaskHighlightClassName(e),
-                              hasEightAmIndicator(e.title) ? "eight-am-task" : "",
+                              hasEightAmIndicator(e.title, e.isSystemTask) ? "eight-am-task" : "",
                               repeatedTaskClassName(e, iso),
                             ].filter(Boolean).join(" ")}
                           >
@@ -15363,7 +15396,7 @@ export default function CommonViewPage() {
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {renderWfcIndicator(e)}
                                   {renderOneHMarkerControl(e)}
-                                  {hasEightAmIndicator(e.title) ? (
+                                  {hasEightAmIndicator(e.title, e.isSystemTask) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
                                   {renderWfcText(commonPrintTaskTitle(e))}
@@ -15414,7 +15447,7 @@ export default function CommonViewPage() {
                               "week-table-entry",
                               commonTaskStateClassName(e.status, e.isDone),
                               commonTaskHighlightClassName(e),
-                              hasEightAmIndicator(e.title) ? "eight-am-task" : "",
+                              hasEightAmIndicator(e.title, e.isSystemTask) ? "eight-am-task" : "",
                               repeatedTaskClassName(e, iso),
                             ].filter(Boolean).join(" ")}
                           >
@@ -15427,7 +15460,7 @@ export default function CommonViewPage() {
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {renderWfcIndicator(e)}
                                   {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(e) : null}
-                                  {hasEightAmIndicator(e.title) ? (
+                                  {hasEightAmIndicator(e.title, e.isSystemTask) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
                                   {renderWfcText(commonPrintPersonalTaskTitle(e))}
@@ -15450,7 +15483,7 @@ export default function CommonViewPage() {
                               "week-table-entry",
                               commonTaskStateClassName(e.status, e.isDone),
                               commonTaskHighlightClassName(e),
-                              hasEightAmIndicator(e.title) ? "eight-am-task" : "",
+                              hasEightAmIndicator(e.title, e.isSystemTask) ? "eight-am-task" : "",
                               repeatedTaskClassName(e, iso),
                               row.id === "personalGA" ? "personal-ga-task" : "",
                             ].filter(Boolean).join(" ")}
@@ -15461,7 +15494,7 @@ export default function CommonViewPage() {
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {renderWfcIndicator(e)}
                                   {renderOneHMarkerControl(e)}
-                                  {hasEightAmIndicator(e.title) ? (
+                                  {hasEightAmIndicator(e.title, e.isSystemTask) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
                                   {renderWfcText(commonPrintTaskTitle(e))}
@@ -15977,7 +16010,7 @@ export default function CommonViewPage() {
                                   getSwimlaneDividerClass(row.id, cells, index),
                                   cell.placeholder ? "placeholder" : "",
                                   commonTaskHighlightClassName(cell),
-                                  isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title) ? "eight-am-task" : "",
+                                  isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title, cell.isSystemTask) ? "eight-am-task" : "",
                                   cell.isDone ? "done" : "",
                                   commonTaskStateClassName(cell.status, cell.isDone),
                                   row.id === "personalGA" && !cell.placeholder ? "personal-ga-task" : "",
@@ -16038,7 +16071,7 @@ export default function CommonViewPage() {
                                         ) : null}
                                         {isFastTaskRowId(row.id) ? renderWfcIndicator(cell) : null}
                                         {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(cell) : null}
-                                        {isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title) ? (
+                                        {isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title, cell.isSystemTask) ? (
                                           <span className="time-indicator" title="08:00 task">
                                             08:00
                                           </span>
@@ -16077,7 +16110,7 @@ export default function CommonViewPage() {
                                         ) : null}
                                         {isFastTaskRowId(row.id) ? renderWfcIndicator(cell) : null}
                                         {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(cell) : null}
-                                        {isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title) ? (
+                                        {isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title, cell.isSystemTask) ? (
                                           <span className="time-indicator" title="08:00 task">
                                             08:00
                                           </span>

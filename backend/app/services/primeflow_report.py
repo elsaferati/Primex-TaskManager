@@ -70,11 +70,11 @@ ONE_H_MARKER_SYMBOLS = {
     "FLAG": "⚑",
 }
 ONE_H_MARKER_LEGEND = (
-    ("?", "Detyrë që parashihet me problem"),
-    ("!", "Kërkon monitorim / përcjellje nga dikush tjetër"),
-    ("⚑", "Monitorim nga GA"),
-    ("KA", "Monitorim nga KA"),
-    ("GENT", "Monitorim nga Genti"),
+    ("?", "PAQARTESI"),
+    ("!", "KËRKON MONITORIM NGA DIKUSH TJETËR"),
+    ("⚑", "PYETJE/SQARIM ME GA"),
+    ("KA", "PYETJE/SQARIM ME KA"),
+    ("GENT", "PYETJE/SQARIM ME GENTIN"),
 )
 BLOCKED_SECTION_TITLE_PREFIX = "BLLOK 14:30-16:00"
 
@@ -669,8 +669,8 @@ def render_html(
             return ""
         return (
             '<span data-task-symbol="true" style="display:inline-block;min-width:22px;'
-            'margin-right:7px;padding:2px 6px;border:1px solid #fca5a5;border-radius:5px;'
-            'background-color:#fef2f2;color:#dc2626;font-size:16px;font-weight:900;'
+            'margin-right:7px;padding:2px 6px;border:1px solid #93c5fd;border-radius:5px;'
+            'background-color:#eff6ff;color:#0f2a5f;font-size:16px;font-weight:900;'
             f'line-height:1;text-align:center;">{html.escape(symbol)}</span>'
         )
 
@@ -867,17 +867,17 @@ def render_html(
         )
 
     def symbol_legend_html() -> str:
-        items = '<b style="font-size:16px;margin:0 5px;color:#dc2626;">/</b>'.join(
-            f'<span style="white-space:nowrap;"><b style="font-size:15px;font-weight:900;">'
+        items = '<b style="font-size:16px;margin:0 5px;color:#0f2a5f;">/</b>'.join(
+            f'<span style="white-space:nowrap;"><b style="font-size:{"10px" if symbol in {"KA", "GENT"} else "15px"};font-weight:900;color:#0f2a5f;">'
             f'{html.escape(symbol)}</b> - {html.escape(description)}</span>'
             for symbol, description in ONE_H_MARKER_LEGEND
         )
         return (
             '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
             'data-report-symbol-legend="true" style="width:100%;border-collapse:collapse;margin:0 0 12px;">'
-            '<tr><td bgcolor="#fef2f2" style="background-color:#fef2f2;border:1px solid #fecaca;'
+            '<tr><td bgcolor="#eff6ff" style="background-color:#eff6ff;border:1px solid #93c5fd;'
             'padding:8px 10px;font-family:Arial,sans-serif;font-size:10px;line-height:1.35;'
-            'text-align:left;color:#991b1b;white-space:nowrap;">'
+            'text-align:left;color:#0f2a5f;white-space:nowrap;">'
             f'<strong style="margin-right:9px;">LEGJENDA:</strong>{items}</td></tr></table>'
         )
 
@@ -1069,26 +1069,26 @@ def render_docx(document: ReportDocument) -> bytes:
         description_run.font.size = Pt(7.5)
         description_run.font.color.rgb = RGBColor.from_string("475569")
     symbol_legend_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
-    shade(symbol_legend_cell, "#fef2f2")
-    border(symbol_legend_cell, "#FECACA", size="6")
+    shade(symbol_legend_cell, "#EFF6FF")
+    border(symbol_legend_cell, "#93C5FD", size="6")
     symbol_legend_paragraph = symbol_legend_cell.paragraphs[0]
     legend_label_run = symbol_legend_paragraph.add_run("LEGJENDA: ")
     legend_label_run.bold = True
     legend_label_run.font.size = Pt(8)
-    legend_label_run.font.color.rgb = RGBColor.from_string("991B1B")
+    legend_label_run.font.color.rgb = RGBColor.from_string("0F2A5F")
     for index, (symbol, description) in enumerate(ONE_H_MARKER_LEGEND):
         if index:
             separator_run = symbol_legend_paragraph.add_run("  /  ")
             separator_run.bold = True
             separator_run.font.size = Pt(11)
-            separator_run.font.color.rgb = RGBColor.from_string("DC2626")
+            separator_run.font.color.rgb = RGBColor.from_string("0F2A5F")
         symbol_run = symbol_legend_paragraph.add_run(symbol)
         symbol_run.bold = True
-        symbol_run.font.size = Pt(9)
-        symbol_run.font.color.rgb = RGBColor.from_string("DC2626")
+        symbol_run.font.size = Pt(8 if symbol in {"KA", "GENT"} else 9)
+        symbol_run.font.color.rgb = RGBColor.from_string("0F2A5F")
         description_run = symbol_legend_paragraph.add_run(f" - {description}")
         description_run.font.size = Pt(6.5)
-        description_run.font.color.rgb = RGBColor.from_string("7F1D1D")
+        description_run.font.color.rgb = RGBColor.from_string("0F2A5F")
     reminder_groups = (
         (REMINDER_SECTION_TITLE, document.reminders),
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
@@ -1173,7 +1173,7 @@ def render_docx(document: ReportDocument) -> bytes:
                     marker_run = card_cell.paragraphs[0].add_run(f"{task.one_h_marker} ")
                     marker_run.bold = True
                     marker_run.font.size = Pt(12)
-                    marker_run.font.color.rgb = RGBColor.from_string("DC2626")
+                    marker_run.font.color.rgb = RGBColor.from_string("0F2A5F")
                 add_marked_runs(card_cell.paragraphs[0], heading or task.title, task.marked_title, bold=True, color="#050505")
                 for item in detail_lines:
                     detail = card_cell.add_paragraph()
@@ -1290,14 +1290,14 @@ def render_png(document: ReportDocument) -> bytes:
     draw.rounded_rectangle(
         (margin, y, width - margin, y + symbol_legend_height),
         radius=8,
-        fill="#fef2f2",
-        outline="#fecaca",
+        fill="#eff6ff",
+        outline="#93c5fd",
         width=1,
     )
     draw.text(
         (margin + 12, y + 14),
         one_h_marker_legend_text(),
-        fill="#b91c1c",
+        fill="#0f2a5f",
         font=legend_font,
     )
     y += symbol_legend_height + 18
@@ -1398,7 +1398,7 @@ def render_png(document: ReportDocument) -> bytes:
                 for title_index, line in enumerate(title_lines):
                     title_x = margin + 25
                     if title_index == 0 and task.one_h_marker:
-                        draw.text((title_x, line_y), task.one_h_marker, fill="#dc2626", font=bold)
+                        draw.text((title_x, line_y), task.one_h_marker, fill="#0f2a5f", font=bold)
                         marker_bounds = draw.textbbox((title_x, line_y), task.one_h_marker, font=bold)
                         title_x = marker_bounds[2] + 10
                     draw_line_with_marks(title_x, line_y, line, task.marked_title, bold, "#050505")

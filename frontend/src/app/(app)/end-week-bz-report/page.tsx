@@ -130,7 +130,7 @@ export default function EndWeekBzReportPage() {
   return <div className="mx-auto max-w-[1400px] space-y-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h1 className="text-2xl font-semibold">{LABEL}</h1><p className="text-sm text-muted-foreground">Editable end-of-week task and meeting report.</p></div>
-      <div className="flex gap-2"><Button variant="outline" onClick={() => void load()} disabled={busy}><RefreshCw className={busy ? "animate-spin" : ""}/> Refresh</Button><Button onClick={() => void generate()} disabled={busy}><RefreshCw/> Generate</Button></div>
+      <div className="flex gap-2"><Button variant="outline" onClick={() => void load()} disabled={busy}><RefreshCw className={busy ? "animate-spin" : ""}/> Refresh</Button><Button onClick={() => void generate()} disabled={busy}><RefreshCw className={busy ? "animate-spin" : ""}/> {busy ? "Generating..." : "Generate"}</Button></div>
     </div>
     <Tabs defaultValue="report">
       <TabsList><TabsTrigger value="report"><Pencil/> Report</TabsTrigger>{canManage ? <TabsTrigger value="history"><History/> Send history</TabsTrigger> : null}</TabsList>

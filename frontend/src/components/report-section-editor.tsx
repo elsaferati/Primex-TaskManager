@@ -172,6 +172,25 @@ function previewTableCell(value: string, header: string) {
   return trimmed
 }
 
+function splitLeadingTaskMarker(value: string) {
+  const match = value.match(/^(⚑|GENT|KA|[!?])\s+(.+)$/)
+  return match ? { marker: match[1], text: match[2] } : null
+}
+
+function renderPreviewTableCell(value: string, header: string) {
+  if (normalizeHeader(header) !== "TITLE") return value || "-"
+  const marked = splitLeadingTaskMarker(value)
+  if (!marked) return value || "-"
+  return (
+    <>
+      <strong className="mr-1 inline-block text-sm font-black leading-none [text-shadow:0_0_0_currentColor]">
+        {marked.marker}
+      </strong>
+      {marked.text}
+    </>
+  )
+}
+
 function tableGridTemplates(lines: string[]) {
   const templates = new Map<number, string>()
   let currentTemplate = ""
@@ -838,7 +857,7 @@ export function ReportSectionPreview({
                               </span>
                             ))
                           ) : (
-                            displayedCell || "-"
+                            renderPreviewTableCell(displayedCell, header)
                           )}
                         </td>
                       )

@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth"
 import { TaskReviewsPanel } from "@/components/task-reviews-panel"
+import { TaskOneHMarker } from "@/components/task-one-h-marker"
 import { clearDepartmentBootstrapCacheByPrefix } from "@/lib/department-bootstrap-cache"
 import { formatDateDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { loadGaNoteTaskAssigneeIds, replaceGaNoteTaskAssignees } from "@/lib/ga-note-task-membership"
@@ -549,8 +550,9 @@ export default function TaskDetailsPage() {
                 >
                   Back
                 </Button>
-                <div className="text-2xl font-semibold text-slate-900">
-                  {renderMarkedNoteContent(title || task.title, title || task.title)}
+                <div className="flex items-start gap-2 text-2xl font-semibold text-slate-900">
+                  <TaskOneHMarker marker={task.one_h_marker} className="mt-1" />
+                  <span>{renderMarkedNoteContent(title || task.title, title || task.title)}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                   <span>Status: {statusText}</span>

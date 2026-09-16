@@ -12,8 +12,10 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import { useAuth } from "@/lib/auth"
+import { TaskOneHMarker } from "@/components/task-one-h-marker"
+import type { Task } from "@/lib/types"
 
-type SearchTask = { id: string; title: string }
+type SearchTask = { id: string; title: string; one_h_marker?: Task["one_h_marker"] }
 type SearchProject = { id: string; name: string }
 
 export function CommandPalette({ openSignal = 0 }: { openSignal?: number }) {
@@ -66,7 +68,8 @@ export function CommandPalette({ openSignal = 0 }: { openSignal?: number }) {
                   router.push(`/tasks/${t.id}`)
                 }}
               >
-                {t.title}
+                <TaskOneHMarker marker={t.one_h_marker} />
+                <span>{t.title}</span>
               </CommandItem>
             ))}
           </CommandGroup>

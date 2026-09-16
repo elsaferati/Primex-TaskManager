@@ -14,7 +14,7 @@ except Exception:
 
 from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_, select, cast, Date
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access
@@ -40,6 +40,7 @@ from app.services.one_h_slots import effective_slot_date
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.system_task_schedule import matches_template_date
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
+from app.services.task_date_window import task_date_window_filter
 
 
 router = APIRouter()
@@ -387,14 +388,9 @@ async def _compute_etag(
             ("system_tasks_created", _max_timestamp_scalar(SystemTaskTemplate.created_at), False)
         )
     if "tasks" in requested:
-        effective_columns = [Task.due_date, Task.start_date, Task.created_at]
-        if hasattr(Task, "planned_for"):
-            effective_columns.insert(0, getattr(Task, "planned_for"))
-        effective_date = cast(func.coalesce(*effective_columns), Date)
         task_filters = [
             Task.is_active.is_(True),
-            effective_date >= week_start,
-            effective_date <= week_end,
+            task_date_window_filter(week_start, week_end),
         ]
         active_task_ids = select(Task.id).where(*task_filters)
         active_task_assignee_count = (
@@ -756,11 +752,7 @@ async def get_common_view(
             stmt = stmt.outerjoin(Project, Task.project_id == Project.id).where(
                 or_(Task.department_id == department_id, Project.department_id == department_id)
             )
-        effective_columns = [Task.due_date, Task.start_date, Task.created_at]
-        if hasattr(Task, "planned_for"):
-            effective_columns.insert(0, getattr(Task, "planned_for"))
-        effective_date = cast(func.coalesce(*effective_columns), Date)
-        stmt = stmt.where(effective_date >= week_start_date, effective_date <= week_end)
+        stmt = stmt.where(task_date_window_filter(week_start_date, week_end))
         tasks = (await db.execute(stmt.order_by(Task.created_at))).scalars().all()
         tasks = [t for t in tasks if _should_include_task(t)]
 
@@ -842,7 +834,11 @@ async def get_common_view(
             display_title = display_title or (
                 plan_note_titles.get(t.plan_note_origin_id) if t.plan_note_origin_id else None
             )
-            display_title = normalize_email_task_title(display_title or t.title)
+            is_system_task = (t.system_template_origin_id is not None or t.system_task_slot_id is not None)
+            display_title = normalize_email_task_title(
+                display_title or t.title,
+                is_system_task=is_system_task,
+            )
             assignees = assignees_by_task.get(t.id) or []
             if not assignees and t.assigned_to:
                 user_for_task = users_map.get(t.assigned_to)
@@ -864,6 +860,7 @@ async def get_common_view(
             confirmation_fields = {
                 "confirmation_assignee_id": str(t.confirmation_assignee_id) if t.confirmation_assignee_id else None,
                 "confirmation_owner": confirmation_owner,
+                "is_system_task": is_system_task,
             }
             dept_id = None
             if assignees:
@@ -997,7 +994,10 @@ async def get_common_view(
                     )
                 if (
                     t.is_deadline_important
-                    or title_has_eight_am_indicator(display_title or t.title)
+                    or title_has_eight_am_indicator(
+                        display_title or t.title,
+                        is_system_task=is_system_task,
+                    )
                 ) and not (t.is_1h_report or t.is_bllok or t.is_r1 or t.is_personal):
                     items["important"].append(
                         {

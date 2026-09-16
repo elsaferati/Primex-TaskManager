@@ -403,7 +403,7 @@ export default function AfterBreakReportPage() {
             <RefreshCw className={loading ? "animate-spin" : ""} /> Refresh
           </Button>
           <Button onClick={() => void generate()} disabled={loading}>
-            <RefreshCw /> Generate
+            <RefreshCw className={loading ? "animate-spin" : ""} /> {loading ? "Generating..." : "Generate"}
           </Button>
         </div>
       </div>

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { Bold, Calendar as CalendarIcon, Check, Clock, Cloud, Image as ImageIcon, List, ListOrdered, ListTodo, Paperclip, Pencil, Printer, Mic, Square, Trash2, Upload } from "lucide-react"
@@ -32,6 +33,7 @@ import type { Department, GaNote, GaNoteAttachment, PlanNote, Project, SkillCate
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
 type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG"
+type OneHMarkerFilter = "all" | "with" | "none" | OneHMarker
 const ONE_H_MARKER_NONE = "__none__"
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "EXCLAMATION", label: "!" },
@@ -1188,6 +1190,7 @@ export default function GaKaNotesPage() {
   const [rangeFilter, setRangeFilter] = React.useState<"week" | "all">("all")
   const [taskStatusFilter, setTaskStatusFilter] = React.useState<TaskStatusFilter>("all")
   const [contentFilter, setContentFilter] = React.useState<ContentFilter>("all")
+  const [oneHMarkerFilter, setOneHMarkerFilter] = React.useState<OneHMarkerFilter>("all")
   const [searchQuery, setSearchQuery] = React.useState("")
   const deferredSearchQuery = React.useDeferredValue(searchQuery)
   const [notesRenderLimit, setNotesRenderLimit] = React.useState(INITIAL_NOTES_RENDER_LIMIT)
@@ -1657,6 +1660,11 @@ export default function GaKaNotesPage() {
     }
   }, [apiFetch])
 
+  useVisibleRefresh(async () => {
+    await fetchNotes()
+    await loadNoteTasks()
+  }, !editNoteId && !savingEdit)
+
   // Load tasks linked to notes to show assignees/descriptions
   React.useEffect(() => {
     void loadNoteTasks()
@@ -2011,6 +2019,14 @@ export default function GaKaNotesPage() {
     } finally {
       setPosting(false)
     }
+  }
+
+  const updateEditNoteMarker = (value: OneHMarker | typeof ONE_H_MARKER_NONE) => {
+    setEditNoteOneHMarker(value)
+    const marker = value === ONE_H_MARKER_NONE ? null : value
+    setEditTaskAssigneeStates((current) => Object.fromEntries(
+      Object.entries(current).map(([id, state]) => [id, { ...state, oneHMarker: marker }])
+    ))
   }
 
   const updateEditTaskAssigneeState = (
@@ -2912,6 +2928,13 @@ export default function GaKaNotesPage() {
       if (contentFilter === "all") return true
       return EMAIL_MARKER_RE.test(note.content || "")
     }
+    const matchesOneHMarkerFilter = (note: GaNote) => {
+      const marker = note.one_h_marker || null
+      if (oneHMarkerFilter === "all") return true
+      if (oneHMarkerFilter === "with") return marker !== null
+      if (oneHMarkerFilter === "none") return marker === null
+      return marker === oneHMarkerFilter
+    }
     const matchesSearchQuery = (note: GaNote) => {
       if (!normalizedSearchQuery) return true
 
@@ -2962,6 +2985,7 @@ export default function GaKaNotesPage() {
       .filter(withinRange)
       .filter(matchesTaskStatusFilter)
       .filter(matchesContentFilter)
+      .filter(matchesOneHMarkerFilter)
       .filter(matchesSearchQuery)
       .sort((a, b) => {
         // First, sort by status: open notes first, closed notes last
@@ -2982,11 +3006,11 @@ export default function GaKaNotesPage() {
         return bCreated - aCreated
       })
     return sorted
-  }, [notes, rangeFilter, taskStatusFilter, contentFilter, deferredSearchQuery, noteTaskInfo, users, departments, projects])
+  }, [notes, rangeFilter, taskStatusFilter, contentFilter, oneHMarkerFilter, deferredSearchQuery, noteTaskInfo, users, departments, projects])
 
   React.useEffect(() => {
     setNotesRenderLimit(INITIAL_NOTES_RENDER_LIMIT)
-  }, [contentFilter, deferredSearchQuery, departmentId, projectId, rangeFilter, taskStatusFilter])
+  }, [contentFilter, deferredSearchQuery, departmentId, oneHMarkerFilter, projectId, rangeFilter, taskStatusFilter])
 
   const renderedNotes = React.useMemo(
     () => visibleNotes.slice(0, notesRenderLimit),
@@ -3174,8 +3198,8 @@ export default function GaKaNotesPage() {
           <div className="max-w-[220px] space-y-2">
             <Label>Symbol (optional)</Label>
             <Select value={noteOneHMarker} onValueChange={(value) => setNoteOneHMarker(value as OneHMarker | typeof ONE_H_MARKER_NONE)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
+              <SelectTrigger className="border-blue-300 bg-blue-50 font-black text-[#0F2A5F]"><SelectValue /></SelectTrigger>
+              <SelectContent className="font-black text-[#0F2A5F]">
                 <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
                 {ONE_H_MARKER_OPTIONS.map((option) => (
                   <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
@@ -3235,17 +3259,17 @@ export default function GaKaNotesPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-xs text-[#0F2A5F]">
             <span className="font-bold uppercase">Legjenda:</span>
-            <span><b className="text-base font-black">?</b> - Detyrë që parashihet me problem</span>
-            <span className="text-lg font-black text-red-500" aria-hidden="true">/</span>
-            <span><b className="text-base font-black">!</b> - Kërkon monitorim / përcjellje nga dikush tjetër</span>
-            <span className="text-lg font-black text-red-500" aria-hidden="true">/</span>
-            <span><b className="text-base font-black">⚑</b> - Monitorim nga GA</span>
-            <span className="text-lg font-black text-red-500" aria-hidden="true">/</span>
-            <span><b className="text-base font-black">KA</b> - Monitorim nga KA</span>
-            <span className="text-lg font-black text-red-500" aria-hidden="true">/</span>
-            <span><b className="text-base font-black">GENT</b> - Monitorim nga Genti</span>
+            <span><b className="text-base font-black">?</b> - PAQARTESI</span>
+            <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
+            <span><b className="text-base font-black">!</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span>
+            <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
+            <span><b className="text-base font-black">⚑</b> - PYETJE/SQARIM ME GA</span>
+            <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
+            <span><b className="text-xs font-black">KA</b> - PYETJE/SQARIM ME KA</span>
+            <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
+            <span><b className="text-xs font-black">GENT</b> - PYETJE/SQARIM ME GENTIN</span>
           </div>
           {showLegend ? (
             <div className="rounded-md border bg-white">
@@ -3263,14 +3287,14 @@ export default function GaKaNotesPage() {
                   </TableHeader>
                   <TableBody>
                     {[
-                      ["?", "Detyrë që parashihet me problem"],
-                      ["!", "Kërkon monitorim / përcjellje nga dikush tjetër"],
-                      ["⚑", "Monitorim nga GA"],
-                      ["KA", "Monitorim nga KA"],
-                      ["GENT", "Monitorim nga Genti"],
+                      ["?", "PAQARTESI"],
+                      ["!", "KËRKON MONITORIM NGA DIKUSH TJETËR"],
+                      ["⚑", "PYETJE/SQARIM ME GA"],
+                      ["KA", "PYETJE/SQARIM ME KA"],
+                      ["GENT", "PYETJE/SQARIM ME GENTIN"],
                     ].map(([symbol, meaning]) => (
                       <TableRow key={symbol} className="h-8">
-                        <TableCell className="p-1 text-center text-lg font-black text-red-600">{symbol}</TableCell>
+                        <TableCell className="p-1 text-center text-lg font-black text-[#0F2A5F]">{symbol}</TableCell>
                         <TableCell className="text-sm font-semibold">Symbol</TableCell>
                         <TableCell className="text-sm text-slate-600">{meaning}</TableCell>
                       </TableRow>
@@ -3445,6 +3469,24 @@ export default function GaKaNotesPage() {
                 <SelectContent>
                   <SelectItem value="all">All</SelectItem>
                   <SelectItem value="emails">Emails</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Select
+                value={oneHMarkerFilter}
+                onValueChange={(value) => setOneHMarkerFilter(value as OneHMarkerFilter)}
+              >
+                <SelectTrigger className="h-9 w-[170px] border-blue-300 bg-blue-50 font-black text-[#0F2A5F]">
+                  <SelectValue placeholder="Symbols" />
+                </SelectTrigger>
+                <SelectContent className="font-black text-[#0F2A5F]">
+                  <SelectItem value="all">All symbols/default</SelectItem>
+                  <SelectItem value="with">All with symbols</SelectItem>
+                  <SelectItem value="none">No symbol</SelectItem>
+                  {ONE_H_MARKER_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -3877,7 +3919,7 @@ export default function GaKaNotesPage() {
                                 </span>
                                 {note.one_h_marker ? (
                                   <span
-                                    className="inline-flex min-h-6 items-center rounded-md border border-red-300 bg-red-50 px-2 text-base font-black text-red-600"
+                                    className="inline-flex min-h-6 items-center rounded-md border border-blue-300 bg-blue-50 px-2 text-lg font-black text-[#0F2A5F] [text-shadow:0_0_0_currentColor]"
                                     title="Note symbol"
                                   >
                                     {oneHMarkerLabel(note.one_h_marker)}
@@ -4630,8 +4672,8 @@ export default function GaKaNotesPage() {
                 <div className="space-y-2">
                   <Label>Symbol (optional)</Label>
                   <Select value={taskOneHMarker} onValueChange={(value) => setTaskOneHMarker(value as OneHMarker | typeof ONE_H_MARKER_NONE)}>
-                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                    <SelectContent>
+                    <SelectTrigger className="w-full border-blue-300 bg-blue-50 font-black text-[#0F2A5F]"><SelectValue /></SelectTrigger>
+                    <SelectContent className="font-black text-[#0F2A5F]">
                       <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
                       {ONE_H_MARKER_OPTIONS.map((option) => (
                         <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
@@ -4964,11 +5006,11 @@ export default function GaKaNotesPage() {
                 <Label>Note symbol</Label>
                 <Select
                   value={editNoteOneHMarker}
-                  onValueChange={(value) => setEditNoteOneHMarker(value as OneHMarker | typeof ONE_H_MARKER_NONE)}
+                  onValueChange={(value) => updateEditNoteMarker(value as OneHMarker | typeof ONE_H_MARKER_NONE)}
                   disabled={savingEdit}
                 >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
+                  <SelectTrigger className="border-blue-300 bg-blue-50 font-black text-[#0F2A5F]"><SelectValue /></SelectTrigger>
+                  <SelectContent className="font-black text-[#0F2A5F]">
                     <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
                     {ONE_H_MARKER_OPTIONS.map((option) => (
                       <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
@@ -5237,13 +5279,11 @@ export default function GaKaNotesPage() {
                               <Label className="text-xs text-muted-foreground">Symbol</Label>
                               <Select
                                 value={state.oneHMarker ?? ONE_H_MARKER_NONE}
-                                onValueChange={(value) => updateEditTaskAssigneeState(assigneeId, {
-                                  oneHMarker: value === ONE_H_MARKER_NONE ? null : value as OneHMarker,
-                                })}
+                                onValueChange={(value) => updateEditNoteMarker(value as OneHMarker | typeof ONE_H_MARKER_NONE)}
                                 disabled={savingEdit}
                               >
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
+                                <SelectTrigger className="border-blue-300 bg-blue-50 font-black text-[#0F2A5F]"><SelectValue /></SelectTrigger>
+                                <SelectContent className="font-black text-[#0F2A5F]">
                                   <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
                                   {ONE_H_MARKER_OPTIONS.map((option) => (
                                     <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>

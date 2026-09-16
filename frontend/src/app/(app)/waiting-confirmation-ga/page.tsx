@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { TaskOneHMarker } from "@/components/task-one-h-marker"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
 import type { Department, Project, Task, TaskAssignee } from "@/lib/types"
@@ -267,7 +268,10 @@ export default function WaitingConfirmationGaPage() {
                           })
                         ) : null}
                       </div>
-                      <span>{task.title || "-"}</span>
+                      <span className="flex items-start gap-1.5">
+                        <TaskOneHMarker marker={task.one_h_marker} />
+                        <span>{task.title || "-"}</span>
+                      </span>
                       {canManageWaitingConfirmation ? (
                         <div className="flex flex-nowrap items-center gap-1.5 sm:hidden">
                           <Button

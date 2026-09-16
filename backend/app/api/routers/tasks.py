@@ -11,7 +11,7 @@ except ImportError:
     ZoneInfo = None
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status, Query
-from sqlalchemy import Date, cast, delete, exists, func, insert, literal, null, or_, select, union_all, update
+from sqlalchemy import delete, exists, func, insert, literal, null, or_, select, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
@@ -51,6 +51,8 @@ from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, notification_task_preview, publish_notification
 from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
 from app.services.task_daily_progress import upsert_explicit_task_daily_status, upsert_task_daily_progress
+from app.services.task_date_window import task_date_window_filter
+from app.services.task_marker import sync_task_marker
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
 from app.services.daily_report_logic import business_days_between, parse_ko_user_id
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
@@ -71,8 +73,12 @@ from app.services.task_title_rules import (
 
 router = APIRouter()
 
-def _validate_eight_am_one_h_slot(title: str, slot: str | None) -> None:
-    if title_has_eight_am_indicator(title) and slot not in (None, "10:00"):
+def _validate_eight_am_one_h_slot(
+    title: str, slot: str | None, *, is_system_task: bool = False
+) -> None:
+    if title_has_eight_am_indicator(
+        title, is_system_task=is_system_task
+    ) and slot not in (None, "10:00"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="08:00 tasks are 1H tasks and must use the 10:00 slot.",
@@ -361,7 +367,7 @@ def _supports_waiting_confirmation(
     is_personal: bool | None = None,
 ) -> bool:
     """Waiting Confirmation is for special and note-origin tasks, never system tasks."""
-    if getattr(task, "system_template_origin_id", None) is not None:
+    if bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None)):
         return False
     if getattr(task, "ga_note_origin_id", None) is not None or getattr(task, "plan_note_origin_id", None) is not None:
         return True
@@ -937,7 +943,10 @@ def _task_to_out(
 ) -> TaskOut:
     return TaskOut(
         id=task.id,
-        title=_normalize_email_task_title(task.title),
+        title=_normalize_email_task_title(
+            task.title,
+            is_system_task=(task.system_template_origin_id is not None or task.system_task_slot_id is not None),
+        ),
         description=task.description,
         internal_notes=task.internal_notes,
         skill_category=task.skill_category,
@@ -1504,18 +1513,10 @@ async def list_tasks(
     if due_to:
         stmt = stmt.where(Task.due_date <= due_to)
     if window_from or window_to:
-        effective_columns = [Task.due_date, Task.start_date, Task.created_at]
-        if hasattr(Task, "planned_for"):
-            effective_columns.insert(0, getattr(Task, "planned_for"))
-        effective_date = cast(func.coalesce(*effective_columns), Date)
-        if window_from:
-            window_from_date = _as_local_date(window_from)
-            if window_from_date:
-                stmt = stmt.where(effective_date >= window_from_date)
-        if window_to:
-            window_to_date = _as_local_date(window_to)
-            if window_to_date:
-                stmt = stmt.where(effective_date <= window_to_date)
+        stmt = stmt.where(task_date_window_filter(
+            _as_local_date(window_from) if window_from else None,
+            _as_local_date(window_to) if window_to else None,
+        ))
     if not include_done:
         stmt = stmt.where(Task.status != TaskStatus.DONE.value)
     elif not include_all_done:
@@ -1929,6 +1930,10 @@ async def create_task(
             dto.alignment_user_ids = list(rows) if rows else None
             return dto
         ga_note.is_converted_to_task = True
+        if _payload_has_field(payload, "one_h_marker"):
+            ga_note.one_h_marker = payload.one_h_marker
+        else:
+            payload = payload.model_copy(update={"one_h_marker": ga_note.one_h_marker})
 
     if payload.plan_note_origin_id is not None:
         plan_note = (
@@ -1993,6 +1998,10 @@ async def create_task(
             dto.alignment_user_ids = list(rows) if rows else None
             return dto
         plan_note.is_converted_to_task = True
+        if _payload_has_field(payload, "one_h_marker"):
+            plan_note.one_h_marker = payload.one_h_marker
+        else:
+            payload = payload.model_copy(update={"one_h_marker": plan_note.one_h_marker})
 
     assignee_ids: list[uuid.UUID] | None = None
     assignee_users: list[User] = []
@@ -2762,11 +2771,14 @@ async def update_task(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> TaskOut:
-    if payload.title is not None:
-        payload.title = _normalize_email_task_title(payload.title)
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if payload.title is not None:
+        payload.title = _normalize_email_task_title(
+            payload.title,
+            is_system_task=(task.system_template_origin_id is not None or task.system_task_slot_id is not None),
+        )
     is_assigned_to_task = await _is_user_assigned_to_task(db, task, user.id)
 
     ensure_task_editor(user, task)
@@ -2800,14 +2812,14 @@ async def update_task(
     
     # For system task status updates, allow admins and managers to bypass department check
     is_system_task_status_update = (
-        task.system_template_origin_id is not None
+        (task.system_template_origin_id is not None or task.system_task_slot_id is not None)
         and payload.status is not None
         and user.role in (UserRole.ADMIN, UserRole.MANAGER)
     )
     # Department access check removed since can_edit above already verified
     # that user is admin, manager, creator, assignee, or same-department member
 
-    if payload.status is not None and task.system_template_origin_id is not None:
+    if payload.status is not None and (task.system_template_origin_id is not None or task.system_task_slot_id is not None):
         if is_assigned_to_task:
             pass
         elif user.role in (UserRole.ADMIN, UserRole.MANAGER):
@@ -3294,12 +3306,16 @@ async def update_task(
         else:
             task.one_h_report_slot = None
     if one_h_marker_set:
-        task.one_h_marker = payload.one_h_marker
+        await sync_task_marker(db, task, payload.one_h_marker)
     if payload.is_r1 is not None:
         task.is_r1 = payload.is_r1
 
     if task.is_1h_report or task.is_r1:
-        _validate_eight_am_one_h_slot(task.title, task.one_h_report_slot)
+        _validate_eight_am_one_h_slot(
+            task.title,
+            task.one_h_report_slot,
+            is_system_task=(task.system_template_origin_id is not None or task.system_task_slot_id is not None),
+        )
 
     project_for_control: Project | None = None
     if task.project_id is not None:
@@ -3796,7 +3812,11 @@ async def update_task_one_h_report_slot(
     next_slot = _normalize_one_h_report_slot(payload.one_h_report_slot)
     if payload.one_h_report_slot is not None and next_slot is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid 1H report slot")
-    _validate_eight_am_one_h_slot(task.title, next_slot)
+    _validate_eight_am_one_h_slot(
+        task.title,
+        next_slot,
+        is_system_task=(task.system_template_origin_id is not None or task.system_task_slot_id is not None),
+    )
 
     # Current-day slots roll over to the next working day at 15:59.
     slot_date = effective_slot_date(payload.report_date)
@@ -3848,14 +3868,7 @@ async def update_task_one_h_marker(
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    task.one_h_marker = payload.one_h_marker
-    if task.fast_task_group_id is not None:
-        await db.execute(
-            update(Task)
-            .where(Task.fast_task_group_id == task.fast_task_group_id)
-            .where(Task.is_active.is_(True))
-            .values(one_h_marker=payload.one_h_marker)
-        )
+    await sync_task_marker(db, task, payload.one_h_marker)
 
     await db.commit()
     await db.refresh(task)

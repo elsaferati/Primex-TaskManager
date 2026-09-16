@@ -1189,10 +1189,10 @@ def _fast_subtype_short(task: Task) -> str:
     return base
 
 
-def _has_0800_marker(title: str | None) -> bool:
+def _has_0800_marker(title: str | None, *, is_system_task: bool = False) -> bool:
     from app.services.task_title_rules import title_has_eight_am_indicator
 
-    return title_has_eight_am_indicator(title)
+    return title_has_eight_am_indicator(title, is_system_task=is_system_task)
 
 
 def _finish_period_rank(value: str | None) -> int:
@@ -1214,7 +1214,12 @@ def _task_export_order_key(task: Task) -> tuple[int, int, int, int, datetime, da
     return (
         1 if is_done else 0,
         _finish_period_rank(task.finish_period),
-        0 if _has_0800_marker(task.title) else 1,
+        0
+        if _has_0800_marker(
+            task.title,
+            is_system_task=bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None)),
+        )
+        else 1,
         0 if getattr(task, "is_deadline_important", False) else 1,
         due_date,
         created_at,

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import { Eye, RefreshCw, Save, Send, Settings } from "lucide-react"
 import { toast } from "sonner"
 
@@ -30,7 +31,7 @@ type Delivery = {
 }
 type Preview = { subject: string; target_date: string; html: string }
 type TaskMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG"
-type TaskMarkerFilter = "all" | "none" | TaskMarker
+type TaskMarkerFilter = "all" | "with" | "none" | TaskMarker
 
 const taskMarkerOptions: Array<{ value: TaskMarker; label: string }> = [
   { value: "EXCLAMATION", label: "!" },
@@ -69,7 +70,7 @@ function formatDateTime(value?: string | null) {
 
 export function PrintReportPage({ today = false }: { today?: boolean }) {
   const API = today ? "/today-print-report" : "/tomorrow-print-report"
-  const reportName = today ? "1H SHTYPI Today" : "1H SHTYPI Tomorrow"
+  const reportName = today ? "1H SHTYPI SOT (Shiko simbolet)" : "1H SHTYPI NESER (Shiko simbolet)"
   const { apiFetch, user, loading: authLoading } = useAuth()
   const [settings, setSettings] = React.useState<SettingsState | null>(null)
   const [recipientInputs, setRecipientInputs] = React.useState({ to: "", cc: "", bcc: "" })
@@ -79,6 +80,7 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
   const [loading, setLoading] = React.useState(true)
   const [saving, setSaving] = React.useState(false)
   const [sending, setSending] = React.useState(false)
+  const [generatingAction, setGeneratingAction] = React.useState<"preview" | "generate" | null>(null)
   const previewRef = React.useRef<HTMLDivElement | null>(null)
   const previewFrameRef = React.useRef<HTMLIFrameElement | null>(null)
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
@@ -145,6 +147,7 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
   }
 
   const generateReport = async (forPreview = false) => {
+    setGeneratingAction(forPreview ? "preview" : "generate")
     try {
       const response = await apiFetch(`${API}/preview?generated_at=${Date.now()}`, { cache: "no-store" })
       if (!response?.ok) throw new Error(await response?.text())
@@ -153,8 +156,16 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
       window.setTimeout(() => previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0)
     } catch (error) {
       toast.error("Report could not be generated", { description: String(error) })
+    } finally {
+      setGeneratingAction(null)
     }
   }
+
+  useVisibleRefresh(async () => {
+    if (previewFrameRef.current?.contentDocument?.querySelector("select[data-task-marker-control]:disabled")) return
+    const response = await apiFetch(`${API}/preview?generated_at=${Date.now()}`, { cache: "no-store" })
+    if (response.ok) setPreview(await response.json())
+  }, Boolean(preview) && !saving && !sending && !authLoading)
 
   const applyPreviewMarkerFilter = React.useCallback(() => {
     const document = previewFrameRef.current?.contentDocument
@@ -172,7 +183,10 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
         const marker = cell.dataset.taskMarker || ""
         const isTaskCard = Boolean(cell.dataset.taskId)
         const matches = markerFilter === "all" || (
-          isTaskCard && (markerFilter === "none" ? !marker : marker === markerFilter)
+          isTaskCard && (
+            markerFilter === "with" ? Boolean(marker) :
+            markerFilter === "none" ? !marker : marker === markerFilter
+          )
         )
         cell.style.display = matches ? "" : "none"
         cell.dataset.taskMarkerFilterHidden = matches ? "false" : "true"
@@ -216,10 +230,10 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
         "max-width:64px",
         "margin:0 0 3px 4px",
         "padding:0 2px",
-        "border:1px solid #FCA5A5",
+        "border:1px solid #93C5FD",
         "border-radius:999px",
-        "background:#FEF2F2",
-        "color:#DC2626",
+        "background:#EFF6FF",
+        "color:#0F2A5F",
         "font:900 16px/1 Arial,sans-serif",
         "cursor:pointer",
       ].join(";")
@@ -227,13 +241,13 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
       const emptyOption = document.createElement("option")
       emptyOption.value = ""
       emptyOption.textContent = "—"
-      emptyOption.style.cssText = "color:#DC2626;font-size:16px;font-weight:900"
+      emptyOption.style.cssText = "color:#0F2A5F;font-size:16px;font-weight:900"
       select.appendChild(emptyOption)
       taskMarkerOptions.forEach((option) => {
         const element = document.createElement("option")
         element.value = option.value
         element.textContent = option.label
-        element.style.cssText = "color:#DC2626;font-size:16px;font-weight:900"
+        element.style.cssText = "color:#0F2A5F;font-size:16px;font-weight:900"
         select.appendChild(element)
       })
       select.value = cell.dataset.taskMarker || ""
@@ -298,21 +312,22 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
           <p className="text-sm text-muted-foreground">{today ? "Today's Common View tasks and meetings, sent at 09:00 Monday-Friday." : "Next-working-day tasks and meetings, sent as an HTML email."}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <label className="flex items-center gap-2 rounded-md border bg-white px-3 text-sm font-medium">
+          <label className="flex items-center gap-2 rounded-md border border-blue-300 bg-blue-50 px-3 text-sm font-medium text-[#0F2A5F]">
             Symbol
             <select
-              className="h-8 bg-transparent text-sm outline-none"
+              className="h-8 bg-transparent text-sm font-black text-[#0F2A5F] outline-none"
               value={markerFilter}
               onChange={(event) => setMarkerFilter(event.target.value as TaskMarkerFilter)}
               aria-label="Filter tasks by symbol"
             >
               <option value="all">All</option>
+              <option value="with">All with symbols</option>
               <option value="none">No symbol</option>
               {taskMarkerOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
-          <Button variant="outline" onClick={() => void generateReport(true)} disabled={!user}><Eye /> Preview email</Button>
-          <Button variant="outline" onClick={() => void generateReport()} disabled={!user}><RefreshCw /> Generate</Button>
+          <Button variant="outline" onClick={() => void generateReport(true)} disabled={!user || generatingAction !== null}>{generatingAction === "preview" ? <RefreshCw className="animate-spin" /> : <Eye />} {generatingAction === "preview" ? "Generating..." : "Preview email"}</Button>
+          <Button variant="outline" onClick={() => void generateReport()} disabled={!user || generatingAction !== null}><RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} /> {generatingAction === "generate" ? "Generating..." : "Generate"}</Button>
           {canManage ? <Button onClick={() => void sendNow()} disabled={sending}><Send /> {sending ? "Sending..." : "Send now"}</Button> : null}
         </div>
       </div>

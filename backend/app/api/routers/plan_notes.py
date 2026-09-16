@@ -42,6 +42,7 @@ from app.services.ga_note_task_instances import (
 )
 from app.services.task_strike_events import record_description_strike_events, record_title_strike_events
 from app.services.task_daily_progress import upsert_explicit_task_daily_status
+from app.services.task_marker import note_bundle_marker_update, sync_note_task_marker
 from app.services.notifications import (
     add_notification,
     notification_task_preview,
@@ -352,7 +353,7 @@ async def update_plan_note(
     if "is_discussed" in update_data:
         note.is_discussed = update_data["is_discussed"]
     if "one_h_marker" in update_data:
-        note.one_h_marker = update_data["one_h_marker"]
+        await sync_note_task_marker(db, note, update_data["one_h_marker"])
     if "next_week" in update_data:
         note.next_week = bool(update_data["next_week"])
     if "planned_for_date" in update_data:
@@ -470,6 +471,10 @@ async def update_plan_note_task_bundle(
     existing_tasks = (
         await db.execute(select(Task).where(Task.plan_note_origin_id == note.id).with_for_update())
     ).scalars().all()
+    try:
+        marker_changed, shared_marker = note_bundle_marker_update(note, payload, existing_tasks)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     semantic_before = {task.id: task_semantic_state(task) for task in existing_tasks}
     affected_department_ids = {task.department_id for task in existing_tasks if task.department_id}
     if note.department_id:
@@ -667,6 +672,11 @@ async def update_plan_note_task_bundle(
                 task=task,
                 user_ids=[task.assigned_to],
             )
+
+    if marker_changed:
+        await sync_note_task_marker(db, note, shared_marker)
+        for task in active_tasks:
+            task.one_h_marker = shared_marker
 
     semantic_tasks = {task.id: task for task in existing_tasks}
     semantic_tasks.update({task.id: task for task in active_tasks})

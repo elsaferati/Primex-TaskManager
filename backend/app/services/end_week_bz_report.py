@@ -40,6 +40,7 @@ from app.services.meetings_report import (
     TECHNICAL_TAG,
 )
 from app.services.task_title_rules import title_has_eight_am_indicator
+from app.services.personal_task_owner import personal_task_owner
 
 REPORT_TYPE = "end_week_bz_report"
 REPORT_LABEL = "PIKAT E BZ FIN JAV"
@@ -58,9 +59,6 @@ DEADLINE_COLUMNS = [("NR", 2), ("WHO", 12), ("TYPE", 7), ("DEP", 5), ("AM/PM", 5
 R1_COLUMNS = [("NR", 2), ("WHO", 12), ("DEP", 5), ("AM/PM", 5), ("TITLE", 45), ("DUE DATE", 16), ("STATUS", 20)]
 EIGHT_AM_COLUMNS = [("NR", 2), ("WHO", 12), ("TYPE", 7), ("DEP", 5), ("AM/PM", 5), ("TITLE", 38), ("DUE DATE", 16), ("STATUS", 20)]
 MEETING_COLUMNS = [("NR", 2), ("WHO", 14), ("TIME", 11), ("TITLE", 42), ("RECURRENCE", 10), ("STATUS", 10)]
-PERSONAL_PREFIX = re.compile(r"^[A-Z]{2,3}(?:\s*[:/]\s*[A-Z]{2,3})*(?=\s|:|/|$)", re.I)
-
-
 def subject_for(day: date) -> str:
     return f"{REPORT_LABEL} - {day:%d.%m.%Y}"
 
@@ -86,14 +84,7 @@ def _first_visible_line(value: str | None) -> str:
 def _personal_group(task: Task, display_title: str | None = None) -> str:
     # This is intentionally identical to Common View's getPersonalTaskGroup:
     # classify the first visible line of the resolved note/task display title.
-    match = PERSONAL_PREFIX.match(_first_visible_line(display_title or task.title).upper())
-    if match:
-        tokens = {token.strip().upper() for token in re.split(r"[:/]", match.group(0))}
-        if "GA" in tokens:
-            return "GA"
-        if "KA" in tokens:
-            return "KA"
-    return "PX"
+    return personal_task_owner(_first_visible_line(display_title or task.title))
 
 
 def _is_wfc_task(task: Task) -> bool:
@@ -187,7 +178,15 @@ async def build_end_week_bz_report_sections(db: AsyncSession, report_day: date) 
     waiting = [task for task in tasks if _is_wfc_task(task)]
     deadline = [task for task in open_for_day if task.is_deadline_important]
     r1 = [task for task in open_for_day if task.is_r1]
-    at_eight = [task for task in open_for_day if title_has_eight_am_indicator(task.title) or _local_time(task.due_date) == "08:00"]
+    at_eight = [
+        task
+        for task in open_for_day
+        if title_has_eight_am_indicator(
+            task.title,
+            is_system_task=bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None)),
+        )
+        or _local_time(task.due_date) == "08:00"
+    ]
 
     meetings = (await db.execute(select(Meeting).options(selectinload(Meeting.participants)).where(Meeting.starts_at.is_not(None)))).scalars().unique().all()
     meetings = [meeting for meeting in meetings if is_common_view_visible_meeting(meeting)]
@@ -202,7 +201,7 @@ async def build_end_week_bz_report_sections(db: AsyncSession, report_day: date) 
 
     personal_lines: list[str] = []
     counts: dict[str, int] = {}
-    for group in ("GA", "KA", "PX"):
+    for group in ("KA", "GENT", "GA", "PX"):
         grouped = [task for task in personal if _personal_group(task, display_titles.get(task.id)) == group]
         if personal_lines:
             personal_lines.append("")

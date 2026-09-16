@@ -45,6 +45,7 @@ import {
   type LegendEntry,
 } from "@/components/weekly-planner-legend-table"
 import { WeeklyPlannerSnapshotsView } from "@/components/weekly-planner-snapshots-view"
+import { TaskOneHMarker } from "@/components/task-one-h-marker"
 import { WeeklyPlanPerformanceView, type WeeklyPlanPerformanceResponse } from "@/components/weekly-plan-performance-view"
 import type { Department, GaNote, Project, Task, UserLookup } from "@/lib/types"
 
@@ -3653,8 +3654,9 @@ export default function WeeklyPlannerPage() {
                 {formatPlannerStatusLabel(task.status)}
               </span>
             </div>
-            <div className="mt-1 line-clamp-2 text-sm font-semibold leading-snug text-slate-900" title={task.title}>
-              {task.title}
+            <div className="mt-1 flex items-start gap-1.5 text-sm font-semibold leading-snug text-slate-900" title={task.title}>
+              <TaskOneHMarker marker={task.one_h_marker} />
+              <span className="line-clamp-2">{task.title}</span>
             </div>
           </div>
         </div>
