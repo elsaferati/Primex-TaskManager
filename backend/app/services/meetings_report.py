@@ -30,7 +30,8 @@ from app.services.daily_report_logic import business_days_between, planned_range
 from app.services.daily_rlz_compliance import REASON_LABELS
 from app.services.meeting_palette import MEETING_TONE_COLORS, meeting_report_tone
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
-from app.services.primeflow_report import GmailService, report_timezone
+from app.services.personal_task_owner import personal_task_owner
+from app.services.primeflow_report import GmailService, one_h_marker_symbol, report_timezone
 from app.services.primeflow_report import PrimeFlowClient
 from app.services.std_feedback_tickets import std_tickets_report_section
 from app.services.system_task_schedule import matches_template_date
@@ -53,9 +54,11 @@ SECTION_TITLES = [
     "PRODUKTE +/- SOT (PCM)",
     "N- DET PERSONALISHT ME KA/GENTIN?",
     "N- WFC ME KA/GENTIN?",
+    "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER",
 ]
 DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[0],  # Manual first
+    SECTION_TITLES[15],  # Manual symbol check second
     SECTION_TITLES[1],  # STD tickets first among auto-filled
     SECTION_TITLES[2],
     SECTION_TITLES[3],
@@ -73,6 +76,7 @@ DISPLAY_SECTION_TITLES = [
 ]
 MANUAL_SECTION_TITLES = {
     SECTION_TITLES[0],
+    SECTION_TITLES[15],
 }
 SECTION_TITLE_ALIASES = {
     "(GA) ZHV: TIKETAT E STD? RAPORTOHEN NE M3": SECTION_TITLES[1],
@@ -111,8 +115,6 @@ def is_retired_meetings_section_title(title: str | None) -> bool:
 DEFAULT_MANUAL_BODY = "(Ploteso manualisht)"
 # Personal KA/Genti ownership is encoded in task-title markers. WFC grouping
 # uses the linked confirmation assignee instead.
-KA_OWNER_MARKER = re.compile(r"(?:^|[/:])\s*KA\b", re.I)
-GENTI_OWNER_MARKER = re.compile(r"(?:^|[/:])\s*(?:GENTI?|GT)\b", re.I)
 PERSONAL_GA = re.compile(r"[/:]\s*GA\b", re.I)
 TECHNICAL_TAG = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.I)
 DUE_SUFFIX = re.compile(r"\s+due\s+\d{1,2}:\d{2}\s*$", re.I)
@@ -404,6 +406,34 @@ def _task_day(task: Task) -> date | None:
     return _local_date(task.due_date or task.start_date or task.created_at)
 
 
+def _task_covers_report_day(task: Task, day: date) -> bool:
+    """Match Common View's working-day expansion for start-to-due task ranges."""
+    single_day_only = str(getattr(task, "phase", "") or "").upper() in {"CHECK", "CONTROL"}
+    start = _local_date(getattr(task, "start_date", None))
+    due = _local_date(getattr(task, "due_date", None))
+    if not single_day_only and start and due:
+        if start > due:
+            start, due = due, start
+        current = start
+        has_working_day = False
+        while current <= due:
+            if current.weekday() < 5:
+                has_working_day = True
+                break
+            current += timedelta(days=1)
+        if has_working_day:
+            return start <= day <= due and day.weekday() < 5
+        return day == start
+
+    source = (
+        getattr(task, "planned_for", None)
+        or getattr(task, "due_date", None)
+        or getattr(task, "start_date", None)
+        or getattr(task, "created_at", None)
+    )
+    return _local_date(source) == day
+
+
 def _is_new_task_for_m3_day(task: Task, day: date) -> bool:
     """Whether a task is new for the M3 report generated for ``day``.
 
@@ -451,15 +481,12 @@ def _is_open(task: Task) -> bool:
     return not task.completed_at and str(task.status or "").upper() not in {"DONE", "COMPLETED"}
 
 
-def _matches_owner_marker(task: Task, marker: re.Pattern[str]) -> bool:
-    return bool(marker.search(_clean_task_title(task.title)) or marker.search(task.title or ""))
-
-
 def _ka_genti_owner(task: Task) -> str | None:
     """Return the report ownership table for a KA/Gent(i) title marker."""
-    if _matches_owner_marker(task, KA_OWNER_MARKER):
+    owner = personal_task_owner(_clean_task_title(task.title) or task.title)
+    if owner == "KA":
         return "KA"
-    if _matches_owner_marker(task, GENTI_OWNER_MARKER):
+    if owner == "GENT":
         return "GENTI"
     return None
 
@@ -1022,7 +1049,8 @@ def _m3_status_table(
         added_week = _m3_added_week_label(task, week_start) if include_added_week else ""
         am_pm = _m3_am_pm_label(task) if include_am_pm else ""
         postponed_from, postponed_to = (date_range_by_task or {}).get(task.id, ("-", "-"))
-        display_title = _clean_task_title(task.title)
+        marker = one_h_marker_symbol(getattr(task, "one_h_marker", None))
+        display_title = " ".join(part for part in (marker, _clean_task_title(task.title)) if part)
         title_lines = _wrap_fixed_width(display_title, 64)
         reason, comment = (daily_rlz_by_task or {}).get(task.id, ("-", "-"))
         reason_lines = _wrap_fixed_width(reason or "-", 24) if daily_rlz_by_task is not None else []
@@ -1258,7 +1286,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     )
     product_delta_today = _product_delta_tasks_for_m3_day(report_tasks, report_day)
 
-    tomorrow_tasks = [task for task in tasks if _task_day(task) == tomorrow and _is_open(task)]
+    tomorrow_tasks = [task for task in tasks if _task_covers_report_day(task, tomorrow) and _is_open(task)]
     new_task_review_tasks = [task for task in tomorrow_tasks if not _is_system_task(task)]
     # "Detyrat e reja" is a one-day list: a task is new on its planned start
     # date, rather than on every day up to its due date.
@@ -1274,22 +1302,19 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         task for task in tasks
         if task.is_personal
         and _is_open(task)
-        and _task_day(task) == tomorrow
-        and (
-            PERSONAL_GA.search(_clean_task_title(task.title))
-            or PERSONAL_GA.search(task.title or "")
-        )
+        and _task_covers_report_day(task, tomorrow)
+        and personal_task_owner(_clean_task_title(task.title) or task.title) == "GA"
     ]
     personal_ka_genti = [
         task for task in tasks
         if task.is_personal
         and _is_open(task)
-        and _task_day(task) == tomorrow
+        and _task_covers_report_day(task, tomorrow)
         and _ka_genti_owner(task) is not None
     ]
     wfc_report_tasks = [
         task for task in tasks
-        if _task_day(task) == tomorrow
+        if _task_covers_report_day(task, tomorrow)
         and _is_report_wfc_task(task)
         and _ka_genti_confirmer(task, names) is not None
     ]
@@ -1426,6 +1451,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
 
     by_title = {
         SECTION_TITLES[0]: "(Ploteso manualisht)",
+        SECTION_TITLES[15]: "(Ploteso manualisht)",
         SECTION_TITLES[1]: std_tickets_section,
         SECTION_TITLES[2]: _normalize_section(section_1),
         SECTION_TITLES[3]: _normalize_section(

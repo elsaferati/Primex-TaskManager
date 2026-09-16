@@ -43,6 +43,7 @@ from app.services.meetings_report import (
     _leave_lines,
     _render_ascii_table_html,
     _task_owners,
+    _task_covers_report_day,
     _daily_baseline_task_ids,
     _tomorrow_common_section,
     _tomorrow_meeting_table,
@@ -56,10 +57,38 @@ from app.services.meetings_report import (
 )
 
 
+class M3TaskDateRangeTests(unittest.TestCase):
+    def test_start_due_range_includes_each_working_day(self) -> None:
+        task = SimpleNamespace(
+            phase="MEETINGS",
+            start_date=datetime(2026, 9, 16, 8, 0),
+            due_date=datetime(2026, 9, 25, 17, 0),
+            planned_for=None,
+            created_at=datetime(2026, 9, 14, 9, 0),
+        )
+        self.assertTrue(_task_covers_report_day(task, date(2026, 9, 17)))
+        self.assertTrue(_task_covers_report_day(task, date(2026, 9, 25)))
+        self.assertFalse(_task_covers_report_day(task, date(2026, 9, 19)))
+        self.assertFalse(_task_covers_report_day(task, date(2026, 9, 28)))
+
+    def test_check_and_control_tasks_remain_single_date(self) -> None:
+        task = SimpleNamespace(
+            phase="CHECK",
+            start_date=datetime(2026, 9, 16, 8, 0),
+            due_date=datetime(2026, 9, 25, 17, 0),
+            planned_for=None,
+            created_at=datetime(2026, 9, 14, 9, 0),
+        )
+        self.assertFalse(_task_covers_report_day(task, date(2026, 9, 17)))
+        self.assertTrue(_task_covers_report_day(task, date(2026, 9, 25)))
+
+
 class ReportOwnerAndWfcTests(unittest.TestCase):
     def test_personal_and_wfc_sections_are_known_auto_sections(self) -> None:
         self.assertEqual(SECTION_TITLES[13], "N- DET PERSONALISHT ME KA/GENTIN?")
         self.assertEqual(SECTION_TITLES[14], "N- WFC ME KA/GENTIN?")
+        self.assertEqual(SECTION_TITLES[15], "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER")
+        self.assertTrue(is_manual_section_title("meetings", SECTION_TITLES[15]))
         self.assertFalse(is_manual_section_title("meetings", SECTION_TITLES[13]))
         self.assertFalse(is_manual_section_title("meetings", SECTION_TITLES[14]))
         self.assertEqual(section_group_label("meetings", SECTION_TITLES[14]), "AUTO-FILLED FROM PRIMEFLOW")
@@ -73,6 +102,9 @@ class ReportOwnerAndWfcTests(unittest.TestCase):
         self.assertEqual(_ka_genti_owner(SimpleNamespace(title="GT: task")), "GENTI")
         self.assertIsNone(_ka_genti_owner(SimpleNamespace(title="DM/GA: task")))
         self.assertIsNone(_ka_genti_owner(SimpleNamespace(title="ER/PX: unrelated task")))
+        self.assertEqual(_ka_genti_owner(SimpleNamespace(title="EF/GA/KA: task")), "KA")
+        self.assertEqual(_ka_genti_owner(SimpleNamespace(title="EF/GA/GT: task")), "GENTI")
+        self.assertEqual(_ka_genti_owner(SimpleNamespace(title="EF/KA/GT/GA: task")), "GENTI")
 
     def test_wfc_is_waiting_confirmation_only(self) -> None:
         self.assertTrue(_is_wfc_task(SimpleNamespace(status="WAITING_CONFIRMATION")))
@@ -501,7 +533,10 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual([section["title"] for section in normalized], [SECTION_TITLES[0]])
+        self.assertEqual(
+            [section["title"] for section in normalized],
+            [SECTION_TITLES[0], SECTION_TITLES[15]],
+        )
 
     def test_common_view_aliases_are_known_auto_not_manual(self) -> None:
         self.assertTrue(is_known_report_title("meetings", "(GA) M3 DET GA MBYLLJA ME HV/OH?"))

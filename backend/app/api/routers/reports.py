@@ -208,6 +208,7 @@ def _task_to_out(
         is_bllok=t.is_bllok,
         is_1h_report=t.is_1h_report,
         one_h_report_slot=t.one_h_report_slot if one_h_report_slot is _ONE_H_SLOT_UNSET else one_h_report_slot,
+        one_h_marker=t.one_h_marker,
         is_r1=t.is_r1,
         is_personal=t.is_personal,
         is_active=t.is_active,

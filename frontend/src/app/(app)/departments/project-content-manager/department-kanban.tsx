@@ -1,6 +1,8 @@
 "use client"
 
 import * as React from "react"
+import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
+import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
 
@@ -3148,6 +3150,7 @@ export default function DepartmentKanban() {
       startDate?: string | null
       dueDate?: string | null
       oneHReportSlot?: OneHReportSlot | null
+      oneHMarker?: Task["one_h_marker"]
       isOneHReportTask?: boolean
     }> = []
     const systemAmRows: typeof rows = []
@@ -3275,6 +3278,7 @@ export default function DepartmentKanban() {
         tyo: getTyoLabel(baseDate, task.completed_at, selectedAllReportDate),
         comment: task.user_comment ?? null,
         taskId: task.id,
+        oneHMarker: task.one_h_marker,
         sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
       })
     }
@@ -3310,6 +3314,7 @@ export default function DepartmentKanban() {
         tyo: "T",
         comment: task.user_comment ?? null,
         taskId: task.id,
+        oneHMarker: task.one_h_marker,
         sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
       })
     }
@@ -3338,6 +3343,7 @@ export default function DepartmentKanban() {
           }),
           comment: task.user_comment ?? null,
           taskId: task.id,
+          oneHMarker: task.one_h_marker,
           sortDate: task.due_date || task.start_date || task.planned_for || task.created_at,
           oneHReportSlot: task.is_1h_report || task.is_r1
             ? dailyReportOneHSlots[task.id] ?? null
@@ -3380,6 +3386,7 @@ export default function DepartmentKanban() {
         }),
         comment: task.user_comment ?? null,
         taskId: task.id,
+        oneHMarker: task.one_h_marker,
         sortDate: task.due_date || task.start_date || task.created_at,
         oneHReportSlot: task.is_1h_report || task.is_r1
           ? dailyReportOneHSlots[task.id] ?? null
@@ -3588,6 +3595,7 @@ export default function DepartmentKanban() {
       startDate?: string | null
       dueDate?: string | null
       oneHReportSlot?: OneHReportSlot | null
+      oneHMarker?: Task["one_h_marker"]
       isOneHReportTask?: boolean
     }> => {
       const rows: ReturnType<typeof convertDailyReportToRows> = []
@@ -3693,6 +3701,7 @@ export default function DepartmentKanban() {
           tyo: getTyoLabel(baseDate, task.completed_at, selectedAllReportDate),
           comment: task.user_comment ?? null,
           taskId: task.id,
+          oneHMarker: task.one_h_marker,
           sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
           startDate: task.start_date || null,
           dueDate: task.due_date || null,
@@ -3737,6 +3746,7 @@ export default function DepartmentKanban() {
             }),
             comment: task.user_comment ?? null,
             taskId: task.id,
+            oneHMarker: task.one_h_marker,
             sortDate: task.due_date || task.start_date || task.created_at,
             startDate: task.start_date || null,
             dueDate: task.due_date || null,
@@ -3767,6 +3777,7 @@ export default function DepartmentKanban() {
               }),
               comment: task.user_comment ?? null,
               taskId: task.id,
+              oneHMarker: task.one_h_marker,
               sortDate: task.due_date || task.start_date || task.created_at,
               startDate: task.start_date || null,
               dueDate: task.due_date || null,
@@ -4692,6 +4703,11 @@ export default function DepartmentKanban() {
       // ignore refresh failures
     }
   }, [activeTab, apiFetch, department?.id, selectedAllReportIso, user?.id, viewMode])
+
+  useVisibleRefresh(async () => {
+    if (activeTab === "all" || activeTab === "system") await refreshDailyReport()
+    else await loadBootstrapData({ silent: true })
+  }, viewMode === "mine" && !editingTaskId)
 
   React.useEffect(() => {
     let cancelled = false
@@ -7240,6 +7256,7 @@ export default function DepartmentKanban() {
                                       08:00
                                     </span>
                                   ) : null}
+                                  <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} />
                                   <span className="min-w-0 flex-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                                     {(() => {
                                       const hasMarks = typeof visibleTitle === "string" && visibleTitle.includes("[[")
@@ -7521,6 +7538,7 @@ export default function DepartmentKanban() {
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>
+                                <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} />
                                 {renderAllTodayTaskTitle(task)}
                               </div>
                             </TableCell>
@@ -7644,6 +7662,7 @@ export default function DepartmentKanban() {
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>
+                                  <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} />
                                   {renderAllTodayTaskTitle(task)}
                                 </span>
                                 {task.plan_note_origin_id ? (
@@ -7775,6 +7794,7 @@ export default function DepartmentKanban() {
                           <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                             <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                               <span>
+                                <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} />
                                 {renderAllTodayTaskTitle(task)}
                               </span>
                                 {task.plan_note_origin_id ? (
@@ -7949,6 +7969,10 @@ export default function DepartmentKanban() {
                       />
                     ) : null}
                     <div className="space-y-2">
+                      <Label className="text-slate-700">Symbol</Label>
+                      <TaskOneHMarkerEditor taskId={allTodayEditingTask?.id} marker={allTodayEditingTask?.one_h_marker} className="w-full max-w-none rounded-xl" />
+                    </div>
+                    <div className="space-y-2">
                       <Label className="text-slate-700">Title</Label>
                       <Textarea
                         value={allTodayEditTitle}
@@ -8105,7 +8129,7 @@ export default function DepartmentKanban() {
         ) : null}
 
         {activeTab === "system" ? (
-          <div className="space-y-4">
+                      <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="text-xl font-semibold pt-4">System Tasks</div>
@@ -8588,8 +8612,12 @@ export default function DepartmentKanban() {
                       <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
                           This is an independent note task copy. Edit its status and scheduling here; shared details are managed in {editingPlanTask ? "PX JAV" : "GA Notes"}.
                       </div>
-                    ) : null}
-                    <div className="space-y-2">
+                        ) : null}
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Symbol</Label>
+                          <TaskOneHMarkerEditor taskId={editingNoProjectTask?.id} marker={editingNoProjectTask?.one_h_marker} className="w-full max-w-none rounded-xl" />
+                        </div>
+                        <div className="space-y-2">
                       <Label className="text-slate-700">Title</Label>
                       <Textarea
                         value={editTaskTitle}
@@ -9783,6 +9811,7 @@ export default function DepartmentKanban() {
                                     08:00
                                   </span>
                                 ) : null}
+                                <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} />
                                 <span className="whitespace-pre-wrap break-words">
                                   {(() => {
                                     const hasMarks = typeof row.title === "string" && row.title.includes("[[")
@@ -9902,6 +9931,7 @@ export default function DepartmentKanban() {
                                   08:00
                                 </span>
                               ) : null}
+                              <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} />
                               <span className="whitespace-pre-wrap break-words">
                                 {(() => {
                                   const hasMarks = typeof row.title === "string" && row.title.includes("[[")

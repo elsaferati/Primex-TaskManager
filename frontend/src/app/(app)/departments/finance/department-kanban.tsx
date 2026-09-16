@@ -1,6 +1,8 @@
 "use client"
 
 import * as React from "react"
+import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
+import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import { toast } from "sonner"
 
 import { TaskEditDialog } from "@/components/task-edit-dialog"
@@ -384,6 +386,8 @@ export default function DepartmentKanban() {
     if (!response.ok) throw new Error("Unable to load today's Daily Report details.")
     setDailyReport((await response.json()) as DailyReportResponse)
   }, [apiFetch, dailyReportUserId, department?.id, todayIso])
+
+  useVisibleRefresh(async () => { await loadData(); await refreshDailyReport() })
 
   React.useEffect(() => {
     let cancelled = false
@@ -850,6 +854,7 @@ export default function DepartmentKanban() {
                       <TableRow key={row.id}>
                         <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                         <TableCell className="w-[480px] min-w-[480px] whitespace-normal font-medium text-slate-800">
+                          <TaskOneHMarkerEditor taskId={row.task.id} marker={row.task.one_h_marker} />
                           {typeof row.title === "string" && row.title.includes("[[")
                             ? renderMarkedNoteContent(row.title, row.title)
                             : row.title}

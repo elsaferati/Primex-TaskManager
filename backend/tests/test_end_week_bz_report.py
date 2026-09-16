@@ -18,11 +18,15 @@ def task(title: str):
     return SimpleNamespace(title=title)
 
 
-def test_personal_tasks_are_split_into_ga_ka_and_px() -> None:
+def test_personal_tasks_follow_ka_genti_ga_px_priority() -> None:
     assert _personal_group(task("DM/GA: Review")) == "GA"
     assert _personal_group(task("AT/KA: Review")) == "KA"
     assert _personal_group(task("ER: Personal work")) == "PX"
     assert _personal_group(task("stored title"), "RA/EF/KA: Review\nmore") == "KA"
+    assert _personal_group(task("EF/GA/KA: Review")) == "KA"
+    assert _personal_group(task("EF/PX/GT: Review")) == "GENT"
+    assert _personal_group(task("EF/GA/GT: Review")) == "GENT"
+    assert _personal_group(task("EF/KA/GT/GA: Review")) == "GENT"
 
 
 def test_wfc_columns_and_both_status_labels_are_explicit() -> None:

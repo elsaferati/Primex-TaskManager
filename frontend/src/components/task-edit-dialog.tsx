@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { TaskSkillField } from "@/components/task-skill-field"
+import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
@@ -335,6 +336,10 @@ export function TaskEditDialog({
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
           <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2 md:col-span-2">
+              <Label>Symbol</Label>
+              <TaskOneHMarkerEditor taskId={task?.id} marker={task?.one_h_marker} className="w-full max-w-none" />
+            </div>
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="task-edit-title">Title</Label>
               <Textarea

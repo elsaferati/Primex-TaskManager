@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import { toast } from "sonner"
 
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
@@ -48,7 +49,7 @@ function canCreatePimImageTestTaskForMeeting(meeting: Meeting): boolean {
 type PersonalTaskGroup = "GA" | "KA" | "GENT" | "PX"
 type PersonalRowId = "personalGA" | "personalKA" | "personalGENT" | "personalPX"
 type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG"
-type OneHMarkerFilter = "all" | "none" | OneHMarker
+type OneHMarkerFilter = "all" | "with" | "none" | OneHMarker
 
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "EXCLAMATION", label: "!" },
@@ -277,7 +278,7 @@ const oneHPrintChecklistsHtml = (reportDay: Date) =>
   ).join("")}</section>`
 
 const oneHMarkerLegendHtml = () =>
-  `<div class="one-h-marker-legend"><strong>LEGJENDA:</strong><span><b>?</b> - Detyrë që parashihet me problem</span><i aria-hidden="true">/</i><span><b>!</b> - Kërkon monitorim / përcjellje nga dikush tjetër</span><i aria-hidden="true">/</i><span><b>⚑</b> - Monitorim nga GA</span><i aria-hidden="true">/</i><span><b>KA</b> - Monitorim nga KA</span><i aria-hidden="true">/</i><span><b>GENT</b> - Monitorim nga Genti</span></div>`
+  `<div class="one-h-marker-legend"><strong>LEGJENDA:</strong><span><b>?</b> - PAQARTESI</span><i aria-hidden="true">/</i><span><b>!</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span><i aria-hidden="true">/</i><span><b>⚑</b> - PYETJE/SQARIM ME GA</span><i aria-hidden="true">/</i><span><b class="compact-marker">KA</b> - PYETJE/SQARIM ME KA</span><i aria-hidden="true">/</i><span><b class="compact-marker">GENT</b> - PYETJE/SQARIM ME GENTIN</span></div>`
 
 function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
   return (
@@ -317,15 +318,15 @@ function OneHMarkerLegend() {
   return (
     <div className="one-h-marker-legend">
       <strong>LEGJENDA:</strong>
-      <span><b>?</b> - Detyrë që parashihet me problem</span>
+      <span><b>?</b> - PAQARTESI</span>
       <i aria-hidden="true">/</i>
-      <span><b>!</b> - Kërkon monitorim / përcjellje nga dikush tjetër</span>
+      <span><b>!</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span>
       <i aria-hidden="true">/</i>
-      <span><b>⚑</b> - Monitorim nga GA</span>
+      <span><b>⚑</b> - PYETJE/SQARIM ME GA</span>
       <i aria-hidden="true">/</i>
-      <span><b>KA</b> - Monitorim nga KA</span>
+      <span><b className="compact-marker">KA</b> - PYETJE/SQARIM ME KA</span>
       <i aria-hidden="true">/</i>
-      <span><b>GENT</b> - Monitorim nga Genti</span>
+      <span><b className="compact-marker">GENT</b> - PYETJE/SQARIM ME GENTIN</span>
     </div>
   )
 }
@@ -1000,9 +1001,9 @@ const getPersonalTaskGroup = (entry: { title: string }): PersonalTaskGroup => {
   const titlePrefix = commonPrintPersonalTaskTitle(entry).trim().toUpperCase()
   const match = titlePrefix.match(/^[A-Z]{1,5}(?:\s*[:/]\s*[A-Z]{1,5})*(?=\s|:|\/|$)/)
   const participants = (match?.[0] || "").split(/[:/]/).map((value) => value.trim())
-  if (participants.includes("GA")) return "GA"
-  if (participants.includes("KA")) return "KA"
   if (participants.some((value) => ["GENT", "GENTI", "GT"].includes(value))) return "GENT"
+  if (participants.includes("KA")) return "KA"
+  if (participants.includes("GA")) return "GA"
   return "PX"
 }
 const getPersonalRowGroup = (rowId: PersonalRowId): PersonalTaskGroup =>
@@ -4075,6 +4076,10 @@ export default function CommonViewPage() {
     }
   }, [apiFetch, authLoading, userId, user?.role, user?.department_id, weekStart, commonViewAggregateEnabled, commonViewIncludeStages, fetchCommonViewStage])
 
+  useVisibleRefresh(async () => {
+    await fetchCommonViewStage(toISODate(weekStart), ["tasks"])
+  }, !authLoading && Boolean(userId) && !savingOneHMarkerTaskId)
+
   const reloadMeetingLists = React.useCallback(async () => {
     const meetingsBase = commonDepartmentId
       ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
@@ -4479,6 +4484,7 @@ export default function CommonViewPage() {
     const matchesOneHMarkerFilter = (entry: FastTaskEntry) => {
       const marker = entry.oneHMarker || null
       if (oneHMarkerFilter === "all") return true
+      if (oneHMarkerFilter === "with") return marker !== null
       if (oneHMarkerFilter === "none") return marker === null
       return marker === oneHMarkerFilter
     }
@@ -5185,9 +5191,10 @@ export default function CommonViewPage() {
   .one-h-print-checklist-day-label { grid-column:1 / -1; margin:0 0 4px; font-weight:800; }
   .one-h-print-checklist-separator { font-size:13px; font-weight:900; line-height:8px; }
   .one-h-print-checklist-description { color:#475569; }
-  .one-h-marker-legend { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 10px; padding:6px 9px; border:1px solid #fca5a5; border-radius:5px; background:#fef2f2; color:#7f1d1d; font-size:9px; font-weight:700; }
-  .one-h-marker-legend b { color:#dc2626; font-size:14px; font-weight:900; }
-  .one-h-marker-legend i { color:#dc2626; font-size:20px; font-style:normal; font-weight:900; line-height:1; }
+  .one-h-marker-legend { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 10px; padding:6px 9px; border:1px solid #93c5fd; border-radius:5px; background:#eff6ff; color:#0f2a5f; font-size:9px; font-weight:700; }
+  .one-h-marker-legend b { color:#0f2a5f; font-size:14px; font-weight:900; }
+  .one-h-marker-legend b.compact-marker { font-size:9px; }
+  .one-h-marker-legend i { color:#0f2a5f; font-size:20px; font-style:normal; font-weight:900; line-height:1; }
   table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9px; line-height: 1.2; }
   table + table { margin-top: 12px; }
   th, td { border: 1px solid #000; padding: 4px 5px; vertical-align: top; overflow-wrap: anywhere; text-align: left; font-weight: 400; }
@@ -5256,21 +5263,21 @@ export default function CommonViewPage() {
       return
     }
 
-    printWindow.document.write("<!doctype html><title>Loading report...</title><p>Loading 1H SHTYPI Today...</p>")
+    printWindow.document.write("<!doctype html><title>Loading report...</title><p>Loading 1H SHTYPI SOT (Shiko simbolet)...</p>")
     printWindow.document.close()
     setPrintingToday(true)
     try {
       const response = await apiFetch(`/today-print-report/print-preview?report_date=${encodeURIComponent(reportDate)}`)
       if (!response?.ok) {
-        throw new Error(`Could not load the 1H SHTYPI Today report (${response?.status || "network error"}).`)
+        throw new Error(`Could not load the 1H SHTYPI SOT (Shiko simbolet) report (${response?.status || "network error"}).`)
       }
       const report = (await response.json()) as { html?: string; subject?: string }
-      if (!report.html) throw new Error("The 1H SHTYPI Today report was empty.")
+      if (!report.html) throw new Error("The 1H SHTYPI SOT (Shiko simbolet) report was empty.")
 
       printWindow.document.open()
       printWindow.document.write(report.html)
       printWindow.document.close()
-      printWindow.document.title = report.subject || `1H SHTYPI - ${reportDate}`
+      printWindow.document.title = report.subject || `1H SHTYPI SOT (Shiko simbolet) - ${reportDate}`
 
       const style = printWindow.document.createElement("style")
       style.textContent = `
@@ -5306,7 +5313,7 @@ export default function CommonViewPage() {
     } catch (error) {
       console.error("Failed to print the canonical Today report", error)
       printWindow.close()
-      toast.error(error instanceof Error ? error.message : "Failed to load the 1H SHTYPI Today report.")
+      toast.error(error instanceof Error ? error.message : "Failed to load the 1H SHTYPI SOT (Shiko simbolet) report.")
       setPrintTotalPages(1)
       applySingleDayPrintFit()
       window.print()
@@ -8627,10 +8634,10 @@ export default function CommonViewPage() {
             flex-wrap: wrap;
             margin: 0 0 8px;
             padding: 5px 7px;
-            border: 1px solid #fca5a5 !important;
+            border: 1px solid #93c5fd !important;
             border-radius: 5px;
-            background: #fef2f2 !important;
-            color: #7f1d1d !important;
+            background: #eff6ff !important;
+            color: #0f2a5f !important;
             font-size: 8px;
             font-weight: 700;
             page-break-inside: avoid;
@@ -8638,12 +8645,15 @@ export default function CommonViewPage() {
             print-color-adjust: exact !important;
           }
           .one-h-marker-legend b {
-            color: #dc2626 !important;
+            color: #0f2a5f !important;
             font-size: 13px;
             font-weight: 900;
           }
+          .one-h-marker-legend b.compact-marker {
+            font-size: 8px;
+          }
           .one-h-marker-legend i {
-            color: #dc2626 !important;
+            color: #0f2a5f !important;
             font-size: 19px;
             font-style: normal;
             font-weight: 900;
@@ -10937,9 +10947,9 @@ export default function CommonViewPage() {
           height: 22px;
           padding: 0 2px;
           border-radius: 999px;
-          background: #fef2f2;
-          border: 1px solid #fca5a5;
-          color: #dc2626;
+          background: #eff6ff;
+          border: 1px solid #93c5fd;
+          color: #0f2a5f;
           font-weight: 900;
           font-size: 16px;
           line-height: 1;
@@ -10951,7 +10961,7 @@ export default function CommonViewPage() {
           opacity: 0.65;
         }
         .oneh-marker-select option {
-          color: #dc2626;
+          color: #0f2a5f;
           font-weight: 900;
           font-size: 16px;
         }
@@ -12382,9 +12392,10 @@ export default function CommonViewPage() {
                 value={oneHMarkerFilter}
                 onChange={(event) => setOneHMarkerFilter(event.target.value as OneHMarkerFilter)}
                 aria-label="Filter tasks by symbol"
-                style={{ width: "125px", color: "#dc2626", fontWeight: 800 }}
+                style={{ width: "125px", color: "#0F2A5F", fontWeight: 800 }}
               >
                 <option value="all">All</option>
+                <option value="with">All with symbols</option>
                 <option value="none">No symbol</option>
                 {ONE_H_MARKER_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>

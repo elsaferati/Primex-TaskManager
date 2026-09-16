@@ -46,7 +46,16 @@ async def search(
     projects = (await db.execute(project_stmt.limit(20))).scalars().all()
 
     return SearchResponse(
-        tasks=[SearchTaskResult(id=t.id, title=t.title, project_id=t.project_id, department_id=t.department_id) for t in tasks],
+        tasks=[
+            SearchTaskResult(
+                id=t.id,
+                title=t.title,
+                project_id=t.project_id,
+                department_id=t.department_id,
+                one_h_marker=t.one_h_marker,
+            )
+            for t in tasks
+        ],
         projects=[SearchProjectResult(id=p.id, title=p.title, department_id=p.department_id) for p in projects],
     )
 

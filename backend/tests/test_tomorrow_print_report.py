@@ -30,16 +30,17 @@ def test_task_marker_legend_explains_the_report_symbols() -> None:
     legend_html = _task_marker_legend_html()
 
     assert 'data-task-marker-legend="true"' in legend_html
-    assert "Detyrë që parashihet me problem" in legend_html
-    assert "Kërkon monitorim / përcjellje nga dikush tjetër" in legend_html
+    assert "PAQARTESI" in legend_html
+    assert "KËRKON MONITORIM NGA DIKUSH TJETËR" in legend_html
     assert "⚑" in legend_html
     assert "GA" in legend_html
-    assert "color:#DC2626" in legend_html
-    assert "?</strong> - Detyrë" in legend_html
-    assert "!</strong> - Kërkon" in legend_html
-    assert "⚑</strong> - Monitorim nga GA" in legend_html
-    assert "KA</strong> - Monitorim nga KA" in legend_html
-    assert "GENT</strong> - Monitorim nga Genti" in legend_html
+    assert "color:#0F2A5F" in legend_html
+    assert "background:#EFF6FF" in legend_html
+    assert "?</strong> - PAQARTESI" in legend_html
+    assert "!</strong> - KËRKON" in legend_html
+    assert "⚑</strong> - PYETJE/SQARIM ME GA" in legend_html
+    assert "KA</strong> - PYETJE/SQARIM ME KA" in legend_html
+    assert "GENT</strong> - PYETJE/SQARIM ME GENTIN" in legend_html
     assert legend_html.count('aria-hidden="true"') == 4
 
 
@@ -863,7 +864,7 @@ def test_personal_tasks_are_split_exclusively_into_ga_ka_gent_and_px_rows() -> N
         {
             "personal": [
                 {"title": "EF/GA: WFC", "date": "2026-08-14"},
-                {"title": "GA/KA: GA wins", "date": "2026-08-14"},
+                    {"title": "GA/KA: KA wins", "date": "2026-08-14"},
                 {"title": "ER: KA: Teams", "date": "2026-08-14"},
                 {"title": "ER/GENT: Personal Gent", "date": "2026-08-14"},
                 {"title": "ER/GENTI: Personal Genti", "date": "2026-08-14"},
@@ -882,8 +883,8 @@ def test_personal_tasks_are_split_exclusively_into_ga_ka_gent_and_px_rows() -> N
         "P: GENT",
         "P: PX\n08:45 / 14:00",
     ]
-    assert {item["title"] for item in personal_rows[0][1]} == {"EF/GA: WFC", "GA/KA: GA wins"}
-    assert [item["title"] for item in personal_rows[1][1]] == ["ER: KA: Teams"]
+    assert {item["title"] for item in personal_rows[0][1]} == {"EF/GA: WFC"}
+    assert {item["title"] for item in personal_rows[1][1]} == {"GA/KA: KA wins", "ER: KA: Teams"}
     assert {item["title"] for item in personal_rows[2][1]} == {
         "ER/GENT: Personal Gent",
         "ER/GENTI: Personal Genti",
@@ -1228,8 +1229,8 @@ def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -
     report = asyncio.run(build_today_print_report(date(2026, 8, 24), include_attachment=True))
 
     assert report["target_date"] == "2026-08-24"
-    assert report["subject"] == "1H SHTYPI  SOT— 24.08.2026"
-    assert "1H SHTYPI  SOT— 24.08.2026" in report["html"]
+    assert report["subject"] == "1H SHTYPI SOT (Shiko simbolet) — 24.08.2026"
+    assert "1H SHTYPI SOT (Shiko simbolet) — 24.08.2026" in report["html"]
     assert "Today task" in report["html"]
     assert "Tomorrow task" not in report["html"]
     assert "Today meeting" in report["html"]
@@ -1254,8 +1255,8 @@ def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -
 
     tomorrow = asyncio.run(build_tomorrow_print_report(date(2026, 8, 24), include_attachment=True))
     assert tomorrow["target_date"] == "2026-08-25"
-    assert tomorrow["subject"] == "1H SHTYPI  NESER — 25.08.2026"
-    assert "1H SHTYPI  NESER — 25.08.2026" in tomorrow["html"]
+    assert tomorrow["subject"] == "1H SHTYPI NESER (Shiko simbolet) — 25.08.2026"
+    assert "1H SHTYPI NESER (Shiko simbolet) — 25.08.2026" in tomorrow["html"]
     assert "Today meeting" not in tomorrow["html"]
     assert "Tomorrow meeting" in tomorrow["html"]
     assert "Following meeting" in tomorrow["html"]

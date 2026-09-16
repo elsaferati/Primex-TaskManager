@@ -20,6 +20,7 @@ from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.user import User
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
+from app.services.personal_task_owner import personal_task_owner
 from app.services.meetings_report import (
     PERSONAL_GA,
     TECHNICAL_TAG,
@@ -697,6 +698,8 @@ async def _personal_section(
         return note_titles.get(task.ga_note_origin_id) or _display_title(task.title)
 
     def _matches_title(task: Task) -> bool:
+        if title_pattern is PERSONAL_GA:
+            return personal_task_owner(_title(task)) == "GA"
         return bool(title_pattern.search(_title(task)) or title_pattern.search(task.title or ""))
 
     ga_personal = [task for task in personal if _matches_title(task)]

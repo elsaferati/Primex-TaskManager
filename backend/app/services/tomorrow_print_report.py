@@ -26,6 +26,7 @@ from app.config import settings
 from app.services.meeting_palette import meeting_report_color
 from app.services.meetings_report import common_view_item_sort_key, next_working_day
 from app.services.primeflow_report import GmailService, PrimeFlowClient, REPORT_SENDER_EMAIL
+from app.services.personal_task_owner import personal_task_owner
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
 from app.services.tomorrow_closing_sections import (
     ClosingSection,
@@ -127,7 +128,6 @@ PERSONAL_TIME_STYLE = "font-size:13px;line-height:1.2;font-weight:800;white-spac
 DEADLINE_COLOR = "#DC2626"
 EIGHT_AM_BORDER_COLOR = "#DC2626"
 NON_ROUTINE_MEETING_BORDER_COLOR = "#2563EB"
-PERSONAL_TASK_INITIALS = re.compile(r"^[A-Z]{1,5}(?:\s*[:/]\s*[A-Z]{1,5})*(?=\s|:|/|$)", re.I)
 NOTE_MARKERS_RE = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.I)
 WFC_TOKEN_RE = re.compile(r"\bWFC\b", re.I)
 STATUS_COLORS = {
@@ -180,8 +180,7 @@ def ensure_required_shtypi_recipient(
 
 def subject_for(target_date: date, relative_day_label: str) -> str:
     """Return the shared email subject and visible report title."""
-    separator = " — " if relative_day_label == "NESER" else "— "
-    return f"1H SHTYPI  {relative_day_label}{separator}{target_date:%d.%m.%Y}"
+    return f"1H SHTYPI {relative_day_label} (Shiko simbolet) — {target_date:%d.%m.%Y}"
 
 
 def _item_date(item: dict[str, Any]) -> date | None:
@@ -239,6 +238,15 @@ def _task_marker_label(item: dict[str, Any]) -> str:
         "GENT": "GENT",
         "FLAG": "⚑",
     }.get(raw, "")
+
+
+def _task_marker_legend_text() -> str:
+    return (
+        "LEGJENDA: ? - PAQARTESI / "
+        "! - KËRKON MONITORIM NGA DIKUSH TJETËR / "
+        "⚑ - PYETJE/SQARIM ME GA / KA - PYETJE/SQARIM ME KA / "
+        "GENT - PYETJE/SQARIM ME GENTIN"
+    )
 
 
 def _task_cell_style(
@@ -511,18 +519,29 @@ def _task_title_html(value: str, *, red_background: bool) -> str:
     return "".join(parts)
 
 
-def _excel_task_title(value: str, *, red_background: bool) -> str | CellRichText:
-    """Use rich text for WFC; Excel uses yellow on red because inline fills are unsupported."""
-    if WFC_TOKEN_RE.search(value) is None:
+def _excel_task_title(
+    value: str, *, red_background: bool, marker_label: str = ""
+) -> str | CellRichText:
+    """Color WFC and the task symbol independently in Excel rich text."""
+    marker_token = f"[{marker_label}]" if marker_label else ""
+    marker_re = re.compile(re.escape(marker_token)) if marker_token else None
+    token_re = re.compile(
+        f"(?:{WFC_TOKEN_RE.pattern})|(?:{marker_re.pattern})"
+        if marker_re else WFC_TOKEN_RE.pattern,
+        re.I,
+    )
+    if token_re.search(value) is None:
         return value
     default_font = InlineFont(color="FFFFFFFF" if red_background else "FF000000")
     wfc_font = InlineFont(color="FFFFFF00" if red_background else "FFDC2626", b=True)
+    marker_font = InlineFont(color="FF0F2A5F", b=True)
     parts: list[str | TextBlock] = []
     cursor = 0
-    for match in WFC_TOKEN_RE.finditer(value):
+    for match in token_re.finditer(value):
         if match.start() > cursor:
             parts.append(TextBlock(default_font, value[cursor:match.start()]))
-        parts.append(TextBlock(wfc_font, match.group(0)))
+        font = marker_font if marker_token and match.group(0).casefold() == marker_token.casefold() else wfc_font
+        parts.append(TextBlock(font, match.group(0)))
         cursor = match.end()
     if cursor < len(value):
         parts.append(TextBlock(default_font, value[cursor:]))
@@ -596,8 +615,8 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
     marker = _task_marker_label(item)
     if marker:
         marker_style = (
-            f"{badge_base}padding:3px 8px;background-color:#FEF2F2;border:1px solid #FCA5A5;"
-            "color:#DC2626;font-size:14px;font-weight:900;"
+            f"{badge_base}padding:3px 8px;background-color:#EFF6FF;border:1px solid #93C5FD;"
+            "color:#0F2A5F;font-size:14px;font-weight:900;"
         )
         top_badges.append(
             f'<span data-task-badge="one-h-marker" style="{marker_style}">{marker}</span>'
@@ -652,17 +671,7 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
 def _personal_task_group(item: dict[str, Any]) -> str:
     """Assign each personal task to exactly one ownership row."""
     title = _report_text(_first_line(item.get("title")))
-    match = PERSONAL_TASK_INITIALS.match(title.strip())
-    if match is None:
-        return "PX"
-    participants = {value.strip().upper() for value in re.split(r"[:/]", match.group(0))}
-    if "GA" in participants:
-        return "GA"
-    if "KA" in participants:
-        return "KA"
-    if participants.intersection({"GENT", "GENTI", "GT"}):
-        return "GENT"
-    return "PX"
+    return personal_task_owner(title)
 
 
 def _confirmation_owner(item: dict[str, Any]) -> str | None:
@@ -921,25 +930,25 @@ def _one_h_checklists_html(report_day: date | None = None) -> str:
 def _task_marker_legend_html() -> str:
     """Explain the task markers wherever the generated 1H report is rendered."""
     items = (
-        ("?", "Detyrë që parashihet me problem"),
-        ("!", "Kërkon monitorim / përcjellje nga dikush tjetër"),
-        ("⚑", "Monitorim nga GA"),
-        ("KA", "Monitorim nga KA"),
-        ("GENT", "Monitorim nga Genti"),
+        ("?", "PAQARTESI"),
+        ("!", "KËRKON MONITORIM NGA DIKUSH TJETËR"),
+        ("⚑", "PYETJE/SQARIM ME GA"),
+        ("KA", "PYETJE/SQARIM ME KA"),
+        ("GENT", "PYETJE/SQARIM ME GENTIN"),
     )
     separator = (
         '<span aria-hidden="true" style="display:inline-block;margin:0 14px;'
-        'color:#DC2626;font-size:21px;font-weight:900;line-height:1;vertical-align:middle;">/</span>'
+        'color:#0F2A5F;font-size:21px;font-weight:900;line-height:1;vertical-align:middle;">/</span>'
     )
     content = separator.join(
         '<span style="display:inline-block;margin:2px 16px 2px 0;white-space:nowrap;">'
-        f'<strong style="color:#DC2626;font-size:17px;font-weight:900;">{symbol}</strong> - '
+        f'<strong style="color:#0F2A5F;font-size:{"12px" if symbol in {"KA", "GENT"} else "17px"};font-weight:900;">{symbol}</strong> - '
         f'{html.escape(description)}</span>'
         for symbol, description in items
     )
     return (
         '<div data-task-marker-legend="true" style="margin:0 0 10px;padding:6px 9px;'
-        'border:1px solid #FCA5A5;border-radius:5px;background:#FEF2F2;color:#7F1D1D;'
+        'border:1px solid #93C5FD;border-radius:5px;background:#EFF6FF;color:#0F2A5F;'
         'font-family:Arial,sans-serif;font-size:11px;font-weight:700;line-height:1.3;">'
         '<strong style="margin-right:12px;">LEGJENDA:</strong>'
         f'{content}</div>'
@@ -1349,6 +1358,7 @@ def _excel_table_attachment(
     closing_sections: list[ClosingSection] | None = None,
     checklist_date: date | None = None,
     missing_one_h_by_slot: dict[str, list[str]] | None = None,
+    report_day_label: str = "SOT",
 ) -> tuple[str, bytes, str]:
     """Create the same printable grid as an XLSX attachment for email recipients."""
     workbook = Workbook()
@@ -1356,7 +1366,7 @@ def _excel_table_attachment(
     sheet.title = "1H SHTYPI"
     sheet.merge_cells("A1:H1")
     title_cell = sheet["A1"]
-    title_cell.value = f"1H SHTYPI - {target_date:%d.%m.%Y}"
+    title_cell.value = f"1H SHTYPI {report_day_label} (Shiko simbolet) - {target_date:%d.%m.%Y}"
     title_cell.font = Font(bold=True, size=14)
     title_cell.alignment = Alignment(horizontal="center")
 
@@ -1521,6 +1531,21 @@ def _excel_table_attachment(
         sheet.row_dimensions[row_number + 1].height = 72
         return row_number + 2
 
+    def write_marker_legend(row_number: int) -> int:
+        sheet.merge_cells(start_row=row_number, start_column=1, end_row=row_number, end_column=8)
+        legend_cell = sheet.cell(row_number, 1, _task_marker_legend_text())
+        legend_cell.fill = PatternFill("solid", fgColor="EFF6FF")
+        legend_cell.font = Font(color="0F2A5F", bold=True, size=9)
+        legend_cell.alignment = Alignment(vertical="center", wrap_text=True)
+        legend_cell.border = Border(
+            left=Side(style="thin", color="93C5FD"),
+            right=Side(style="thin", color="93C5FD"),
+            top=Side(style="thin", color="93C5FD"),
+            bottom=Side(style="thin", color="93C5FD"),
+        )
+        sheet.row_dimensions[row_number].height = 28
+        return row_number + 1
+
     def write_section(
         rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: bool, row_number: int
     ) -> int:
@@ -1630,6 +1655,7 @@ def _excel_table_attachment(
                         cell_value = _excel_task_title(
                             cell_value,
                             red_background=background == DEADLINE_COLOR,
+                            marker_label=marker_label,
                         )
                     cell = sheet.cell(row_number, item_index, cell_value)
                     if not meeting:
@@ -1786,6 +1812,7 @@ def _excel_table_attachment(
         line_cell.font = Font(size=11)
         line_cell.alignment = Alignment(horizontal="left", vertical="center")
         sheet.row_dimensions[row].height = 22
+    write_marker_legend(comment_start_row + len(_comment_write_in_lines(comment_columns)) + 2)
     widths = [4, 24, 29, 29, 29, 29, 29, 29]
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[chr(64 + index)].width = width
@@ -1808,6 +1835,7 @@ def _docx_table_attachment(
     meeting_sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]] | None = None,
     comment_initials: list[str] | None = None,
     missing_one_h_by_slot: dict[str, list[str]] | None = None,
+    report_day_label: str = "SOT",
 ) -> tuple[str, bytes, str]:
     """Create a landscape Word report from the same rows and colours as HTML."""
     document = Document()
@@ -1842,6 +1870,29 @@ def _docx_table_attachment(
         run.font.size = Pt(7.5)
         run.bold = bold
         run.font.color.rgb = RGBColor.from_string(color.removeprefix("#"))
+
+    def set_task_cell(cell: Any, item: dict[str, Any], number: int, *, personal: bool, bold: bool, color: str) -> None:
+        cell.text = ""
+        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+        paragraph = cell.paragraphs[0]
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        paragraph.paragraph_format.space_after = Pt(0)
+        marker = _task_marker_label(item)
+        parts = [
+            (f"{number}. [{_task_period_label(item)}]", color),
+            (" [WFC]" if _task_status(item) == "WAITING_CONFIRMATION" else "", color),
+            (f" [{marker}]" if marker else "", "0F2A5F"),
+            (f" {_task_title(item, personal=personal)}", color),
+        ]
+        for value, run_color in parts:
+            if not value:
+                continue
+            run = paragraph.add_run(value)
+            run.font.name = "Arial"
+            run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:ascii"), "Arial")
+            run.font.size = Pt(7.5)
+            run.bold = bold or run_color == "0F2A5F"
+            run.font.color.rgb = RGBColor.from_string(run_color.removeprefix("#"))
 
     def set_stacked_date_cell(cell: Any, value: str, *, color: str = "000000") -> None:
         first_line, second_line = str(value).split("\n", 1)
@@ -1889,7 +1940,7 @@ def _docx_table_attachment(
     title = document.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     title.paragraph_format.space_after = Pt(6)
-    title_run = title.add_run(f"1H SHTYPI - {target_date:%d.%m.%Y}")
+    title_run = title.add_run(f"1H SHTYPI {report_day_label} (Shiko simbolet) - {target_date:%d.%m.%Y}")
     title_run.font.name = "Arial"
     title_run.font.size = Pt(16)
     title_run.bold = True
@@ -1940,6 +1991,14 @@ def _docx_table_attachment(
                             center=column in {"NR", "DISK"},
                         )
 
+    marker_legend_cell = document.add_table(rows=1, cols=1).cell(0, 0)
+    shade(marker_legend_cell, "EFF6FF")
+    marker_legend_run = marker_legend_cell.paragraphs[0].add_run(_task_marker_legend_text())
+    marker_legend_run.bold = True
+    marker_legend_run.font.name = "Arial"
+    marker_legend_run.font.size = Pt(7.5)
+    marker_legend_run.font.color.rgb = RGBColor.from_string("0F2A5F")
+
     heading("TASKS", size=11)
     task_table = document.add_table(rows=1, cols=8)
     task_table.style = "Table Grid"
@@ -1970,12 +2029,11 @@ def _docx_table_attachment(
                 background = _task_cell_style(item, personal=personal, report_date=target_date)[1]
                 foreground = "FFFFFF" if background == DEADLINE_COLOR else "111827"
                 shade(row.cells[item_index + 2], background)
-                set_cell(
+                set_task_cell(
                     row.cells[item_index + 2],
-                    f"{item_index + 1 + chunk_index * 6}. [{_task_period_label(item)}]"
-                    f"{' [WFC]' if _task_status(item) == 'WAITING_CONFIRMATION' else ''}"
-                    f"{f' [{_task_marker_label(item)}]' if _task_marker_label(item) else ''} "
-                    f"{_task_title(item, personal=personal)}",
+                    item,
+                    item_index + 1 + chunk_index * 6,
+                    personal=personal,
                     bold=background == DEADLINE_COLOR,
                     color=foreground,
                 )
@@ -2023,7 +2081,7 @@ def _core_png_table_attachment(
     task_rows: list[tuple[str, list[dict[str, Any]], bool]], target_date: date,
     comment_initials: list[str] | None = None,
     meeting_sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]] | None = None,
-    report_day_label: str = "TODAY",
+    report_day_label: str = "SOT",
     missing_one_h_by_slot: dict[str, list[str]] | None = None,
 ) -> tuple[str, bytes, str]:
     """Render the Today SHTYPI task grid with the same task-state colours."""
@@ -2143,7 +2201,7 @@ def _core_png_table_attachment(
         if suffix:
             draw.text((cursor_x, cursor_y), suffix, fill=default_color, font=font)
 
-    draw.text((margin, 22), f"1H SHTYPI {report_day_label} - {target_date:%d.%m.%Y}", fill="#111827", font=heading)
+    draw.text((margin, 22), f"1H SHTYPI {report_day_label} (Shiko simbolet) - {target_date:%d.%m.%Y}", fill="#111827", font=heading)
     draw.text((margin, 59), "Current Common View state used by the 1H report", fill="#475569", font=regular)
 
     y, x = header_top, margin
@@ -2268,11 +2326,11 @@ def _core_png_table_attachment(
                     draw.rounded_rectangle(
                         (badge_left, text_y, badge_right, text_y + 23),
                         radius=10,
-                        fill="#FEF2F2",
-                        outline="#FCA5A5",
+                        fill="#EFF6FF",
+                        outline="#93C5FD",
                         width=1,
                     )
-                    draw.text((badge_left + 6, text_y + 3), marker_label, fill="#DC2626", font=small_bold)
+                    draw.text((badge_left + 6, text_y + 3), marker_label, fill="#0F2A5F", font=small_bold)
                 text_y += 28
                 value = f"{item_index + 1 + chunk_index * 6}. {_task_title(item, personal=personal)}"
                 task_font = bold if fill == DEADLINE_COLOR else regular
@@ -2414,6 +2472,7 @@ def _png_table_attachment(
     meeting_sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]] | None = None,
     closing_sections: list[ClosingSection] | None = None,
     missing_one_h_by_slot: dict[str, list[str]] | None = None,
+    report_day_label: str = "SOT",
 ) -> tuple[str, bytes, str]:
     """Render one PNG containing the closing tables and the canonical task grid."""
     filename, core_bytes, mime_type = _core_png_table_attachment(
@@ -2421,7 +2480,7 @@ def _png_table_attachment(
         target_date,
         comment_initials,
         meeting_sections,
-        "NESER" if closing_sections else "TODAY",
+        report_day_label,
         missing_one_h_by_slot,
     )
     if not closing_sections:
@@ -2651,9 +2710,9 @@ async def _build_print_report(
     plain_rows.extend(_closing_sections_plain_text(closing_sections))
     plain_rows.extend([
         "",
-        "LEGJENDA: ? - Detyrë që parashihet me problem / "
-        "! - Kërkon monitorim / përcjellje nga dikush tjetër / "
-        "⚑ - Monitorim nga GA / KA - Monitorim nga KA / GENT - Monitorim nga Genti",
+        "LEGJENDA: ? - PAQARTESI / "
+        "! - KËRKON MONITORIM NGA DIKUSH TJETËR / "
+        "⚑ - PYETJE/SQARIM ME GA / KA - PYETJE/SQARIM ME KA / GENT - PYETJE/SQARIM ME GENTIN",
         "",
         "TASKS",
     ])
@@ -2702,6 +2761,7 @@ async def _build_print_report(
                 closing_sections=closing_sections,
                 checklist_date=checklist_date,
                 missing_one_h_by_slot=missing_one_h_by_slot,
+                report_day_label=report_day_label,
             )
         ]
         if include_png:
@@ -2713,6 +2773,7 @@ async def _build_print_report(
                     meeting_sections,
                     closing_sections,
                     missing_one_h_by_slot,
+                    report_day_label,
                 )
             )
         if include_docx:
@@ -2724,6 +2785,7 @@ async def _build_print_report(
                     meeting_sections=meeting_sections,
                     comment_initials=comment_initials,
                     missing_one_h_by_slot=missing_one_h_by_slot,
+                    report_day_label=report_day_label,
                 )
             )
         report["attachments"] = attachments

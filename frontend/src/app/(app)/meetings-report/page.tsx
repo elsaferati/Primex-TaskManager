@@ -52,6 +52,9 @@ function compactSectionTitle(value: string) {
 
 function canonicalMeetingsSectionTitle(title: string) {
   const key = compactSectionTitle(title)
+  if (key === compactSectionTitle("SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER")) {
+    return "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER"
+  }
   if (key === compactSectionTitle("A JEMI BRENDA MESATARES ME PROJEKTE?")) {
     return "A JEMI BRENDA MESATARES ME PROJEKTE?"
   }
@@ -118,6 +121,7 @@ function canonicalMeetingsSectionTitle(title: string) {
 function collapseMeetingsSections(sections: Section[]): Section[] {
   const displayOrder = [
     "A JEMI BRENDA MESATARES ME PROJEKTE?",
+    "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER",
     "(GA) ZHV: TIKETAT E STD?",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
@@ -133,7 +137,10 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
     "N- DET PERSONALISHT ME KA/GENTIN?",
     "N- WFC ME KA/GENTIN?",
   ]
-  const manuals = new Set(["A JEMI BRENDA MESATARES ME PROJEKTE?"])
+  const manuals = new Set([
+    "A JEMI BRENDA MESATARES ME PROJEKTE?",
+    "SHIKO DET ME SIMBOLE NE 1H SHTYPI NESER",
+  ])
   const placeholder = "(Ploteso manualisht)"
   const byTitle = new Map<string, Section>()
   const extras: Section[] = []
@@ -528,7 +535,7 @@ export default function MeetingsReportPage() {
             <RefreshCw className={loading || loadingHistory ? "animate-spin" : ""} /> Refresh
           </Button>
           <Button onClick={() => void generate()} disabled={loading}>
-            <RefreshCw /> Generate report
+            <RefreshCw className={loading ? "animate-spin" : ""} /> {loading ? "Generating..." : "Generate report"}
           </Button>
         </div>
       </div>

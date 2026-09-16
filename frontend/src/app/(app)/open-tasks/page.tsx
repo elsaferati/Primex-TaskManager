@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { TaskSkillField } from "@/components/task-skill-field"
+import { TaskOneHMarker } from "@/components/task-one-h-marker"
 import { useAuth } from "@/lib/auth"
 import { departmentTableTag, formatDepartmentName } from "@/lib/department-name"
 import { formatDateDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
@@ -848,8 +849,9 @@ export default function OpenTasksPage() {
                             </span>
                           </TableCell>
                           <TableCell className="min-w-0 whitespace-normal px-1.5 py-2 align-middle">
-                            <div className="break-words text-sm font-medium leading-snug text-slate-900">
-                              {renderHighlightedAddedText(task.title)}
+                            <div className="flex items-start gap-1.5 break-words text-sm font-medium leading-snug text-slate-900">
+                              <TaskOneHMarker marker={task.one_h_marker} />
+                              <span>{renderHighlightedAddedText(task.title)}</span>
                             </div>
                           </TableCell>
                           <TableCell className="px-1.5 py-2 align-middle text-[13px] uppercase text-slate-700">{sourceLabel(task)}</TableCell>

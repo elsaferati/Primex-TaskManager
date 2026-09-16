@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
+import { TaskOneHMarker } from "@/components/task-one-h-marker"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { formatDateDMY, formatDateTimeDMY, toDateInputValue } from "@/lib/dates"
 import { cn } from "@/lib/utils"
@@ -3055,6 +3056,7 @@ export default function AdminTasksPage() {
       dateLabel: string
       period: string
       title: string
+      oneHMarker?: Task["one_h_marker"]
       systemFrequency: string
       systemFrequencyDisplayLabel: string
       bz: string
@@ -3131,6 +3133,7 @@ export default function AdminTasksPage() {
         dateLabel: dueDateDisplayIso ? formatDateDayMonth(dueDateDisplayIso) : "-",
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         title: task.title || "-",
+        oneHMarker: task.one_h_marker,
         systemFrequency,
         systemFrequencyDisplayLabel: systemFrequencyDisplayLabel(systemFrequency),
         bz: hasTaskAlignment || hasTemplateAlignment ? "GA" : "-",
@@ -6804,12 +6807,13 @@ export default function AdminTasksPage() {
                     className="min-w-[160px] border-r border-slate-200 px-1.5 py-1 align-middle whitespace-normal break-words font-medium text-slate-800 last:border-r-0 sm:min-w-[220px]"
                     title={plainCommonMarkedTitle(row.title)}
                   >
-                    <div className="flex items-start gap-1.5 sm:block">
+                    <div className="flex items-start gap-1.5">
                       {row.kohaBz !== "-" ? (
                         <span className="inline-flex shrink-0 rounded-sm bg-slate-100 px-1 py-0.5 text-[9px] font-semibold text-slate-600 sm:hidden">
                           {row.kohaBz}
                         </span>
                       ) : null}
+                      <TaskOneHMarker marker={row.oneHMarker} />
                       <span>{renderCommonMarkedTitle(row.title)}</span>
                     </div>
                   </TableCell>

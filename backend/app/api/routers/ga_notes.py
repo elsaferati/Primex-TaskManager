@@ -39,6 +39,7 @@ from app.services.audit import add_audit_log
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
 from app.services.daily_realization_events import record_task_semantic_events, task_semantic_state
 from app.services.ga_note_task import ga_note_default_task_description, ga_note_task_title
+from app.services.task_marker import note_bundle_marker_update, sync_note_task_marker
 from app.services.task_strike_events import record_description_strike_events, record_title_strike_events
 from app.services.task_daily_progress import upsert_explicit_task_daily_status
 from app.services.ga_note_task_instances import (
@@ -405,7 +406,7 @@ async def update_ga_note(
     if payload.is_discussed is not None:
         note.is_discussed = payload.is_discussed
     if "one_h_marker" in payload.model_fields_set:
-        note.one_h_marker = payload.one_h_marker
+        await sync_note_task_marker(db, note, payload.one_h_marker)
 
     if payload.content is not None and payload.content != old_content:
         new_task_title = _ga_note_task_title(note.content)
@@ -480,6 +481,10 @@ async def update_ga_note_task_bundle(
     existing_tasks = (
         await db.execute(select(Task).where(Task.ga_note_origin_id == note.id).with_for_update())
     ).scalars().all()
+    try:
+        marker_changed, shared_marker = note_bundle_marker_update(note, payload, existing_tasks)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     semantic_before = {task.id: task_semantic_state(task) for task in existing_tasks}
     affected_department_ids = {task.department_id for task in existing_tasks if task.department_id}
     if note.department_id:
@@ -682,6 +687,11 @@ async def update_ga_note_task_bundle(
                 task=task,
                 user_ids=[task.assigned_to],
             )
+
+    if marker_changed:
+        await sync_note_task_marker(db, note, shared_marker)
+        for task in active_tasks:
+            task.one_h_marker = shared_marker
 
     semantic_tasks = {task.id: task for task in existing_tasks}
     semantic_tasks.update({task.id: task for task in active_tasks})

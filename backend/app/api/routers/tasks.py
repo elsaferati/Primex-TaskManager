@@ -11,7 +11,7 @@ except ImportError:
     ZoneInfo = None
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status, Query
-from sqlalchemy import Date, cast, delete, exists, func, insert, literal, null, or_, select, union_all, update
+from sqlalchemy import delete, exists, func, insert, literal, null, or_, select, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
@@ -51,6 +51,8 @@ from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, notification_task_preview, publish_notification
 from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
 from app.services.task_daily_progress import upsert_explicit_task_daily_status, upsert_task_daily_progress
+from app.services.task_date_window import task_date_window_filter
+from app.services.task_marker import sync_task_marker
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
 from app.services.daily_report_logic import business_days_between, parse_ko_user_id
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
@@ -1504,18 +1506,10 @@ async def list_tasks(
     if due_to:
         stmt = stmt.where(Task.due_date <= due_to)
     if window_from or window_to:
-        effective_columns = [Task.due_date, Task.start_date, Task.created_at]
-        if hasattr(Task, "planned_for"):
-            effective_columns.insert(0, getattr(Task, "planned_for"))
-        effective_date = cast(func.coalesce(*effective_columns), Date)
-        if window_from:
-            window_from_date = _as_local_date(window_from)
-            if window_from_date:
-                stmt = stmt.where(effective_date >= window_from_date)
-        if window_to:
-            window_to_date = _as_local_date(window_to)
-            if window_to_date:
-                stmt = stmt.where(effective_date <= window_to_date)
+        stmt = stmt.where(task_date_window_filter(
+            _as_local_date(window_from) if window_from else None,
+            _as_local_date(window_to) if window_to else None,
+        ))
     if not include_done:
         stmt = stmt.where(Task.status != TaskStatus.DONE.value)
     elif not include_all_done:
@@ -1929,6 +1923,10 @@ async def create_task(
             dto.alignment_user_ids = list(rows) if rows else None
             return dto
         ga_note.is_converted_to_task = True
+        if _payload_has_field(payload, "one_h_marker"):
+            ga_note.one_h_marker = payload.one_h_marker
+        else:
+            payload = payload.model_copy(update={"one_h_marker": ga_note.one_h_marker})
 
     if payload.plan_note_origin_id is not None:
         plan_note = (
@@ -1993,6 +1991,10 @@ async def create_task(
             dto.alignment_user_ids = list(rows) if rows else None
             return dto
         plan_note.is_converted_to_task = True
+        if _payload_has_field(payload, "one_h_marker"):
+            plan_note.one_h_marker = payload.one_h_marker
+        else:
+            payload = payload.model_copy(update={"one_h_marker": plan_note.one_h_marker})
 
     assignee_ids: list[uuid.UUID] | None = None
     assignee_users: list[User] = []
@@ -3294,7 +3296,7 @@ async def update_task(
         else:
             task.one_h_report_slot = None
     if one_h_marker_set:
-        task.one_h_marker = payload.one_h_marker
+        await sync_task_marker(db, task, payload.one_h_marker)
     if payload.is_r1 is not None:
         task.is_r1 = payload.is_r1
 
@@ -3848,14 +3850,7 @@ async def update_task_one_h_marker(
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    task.one_h_marker = payload.one_h_marker
-    if task.fast_task_group_id is not None:
-        await db.execute(
-            update(Task)
-            .where(Task.fast_task_group_id == task.fast_task_group_id)
-            .where(Task.is_active.is_(True))
-            .values(one_h_marker=payload.one_h_marker)
-        )
+    await sync_task_marker(db, task, payload.one_h_marker)
 
     await db.commit()
     await db.refresh(task)
