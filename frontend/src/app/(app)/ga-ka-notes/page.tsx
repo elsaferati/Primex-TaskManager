@@ -36,12 +36,12 @@ type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "
 type OneHMarkerFilter = "all" | "with" | "none" | OneHMarker
 const ONE_H_MARKER_NONE = "__none__"
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
-  { value: "EXCLAMATION", label: "!" },
   { value: "QUESTION", label: "?" },
-  { value: "KA", label: "KA" },
-  { value: "GENT", label: "GENT" },
+  { value: "EXCLAMATION", label: "!" },
   { value: "M2", label: "M2" },
   { value: "M3", label: "M3" },
+  { value: "GENT", label: "GENT" },
+  { value: "KA", label: "KA" },
   { value: "FLAG", label: "⚑" },
 ]
 const oneHMarkerLabel = (value?: OneHMarker | null) =>
@@ -3267,15 +3267,15 @@ export default function GaKaNotesPage() {
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
             <span><b className="text-base font-black">!</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
-            <span><b className="text-base font-black">⚑</b> - PYETJE/SQARIM ME GA</span>
-            <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
-            <span><b className="text-xs font-black">KA</b> - PYETJE/SQARIM ME KA</span>
-            <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
-            <span><b className="text-xs font-black">GENT</b> - PYETJE/SQARIM ME GENTIN</span>
-            <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
             <span><b className="text-xs font-black">M2</b> - DOREZIM DERI NE PAUZE</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
             <span><b className="text-xs font-black">M3</b> - DOREZIM DERI NE FUND TE DITES</span>
+            <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
+            <span><b className="text-xs font-black">GENT</b> - PYETJE/SQARIM ME GENTIN</span>
+            <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
+            <span><b className="text-xs font-black">KA</b> - PYETJE/SQARIM ME KA</span>
+            <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
+            <span><b className="text-base font-black">⚑</b> - PYETJE/SQARIM ME GA</span>
           </div>
           {showLegend ? (
             <div className="rounded-md border bg-white">
@@ -3295,11 +3295,11 @@ export default function GaKaNotesPage() {
                     {[
                       ["?", "PAQARTESI"],
                       ["!", "KËRKON MONITORIM NGA DIKUSH TJETËR"],
-                      ["⚑", "PYETJE/SQARIM ME GA"],
-                      ["KA", "PYETJE/SQARIM ME KA"],
-                      ["GENT", "PYETJE/SQARIM ME GENTIN"],
                       ["M2", "DOREZIM DERI NE PAUZE"],
                       ["M3", "DOREZIM DERI NE FUND TE DITES"],
+                      ["GENT", "PYETJE/SQARIM ME GENTIN"],
+                      ["KA", "PYETJE/SQARIM ME KA"],
+                      ["⚑", "PYETJE/SQARIM ME GA"],
                     ].map(([symbol, meaning]) => (
                       <TableRow key={symbol} className="h-8">
                         <TableCell className="p-1 text-center text-lg font-black text-[#0F2A5F]">{symbol}</TableCell>

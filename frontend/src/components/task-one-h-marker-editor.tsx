@@ -12,13 +12,13 @@ type TaskMarker = NonNullable<Task["one_h_marker"]>
 const NONE = "__none__"
 const MARKER_UPDATED_EVENT = "primeflow:task-marker-updated"
 const OPTIONS: Array<{ value: TaskMarker; label: string }> = [
-  { value: "EXCLAMATION", label: "!" },
   { value: "QUESTION", label: "?" },
-  { value: "KA", label: "KA" },
-  { value: "GENT", label: "GENT" },
+  { value: "EXCLAMATION", label: "!" },
   { value: "M2", label: "M2" },
   { value: "M3", label: "M3" },
-  { value: "FLAG", label: "⚑" },
+  { value: "GENT", label: "GENT" },
+  { value: "KA", label: "KA" },
+  { value: "FLAG", label: "\u2691" },
 ]
 
 export function TaskOneHMarkerEditor({

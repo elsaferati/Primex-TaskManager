@@ -961,7 +961,7 @@ class PrimeFlowReportTests(unittest.TestCase):
 
         self.assertTrue(png.startswith(b"\x89PNG"))
         self.assertIn(
-            "LEGJENDA: ? - PAQARTESI / ! - KËRKON MONITORIM NGA DIKUSH TJETËR / ⚑ - PYETJE/SQARIM ME GA / KA - PYETJE/SQARIM ME KA / GENT - PYETJE/SQARIM ME GENTIN / M2 - DOREZIM DERI NE PAUZE / M3 - DOREZIM DERI NE FUND TE DITES",
+            "LEGJENDA: ? - PAQARTESI / ! - KËRKON MONITORIM NGA DIKUSH TJETËR / M2 - DOREZIM DERI NE PAUZE / M3 - DOREZIM DERI NE FUND TE DITES / GENT - PYETJE/SQARIM ME GENTIN / KA - PYETJE/SQARIM ME KA / ⚑ - PYETJE/SQARIM ME GA",
             drawn_text,
         )
         self.assertIn("?", drawn_text)

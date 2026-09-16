@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
+import { TaskOneHMarkerLegend } from "@/components/task-one-h-marker-legend"
 import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
@@ -6436,6 +6437,7 @@ export default function DepartmentKanban() {
                         </Button>
                       </div>
                     </div>
+                    <TaskOneHMarkerLegend className="mt-3" />
                     <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                       <span className="font-medium text-slate-600">Period:</span>
                       <button

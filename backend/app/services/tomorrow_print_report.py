@@ -249,10 +249,10 @@ def _task_marker_legend_text() -> str:
     return (
         "LEGJENDA: ? - PAQARTESI / "
         "! - KËRKON MONITORIM NGA DIKUSH TJETËR / "
-        "⚑ - PYETJE/SQARIM ME GA / KA - PYETJE/SQARIM ME KA / "
-        "GENT - PYETJE/SQARIM ME GENTIN / "
         "M2 - DOREZIM DERI NE PAUZE / "
-        "M3 - DOREZIM DERI NE FUND TE DITES"
+        "M3 - DOREZIM DERI NE FUND TE DITES / "
+        "GENT - PYETJE/SQARIM ME GENTIN / "
+        "KA - PYETJE/SQARIM ME KA / ⚑ - PYETJE/SQARIM ME GA"
     )
 
 
@@ -1117,11 +1117,11 @@ def _task_marker_legend_html() -> str:
     items = (
         ("?", "PAQARTESI"),
         ("!", "KËRKON MONITORIM NGA DIKUSH TJETËR"),
-        ("⚑", "PYETJE/SQARIM ME GA"),
-        ("KA", "PYETJE/SQARIM ME KA"),
-        ("GENT", "PYETJE/SQARIM ME GENTIN"),
         ("M2", "DOREZIM DERI NE PAUZE"),
         ("M3", "DOREZIM DERI NE FUND TE DITES"),
+        ("GENT", "PYETJE/SQARIM ME GENTIN"),
+        ("KA", "PYETJE/SQARIM ME KA"),
+        ("⚑", "PYETJE/SQARIM ME GA"),
     )
     separator = (
         '<span aria-hidden="true" style="display:inline-block;margin:0 14px;'
@@ -3069,8 +3069,8 @@ async def _build_print_report(
         "",
         "LEGJENDA: ? - PAQARTESI / "
         "! - KËRKON MONITORIM NGA DIKUSH TJETËR / "
-        "⚑ - PYETJE/SQARIM ME GA / KA - PYETJE/SQARIM ME KA / GENT - PYETJE/SQARIM ME GENTIN / "
-        "M2 - DOREZIM DERI NE PAUZE / M3 - DOREZIM DERI NE FUND TE DITES",
+        "M2 - DOREZIM DERI NE PAUZE / M3 - DOREZIM DERI NE FUND TE DITES / "
+        "GENT - PYETJE/SQARIM ME GENTIN / KA - PYETJE/SQARIM ME KA / ⚑ - PYETJE/SQARIM ME GA",
         "",
         "TASKS",
     ])

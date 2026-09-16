@@ -34,12 +34,12 @@ type TaskMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "
 type TaskMarkerFilter = "all" | "with" | "none" | TaskMarker
 
 const taskMarkerOptions: Array<{ value: TaskMarker; label: string }> = [
-  { value: "EXCLAMATION", label: "!" },
   { value: "QUESTION", label: "?" },
-  { value: "KA", label: "KA" },
-  { value: "GENT", label: "GENT" },
+  { value: "EXCLAMATION", label: "!" },
   { value: "M2", label: "M2" },
   { value: "M3", label: "M3" },
+  { value: "GENT", label: "GENT" },
+  { value: "KA", label: "KA" },
   { value: "FLAG", label: "⚑" },
 ]
 
