@@ -3272,9 +3272,9 @@ export default function GaKaNotesPage() {
             <span><b className="text-xs font-black">KA</b> - PYETJE/SQARIM ME KA</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
             <span><b className="text-xs font-black">GENT</b> - PYETJE/SQARIM ME GENTIN</span>
-            <span aria-hidden="true">/</span>
+            <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
             <span><b className="text-xs font-black">M2</b> - DOREZIM DERI NE PAUZE</span>
-            <span aria-hidden="true">/</span>
+            <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
             <span><b className="text-xs font-black">M3</b> - DOREZIM DERI NE FUND TE DITES</span>
           </div>
           {showLegend ? (
