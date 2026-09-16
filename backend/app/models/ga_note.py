@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, func
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,6 +32,7 @@ class GaNote(Base):
     is_converted_to_task: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_discussed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     one_h_marker: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    one_h_marker_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"))
     department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("departments.id"))
 

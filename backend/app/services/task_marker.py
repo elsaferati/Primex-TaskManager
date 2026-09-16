@@ -7,42 +7,70 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.ga_note import GaNote
 from app.models.plan_note import PlanNote
 from app.models.task import Task
+from app.services.one_h_slots import current_effective_slot_date, effective_slot_date
+
+
+def active_one_h_marker(item, report_date=None, now=None) -> str | None:
+    marker = getattr(item, "one_h_marker", None)
+    if marker and not hasattr(item, "one_h_marker_date"):
+        return marker
+    marker_date = getattr(item, "one_h_marker_date", None)
+    if not marker or marker_date is None:
+        return None
+    target_date = (
+        effective_slot_date(report_date, now)
+        if report_date is not None
+        else current_effective_slot_date(now)
+    )
+    return marker if marker_date == target_date else None
 
 
 async def sync_note_task_marker(db: AsyncSession, note: GaNote | PlanNote, marker: str | None) -> None:
+    marker_date = current_effective_slot_date() if marker else None
     note.one_h_marker = marker
+    note.one_h_marker_date = marker_date
     origin = Task.plan_note_origin_id if isinstance(note, PlanNote) else Task.ga_note_origin_id
     await db.execute(
-        update(Task).where(origin == note.id, Task.is_active.is_(True)).values(one_h_marker=marker)
+        update(Task).where(origin == note.id, Task.is_active.is_(True)).values(
+            one_h_marker=marker, one_h_marker_date=marker_date
+        )
     )
 
 
 async def sync_task_marker(db: AsyncSession, task: Task, marker: str | None) -> None:
+    marker_date = current_effective_slot_date() if marker else None
     task.one_h_marker = marker
+    task.one_h_marker_date = marker_date
     related = []
     if task.fast_task_group_id is not None:
         related.append(Task.fast_task_group_id == task.fast_task_group_id)
     for model, origin in ((GaNote, "ga_note_origin_id"), (PlanNote, "plan_note_origin_id")):
         note_id = getattr(task, origin, None)
         if note_id is not None:
-            await db.execute(update(model).where(model.id == note_id).values(one_h_marker=marker))
+            await db.execute(
+                update(model).where(model.id == note_id).values(
+                    one_h_marker=marker, one_h_marker_date=marker_date
+                )
+            )
             related.append(getattr(Task, origin) == note_id)
     if related:
         await db.execute(
-            update(Task).where(or_(*related), Task.is_active.is_(True)).values(one_h_marker=marker)
+            update(Task).where(or_(*related), Task.is_active.is_(True)).values(
+                one_h_marker=marker, one_h_marker_date=marker_date
+            )
         )
 
 
 def note_bundle_marker_update(note, payload, tasks) -> tuple[bool, str | None]:
     """Ignore unchanged editor fields; accept a symbol edit from either control."""
-    if "one_h_marker" in payload.model_fields_set and payload.one_h_marker != note.one_h_marker:
+    if "one_h_marker" in payload.model_fields_set and payload.one_h_marker != active_one_h_marker(note):
         return True, payload.one_h_marker
-    by_assignee = {task.assigned_to: task.one_h_marker for task in tasks if task.is_active}
+    by_assignee = {task.assigned_to: active_one_h_marker(task) for task in tasks if task.is_active}
     changed = {
         state.one_h_marker
         for state in payload.assignee_states or []
         if "one_h_marker" in state.model_fields_set
-        and state.one_h_marker != by_assignee.get(state.assignee_id, note.one_h_marker)
+        and state.one_h_marker != by_assignee.get(state.assignee_id, active_one_h_marker(note))
     }
     if len(changed) > 1:
         raise ValueError("Choose one symbol for the linked note and tasks")

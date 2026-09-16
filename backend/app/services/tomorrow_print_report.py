@@ -237,6 +237,8 @@ def _task_marker_label(item: dict[str, Any]) -> str:
         "QUESTION": "?",
         "KA": "KA",
         "GENT": "GENT",
+        "M2": "M2",
+        "M3": "M3",
         "FLAG": "⚑",
     }.get(raw, "")
 
@@ -246,7 +248,9 @@ def _task_marker_legend_text() -> str:
         "LEGJENDA: ? - PAQARTESI / "
         "! - KËRKON MONITORIM NGA DIKUSH TJETËR / "
         "⚑ - PYETJE/SQARIM ME GA / KA - PYETJE/SQARIM ME KA / "
-        "GENT - PYETJE/SQARIM ME GENTIN"
+        "GENT - PYETJE/SQARIM ME GENTIN / "
+        "M2 - DOREZIM DERI NE PAUZE / "
+        "M3 - DOREZIM DERI NE FUND TE DITES"
     )
 
 
@@ -947,6 +951,8 @@ def _task_marker_legend_html() -> str:
         ("⚑", "PYETJE/SQARIM ME GA"),
         ("KA", "PYETJE/SQARIM ME KA"),
         ("GENT", "PYETJE/SQARIM ME GENTIN"),
+        ("M2", "DOREZIM DERI NE PAUZE"),
+        ("M3", "DOREZIM DERI NE FUND TE DITES"),
     )
     separator = (
         '<span aria-hidden="true" style="display:inline-block;margin:0 14px;'
@@ -954,7 +960,7 @@ def _task_marker_legend_html() -> str:
     )
     content = separator.join(
         '<span style="display:inline-block;margin:2px 16px 2px 0;white-space:nowrap;">'
-        f'<strong style="color:#0F2A5F;font-size:{"12px" if symbol in {"KA", "GENT"} else "17px"};font-weight:900;">{symbol}</strong> - '
+        f'<strong style="color:#0F2A5F;font-size:{"12px" if symbol in {"KA", "GENT", "M2", "M3"} else "17px"};font-weight:900;">{symbol}</strong> - '
         f'{html.escape(description)}</span>'
         for symbol, description in items
     )
@@ -2779,7 +2785,8 @@ async def _build_print_report(
         "",
         "LEGJENDA: ? - PAQARTESI / "
         "! - KËRKON MONITORIM NGA DIKUSH TJETËR / "
-        "⚑ - PYETJE/SQARIM ME GA / KA - PYETJE/SQARIM ME KA / GENT - PYETJE/SQARIM ME GENTIN",
+        "⚑ - PYETJE/SQARIM ME GA / KA - PYETJE/SQARIM ME KA / GENT - PYETJE/SQARIM ME GENTIN / "
+        "M2 - DOREZIM DERI NE PAUZE / M3 - DOREZIM DERI NE FUND TE DITES",
         "",
         "TASKS",
     ])

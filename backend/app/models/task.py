@@ -101,6 +101,7 @@ class Task(Base):
     is_1h_report: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     one_h_report_slot: Mapped[str | None] = mapped_column(String(5), nullable=True)
     one_h_marker: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    one_h_marker_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     is_r1: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_personal: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     fast_task_order: Mapped[int | None] = mapped_column(Integer, nullable=True)

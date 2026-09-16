@@ -36,6 +36,7 @@ from app.services.primeflow_report import PrimeFlowClient
 from app.services.std_feedback_tickets import std_tickets_report_section
 from app.services.system_task_schedule import matches_template_date
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
+from app.services.task_marker import active_one_h_marker
 
 REPORT_TYPE = "meetings_report"
 SECTION_TITLES = [
@@ -1064,7 +1065,7 @@ def _m3_status_table(
         added_week = _m3_added_week_label(task, week_start) if include_added_week else ""
         am_pm = _m3_am_pm_label(task) if include_am_pm else ""
         postponed_from, postponed_to = (date_range_by_task or {}).get(task.id, ("-", "-"))
-        marker = one_h_marker_symbol(getattr(task, "one_h_marker", None))
+        marker = one_h_marker_symbol(active_one_h_marker(task))
         display_title = " ".join(part for part in (marker, _clean_task_title(task.title, is_system_task=bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None)))) if part)
         title_lines = _wrap_fixed_width(display_title, 64)
         reason, comment = (daily_rlz_by_task or {}).get(task.id, ("-", "-"))

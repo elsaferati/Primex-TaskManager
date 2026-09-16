@@ -357,7 +357,7 @@ export interface Task {
   is_bllok?: boolean
   is_1h_report?: boolean
   one_h_report_slot?: string | null
-  one_h_marker?: "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | null
+  one_h_marker?: "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3" | null
   is_r1?: boolean
   is_personal?: boolean
   fast_task_order?: number | null
@@ -591,7 +591,7 @@ export interface GaNote {
   completed_at?: string | null
   is_converted_to_task: boolean
   is_discussed?: boolean
-  one_h_marker?: "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | null
+  one_h_marker?: "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3" | null
   next_week?: boolean
   project_id?: string | null
   department_id?: string | null
@@ -613,7 +613,7 @@ export interface PlanNote {
   completed_at?: string | null
   is_converted_to_task: boolean
   is_discussed?: boolean
-  one_h_marker?: "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | null
+  one_h_marker?: "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3" | null
   next_week?: boolean
   project_id?: string | null
   department_id?: string | null

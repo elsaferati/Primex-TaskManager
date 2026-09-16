@@ -67,6 +67,8 @@ ONE_H_MARKER_SYMBOLS = {
     "QUESTION": "?",
     "KA": "KA",
     "GENT": "GENT",
+    "M2": "M2",
+    "M3": "M3",
     "FLAG": "⚑",
 }
 ONE_H_MARKER_LEGEND = (
@@ -75,6 +77,8 @@ ONE_H_MARKER_LEGEND = (
     ("⚑", "PYETJE/SQARIM ME GA"),
     ("KA", "PYETJE/SQARIM ME KA"),
     ("GENT", "PYETJE/SQARIM ME GENTIN"),
+    ("M2", "DOREZIM DERI NE PAUZE"),
+    ("M3", "DOREZIM DERI NE FUND TE DITES"),
 )
 BLOCKED_SECTION_TITLE_PREFIX = "BLLOK 14:30-16:00"
 

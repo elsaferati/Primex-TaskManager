@@ -8,6 +8,7 @@ from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.project import Project
 from app.models.task import Task
+from app.services.task_marker import active_one_h_marker
 from app.schemas.search import SearchProjectResult, SearchResponse, SearchTaskResult
 
 
@@ -52,7 +53,7 @@ async def search(
                 title=t.title,
                 project_id=t.project_id,
                 department_id=t.department_id,
-                one_h_marker=t.one_h_marker,
+                one_h_marker=active_one_h_marker(t),
             )
             for t in tasks
         ],
