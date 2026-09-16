@@ -26,7 +26,7 @@ from app.models.department import Department
 from app.models.enums import CommonApprovalStatus, CommonCategory, UserRole
 from app.models.ga_note import GaNote
 from app.models.plan_note import PlanNote
-from app.models.meeting import Meeting
+from app.models.meeting import Meeting, MeetingParticipant
 from app.models.project import Project
 from app.services.project_classification import has_mst_identity, is_vs_or_vl_project
 from app.services.common_leave import parse_common_view_annual_leave
@@ -68,7 +68,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "15"
+COMMON_VIEW_CACHE_VERSION = "17"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -642,6 +642,9 @@ async def get_common_view(
                         "until": until,
                         "start": start,
                         "note": note or None,
+                        "userId": str(e.assigned_to_user_id or e.created_by_user_id)
+                        if (e.assigned_to_user_id or e.created_by_user_id)
+                        else None,
                     }
                 )
             elif e.category == CommonCategory.absences:
@@ -1186,6 +1189,27 @@ async def get_common_view(
             meeting_stmt = meeting_stmt.where(Meeting.department_id == department_id)
         meetings = (await db.execute(meeting_stmt.order_by(Meeting.starts_at, Meeting.created_at.desc()))).scalars().all()
         meetings_by_id = {meeting.id: meeting for meeting in meetings}
+        participant_users_by_meeting: dict[uuid.UUID, list[tuple[str, str]]] = {}
+        if meetings_by_id:
+            participant_rows = (
+                await db.execute(
+                    select(MeetingParticipant.meeting_id, MeetingParticipant.user_id)
+                    .where(MeetingParticipant.meeting_id.in_(meetings_by_id))
+                )
+            ).all()
+            for meeting_id, user_id in participant_rows:
+                participant = users_map.get(user_id)
+                if participant is None:
+                    continue
+                participant_name = (
+                    participant.full_name or participant.username or participant.email or ""
+                ).strip()
+                if participant_name:
+                    participant_users_by_meeting.setdefault(meeting_id, []).append(
+                        (participant_name, str(user_id))
+                    )
+            for participant_users in participant_users_by_meeting.values():
+                participant_users.sort(key=lambda value: value[0].casefold())
         week_days = [week_start_date + timedelta(days=i) for i in range(7)]
 
         for meeting in meetings:
@@ -1239,6 +1263,12 @@ async def get_common_view(
                                 "time": time_label,
                                 "platform": meeting.platform or "TBD",
                                 "owner": owner_name,
+                                "assignees": [
+                                    name for name, _ in participant_users_by_meeting.get(meeting.id, [])
+                                ],
+                                "assigneeUserIds": [
+                                    user_id for _, user_id in participant_users_by_meeting.get(meeting.id, [])
+                                ],
                                 "department": department_name,
                                 "recurrence_type": meeting.recurrence_type or "none",
                                 "calendarImported": is_calendar_meeting,
@@ -1263,6 +1293,12 @@ async def get_common_view(
                         "time": _format_time(meeting.starts_at),
                         "platform": meeting.platform or "TBD",
                         "owner": owner_name,
+                        "assignees": [
+                            name for name, _ in participant_users_by_meeting.get(meeting.id, [])
+                        ],
+                        "assigneeUserIds": [
+                            user_id for _, user_id in participant_users_by_meeting.get(meeting.id, [])
+                        ],
                         "department": department_name,
                         "recurrence_type": meeting.recurrence_type or "none",
                         "calendarImported": is_calendar_meeting,
