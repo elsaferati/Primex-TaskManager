@@ -70,7 +70,7 @@ export function TaskOneHMarkerEditor({
   return (
     <Select value={value} onValueChange={(next) => void updateMarker(next)} disabled={!taskId || saving}>
       <SelectTrigger
-        className={`h-7 min-w-[64px] max-w-[82px] border-blue-300 bg-blue-50 px-2 font-black text-[#0F2A5F] ${className || ""}`}
+        className={`h-7 min-w-[64px] max-w-[82px] border-blue-300 bg-blue-50 px-2 text-base font-black text-[#0F2A5F] [text-shadow:0_0_0_currentColor] ${className || ""}`}
         aria-label="Task symbol"
         title="Edit task symbol"
         onClick={(event) => event.stopPropagation()}

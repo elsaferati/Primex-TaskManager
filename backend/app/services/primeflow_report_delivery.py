@@ -287,6 +287,8 @@ async def _text_overrides_for_1h_interval(
                 Task.id,
                 Task.title,
                 Task.description,
+                Task.system_template_origin_id,
+                Task.system_task_slot_id,
                 GaNote.content,
                 PlanNote.content,
                 TaskStrikeEvent,
@@ -307,14 +309,17 @@ async def _text_overrides_for_1h_interval(
     by_task: dict[uuid.UUID, list[TaskStrikeEvent]] = {}
     current_titles: dict[uuid.UUID, str] = {}
     current_descriptions: dict[uuid.UUID, str | None] = {}
-    for task_id, task_title, task_description, ga_content, plan_content, event in rows:
+    for task_id, task_title, task_description, system_template_origin_id, system_task_slot_id, ga_content, plan_content, event in rows:
         source_title = ga_content or plan_content or task_title or ""
         normalized_title = "\n".join(
             " ".join(line.split())
             for line in str(source_title).replace("\r\n", "\n").replace("\r", "\n").split("\n")
             if line.strip()
         )
-        current_titles[task_id] = normalize_email_task_title(normalized_title)
+        current_titles[task_id] = normalize_email_task_title(
+            normalized_title,
+            is_system_task=system_template_origin_id is not None or system_task_slot_id is not None,
+        )
         current_descriptions[task_id] = task_description
         if event is not None:
             by_task.setdefault(task_id, []).append(event)

@@ -483,7 +483,7 @@ def _is_open(task: Task) -> bool:
 
 def _ka_genti_owner(task: Task) -> str | None:
     """Return the report ownership table for a KA/Gent(i) title marker."""
-    owner = personal_task_owner(_clean_task_title(task.title) or task.title)
+    owner = personal_task_owner(_clean_task_title(task.title, is_system_task=bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None))) or task.title)
     if owner == "KA":
         return "KA"
     if owner == "GENT":
@@ -726,10 +726,15 @@ def common_view_task_sort_key(
     owner = _task_owners(task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids)
     existing_order = (
         0 if bool(task.is_deadline_important) else 1,
-        0 if title_has_eight_am_indicator(task.title) else 1,
+        0
+        if title_has_eight_am_indicator(
+            task.title,
+            is_system_task=bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None)),
+        )
+        else 1,
         owner.casefold(),
         task.fast_task_order if task.fast_task_order is not None else 10**9,
-        _clean_task_title(task.title).casefold(),
+        _clean_task_title(task.title, is_system_task=bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None))).casefold(),
         str(task.created_at or ""),
     )
     weekly_planner_order = getattr(task, "_weekly_planner_report_sort", None)
@@ -745,7 +750,17 @@ def common_view_item_sort_key(item: dict[str, Any]) -> tuple:
     owner = _common_owner(item)
     title = _common_title(item)
     important = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
-    eight_am = title_has_eight_am_indicator(title)
+    eight_am = title_has_eight_am_indicator(
+        title,
+        is_system_task=bool(
+            item.get("is_system_task")
+            or item.get("isSystemTask")
+            or item.get("system_template_origin_id")
+            or item.get("systemTemplateOriginId")
+            or item.get("system_task_slot_id")
+            or item.get("systemTaskSlotId")
+        ),
+    )
     order = item.get("fast_task_order")
     if order is None:
         order = item.get("fastTaskOrder")
@@ -774,7 +789,7 @@ def _task_line(
     owner = _task_owners(
         task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
     )
-    title = _clean_task_title(task.title)
+    title = _clean_task_title(task.title, is_system_task=bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None)))
     line = f"- {owner}: {title}"
     if include_status:
         return f"- [{_normalize_report_status(task.status)}] {owner}: {title}"
@@ -783,7 +798,7 @@ def _task_line(
 
 def _task_line_with_late_days(task: Task, names: dict[Any, str]) -> str:
     owner = _initials(names.get(task.assigned_to))
-    title_lines = _wrap_fixed_width(_clean_task_title(task.title), 48)
+    title_lines = _wrap_fixed_width(_clean_task_title(task.title, is_system_task=bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None))), 48)
     days = _late_days(task)
     late_label = _late_days_label(days)
     lines = [f"- {owner:<4} | {title_lines[0]:<48} | {late_label}"]
@@ -802,7 +817,7 @@ def _m3_task_type_label(task: Task) -> str:
     GA/PX note origins are sources, not types. Fast tasks show FT, or a subtype
     when flagged (1H/BLL/R1/P).
     """
-    if getattr(task, "system_template_origin_id", None) is not None:
+    if bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None)):
         return "SYS"
     if getattr(task, "project_id", None) is not None:
         return "PRJK"
@@ -1050,7 +1065,7 @@ def _m3_status_table(
         am_pm = _m3_am_pm_label(task) if include_am_pm else ""
         postponed_from, postponed_to = (date_range_by_task or {}).get(task.id, ("-", "-"))
         marker = one_h_marker_symbol(getattr(task, "one_h_marker", None))
-        display_title = " ".join(part for part in (marker, _clean_task_title(task.title)) if part)
+        display_title = " ".join(part for part in (marker, _clean_task_title(task.title, is_system_task=bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None)))) if part)
         title_lines = _wrap_fixed_width(display_title, 64)
         reason, comment = (daily_rlz_by_task or {}).get(task.id, ("-", "-"))
         reason_lines = _wrap_fixed_width(reason or "-", 24) if daily_rlz_by_task is not None else []
@@ -1060,7 +1075,10 @@ def _m3_status_table(
         if include_priority_tone:
             priority_tone = (
                 "eight_am"
-                if title_has_eight_am_indicator(task.title)
+                if title_has_eight_am_indicator(
+                    task.title,
+                    is_system_task=bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None)),
+                )
                 else "deadline"
                 if bool(getattr(task, "is_deadline_important", False))
                 else ""
@@ -1132,7 +1150,7 @@ def _task_late_lines(tasks: list[Task], names: dict[Any, str]) -> list[str]:
     return [_task_line_with_late_days(task, names) for task in ordered]
 
 
-def _clean_task_title(value: str | None) -> str:
+def _clean_task_title(value: str | None, *, is_system_task: bool = False) -> str:
     """Normalize task titles for reports.
 
     Titles often store post-create edits as ``[[added]]...[[/added]]``. Keep that
@@ -1144,7 +1162,10 @@ def _clean_task_title(value: str | None) -> str:
     if not title_line:
         title_line = next((line for line in candidates if not re.match(r"^\d+\.", line)), "")
     title_line = DUE_SUFFIX.sub("", title_line)
-    return normalize_email_task_title(re.sub(r"\s+", " ", title_line).strip()) or "-"
+    return normalize_email_task_title(
+        re.sub(r"\s+", " ", title_line).strip(),
+        is_system_task=is_system_task,
+    ) or "-"
 
 
 def _empty_aware(lines: list[str]) -> str:
@@ -1293,7 +1314,10 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     new_tomorrow = [task for task in new_task_review_tasks if _is_new_task_for_m3_day(task, tomorrow)]
     at_0800 = [
         task for task in new_task_review_tasks
-        if title_has_eight_am_indicator(task.title)
+        if title_has_eight_am_indicator(
+            task.title,
+            is_system_task=bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None)),
+        )
         or (task.due_date and _local_time(task.due_date) == "08:00")
     ]
     deadline = [task for task in new_task_review_tasks if task.is_deadline_important]
@@ -1303,7 +1327,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         if task.is_personal
         and _is_open(task)
         and _task_covers_report_day(task, tomorrow)
-        and personal_task_owner(_clean_task_title(task.title) or task.title) == "GA"
+        and personal_task_owner(_clean_task_title(task.title, is_system_task=bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None))) or task.title) == "GA"
     ]
     personal_ka_genti = [
         task for task in tasks
@@ -1676,7 +1700,7 @@ def _task_metadata_by_title(
     """
     metadata: dict[str, tuple[str, str]] = {}
     for task in tasks:
-        title = _clean_task_title(task.title)
+        title = _clean_task_title(task.title, is_system_task=bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None)))
         value = (_m3_department_label(task, department_codes), _m3_am_pm_label(task))
         metadata.setdefault(title, value)
         if names is not None:
@@ -2027,7 +2051,17 @@ def _item_date(item: dict[str, Any]) -> date | None:
 
 def _common_title(item: dict[str, Any]) -> str:
     raw = item.get("task_title") or item.get("title") or item.get("task") or item.get("note") or ""
-    return _clean_task_title(str(raw))
+    return _clean_task_title(
+        str(raw),
+        is_system_task=bool(
+            item.get("is_system_task")
+            or item.get("isSystemTask")
+            or item.get("system_template_origin_id")
+            or item.get("systemTemplateOriginId")
+            or item.get("system_task_slot_id")
+            or item.get("systemTaskSlotId")
+        ),
+    )
 
 
 def _common_owner(item: dict[str, Any]) -> str:
@@ -2197,7 +2231,7 @@ async def _bz_alignment_lines(
                 if user_id in users_map
             ]
         owner_label = " ".join(dict.fromkeys([owner for owner in owners if owner != "-"])) or "-"
-        title = _clean_task_title(template.title)
+        title = _clean_task_title(template.title, is_system_task=True)
         key = (template.id, day.isoformat())
         if key in seen:
             continue
@@ -2241,7 +2275,7 @@ async def _bz_template_metadata(db: AsyncSession) -> dict[str, tuple[str, str]]:
         assignee_ids = list(template.assignee_ids or [])
         primary_user_id = assignee_ids[0] if assignee_ids else template.default_assignee_id
         primary_user = users_by_id.get(primary_user_id)
-        metadata[_clean_task_title(template.title)] = (
+        metadata[_clean_task_title(template.title, is_system_task=True)] = (
             _m3_department_code_label(getattr(primary_user, "department_id", None), department_codes)
             if primary_user else "-",
             "-",
@@ -2855,12 +2889,26 @@ def _is_m3_start_due_table(caption: str) -> bool:
     return caption.strip().upper().rstrip(":") == "SHTYER START DHE DUE DATE"
 
 
+def _split_leading_task_marker(value: str) -> tuple[str, str] | None:
+    match = re.match(r"^(⚑|GENT|KA|[!?])\s+(.+)$", str(value or ""))
+    return (match.group(1), match.group(2)) if match else None
+
+
 def _render_table_cell_html(
     header: str,
     value: str,
     *,
     strong_start_due_divider: bool = False,
 ) -> str:
+    if _normalized_table_header(header) == "TITLE":
+        marked = _split_leading_task_marker(value)
+        if marked:
+            marker, task_title = marked
+            return (
+                '<strong data-task-symbol="true" style="display:inline-block;margin-right:4px;'
+                'font-size:1.18em;font-weight:900;line-height:1;text-shadow:0 0 0 currentColor;">'
+                f"{html.escape(marker)}</strong>{html.escape(task_title).replace(chr(10), '<br>')}"
+            )
     if not _is_stacked_start_due_cell(header, value):
         return html.escape(value).replace(chr(10), "<br>")
     start_line, due_line = value.split("\n", 1)
@@ -3774,6 +3822,15 @@ def render_section_report_docx(
         *,
         strong_start_due_divider: bool = False,
     ) -> None:
+        if _normalized_table_header(header) == "TITLE":
+            marked = _split_leading_task_marker(value)
+            if marked:
+                marker, task_title = marked
+                cell.text = ""
+                paragraph = cell.paragraphs[0]
+                paragraph.add_run(f"{marker} ")
+                paragraph.add_run(task_title)
+                return
         if not _is_stacked_start_due_cell(header, value):
             cell.text = value
             return
@@ -3864,6 +3921,10 @@ def render_section_report_docx(
                 )
                 outline = "#DC2626" if tone == "eight-am" else ("#2563EB" if highlighted else "#CBD5E1")
                 cell_style(cell, cell_fill, color=cell_color, bold=cell_bold, size=8, outline=outline)
+                if header_name == "TITLE" and _split_leading_task_marker(str(value)):
+                    marker_run = cell.paragraphs[0].runs[0]
+                    marker_run.bold = True
+                    marker_run.font.size = Pt(11)
                 set_width(cell, column_widths[column])
         document.add_paragraph().paragraph_format.space_after = Pt(1)
 
@@ -4037,7 +4098,17 @@ def render_section_report_png(
                 x = right
             y += 34
             for row_index, row in enumerate(block["rows"]):
-                cells = [wrap(str(value), font, max(20, column_widths[index] - 12)) for index, value in enumerate(row)]
+                cells = [
+                    wrap(
+                        str(value),
+                        bold
+                        if _normalized_table_header(block["header"][index]) == "TITLE"
+                        and _split_leading_task_marker(str(value))
+                        else font,
+                        max(20, column_widths[index] - 12),
+                    )
+                    for index, value in enumerate(row)
+                ]
                 row_height = max(31, 8 + max(len(cell) for cell in cells) * 22)
                 if any(
                     _is_stacked_start_due_cell(block["header"][index], str(value))
@@ -4065,6 +4136,8 @@ def render_section_report_png(
                         cell_fill, cell_color, cell_font = "#FEE2E2", "#991B1B", bold
                     if highlighted and header_name == "TITLE":
                         cell_color, cell_font = "#2563EB", bold
+                    elif header_name == "TITLE" and _split_leading_task_marker(str(value)):
+                        cell_font = bold
                     right = x + column_widths[index]
                     outlined = highlighted or tone == "eight-am"
                     outline = "#DC2626" if tone == "eight-am" else ("#2563EB" if highlighted else "#CBD5E1")

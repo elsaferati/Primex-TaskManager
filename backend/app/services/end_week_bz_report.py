@@ -178,7 +178,15 @@ async def build_end_week_bz_report_sections(db: AsyncSession, report_day: date) 
     waiting = [task for task in tasks if _is_wfc_task(task)]
     deadline = [task for task in open_for_day if task.is_deadline_important]
     r1 = [task for task in open_for_day if task.is_r1]
-    at_eight = [task for task in open_for_day if title_has_eight_am_indicator(task.title) or _local_time(task.due_date) == "08:00"]
+    at_eight = [
+        task
+        for task in open_for_day
+        if title_has_eight_am_indicator(
+            task.title,
+            is_system_task=bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None)),
+        )
+        or _local_time(task.due_date) == "08:00"
+    ]
 
     meetings = (await db.execute(select(Meeting).options(selectinload(Meeting.participants)).where(Meeting.starts_at.is_not(None)))).scalars().unique().all()
     meetings = [meeting for meeting in meetings if is_common_view_visible_meeting(meeting)]

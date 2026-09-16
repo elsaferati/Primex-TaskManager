@@ -854,10 +854,14 @@ export default function DepartmentKanban() {
                       <TableRow key={row.id}>
                         <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                         <TableCell className="w-[480px] min-w-[480px] whitespace-normal font-medium text-slate-800">
-                          <TaskOneHMarkerEditor taskId={row.task.id} marker={row.task.one_h_marker} />
-                          {typeof row.title === "string" && row.title.includes("[[")
-                            ? renderMarkedNoteContent(row.title, row.title)
-                            : row.title}
+                          <div className="flex w-full items-start gap-2">
+                            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+                              {typeof row.title === "string" && row.title.includes("[[")
+                                ? renderMarkedNoteContent(row.title, row.title)
+                                : row.title}
+                            </span>
+                            <TaskOneHMarkerEditor taskId={row.task.id} marker={row.task.one_h_marker} className="order-last ml-auto shrink-0" />
+                          </div>
                         </TableCell>
                         <TableCell className="w-16 min-w-16 max-w-16 px-0 text-center">
                           {row.systemFrequencyDisplayLabel ? (

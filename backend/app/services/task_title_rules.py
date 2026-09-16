@@ -7,15 +7,26 @@ EMAIL_TASK_TITLE_RE = re.compile(r"\bEM\b", re.IGNORECASE)
 EIGHT_AM_TITLE_RE = re.compile(r"\b0?8:00\b")
 
 
-def title_has_eight_am_indicator(title: str | None) -> bool:
-    """Treat standalone EM markers as 08:00 even if the time was omitted."""
+def title_has_eight_am_indicator(
+    title: str | None, *, is_system_task: bool = False
+) -> bool:
+    """Recognize explicit 08:00 markers and non-system standalone EM markers."""
     value = title or ""
-    return bool(EIGHT_AM_TITLE_RE.search(value) or EMAIL_TASK_TITLE_RE.search(value))
+    return bool(
+        EIGHT_AM_TITLE_RE.search(value)
+        or (not is_system_task and EMAIL_TASK_TITLE_RE.search(value))
+    )
 
 
-def normalize_email_task_title(title: str | None) -> str:
-    """Add one visible 08:00 prefix to a standalone-EM task title."""
+def normalize_email_task_title(
+    title: str | None, *, is_system_task: bool = False
+) -> str:
+    """Add one visible 08:00 prefix to a non-system standalone-EM task title."""
     normalized = (title or "").strip()
-    if EMAIL_TASK_TITLE_RE.search(normalized) and not EIGHT_AM_TITLE_RE.search(normalized):
+    if (
+        not is_system_task
+        and EMAIL_TASK_TITLE_RE.search(normalized)
+        and not EIGHT_AM_TITLE_RE.search(normalized)
+    ):
         return f"08:00 {normalized}"
     return normalized

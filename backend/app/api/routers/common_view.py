@@ -69,7 +69,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "16"
+COMMON_VIEW_CACHE_VERSION = "17"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -831,7 +831,11 @@ async def get_common_view(
             display_title = display_title or (
                 plan_note_titles.get(t.plan_note_origin_id) if t.plan_note_origin_id else None
             )
-            display_title = normalize_email_task_title(display_title or t.title)
+            is_system_task = (t.system_template_origin_id is not None or t.system_task_slot_id is not None)
+            display_title = normalize_email_task_title(
+                display_title or t.title,
+                is_system_task=is_system_task,
+            )
             assignees = assignees_by_task.get(t.id) or []
             if not assignees and t.assigned_to:
                 user_for_task = users_map.get(t.assigned_to)
@@ -853,6 +857,7 @@ async def get_common_view(
             confirmation_fields = {
                 "confirmation_assignee_id": str(t.confirmation_assignee_id) if t.confirmation_assignee_id else None,
                 "confirmation_owner": confirmation_owner,
+                "is_system_task": is_system_task,
             }
             dept_id = None
             if assignees:
@@ -986,7 +991,10 @@ async def get_common_view(
                     )
                 if (
                     t.is_deadline_important
-                    or title_has_eight_am_indicator(display_title or t.title)
+                    or title_has_eight_am_indicator(
+                        display_title or t.title,
+                        is_system_task=is_system_task,
+                    )
                 ) and not (t.is_1h_report or t.is_bllok or t.is_r1 or t.is_personal):
                     items["important"].append(
                         {

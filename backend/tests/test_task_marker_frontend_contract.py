@@ -24,6 +24,20 @@ def test_every_department_my_view_renders_the_same_task_marker():
         assert "task.one_h_marker" in source, department
 
 
+def test_department_task_marker_dropdowns_align_to_the_end_of_title_cells():
+    for department in (
+        "development",
+        "graphic-design",
+        "project-content-manager",
+        "finance",
+    ):
+        source = (
+            ROOT
+            / f"frontend/src/app/(app)/departments/{department}/department-kanban.tsx"
+        ).read_text(encoding="utf-8")
+        assert 'className="order-last ml-auto shrink-0"' in source, department
+
+
 def test_symbol_filters_include_all_marked_tasks_in_1h_and_px_notes():
     one_h = (ROOT / "frontend/src/app/(app)/tomorrow-print-report/page.tsx").read_text(encoding="utf-8")
     px_notes = (ROOT / "frontend/src/app/(app)/ga-ka-notes/page.tsx").read_text(encoding="utf-8")

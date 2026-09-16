@@ -6631,7 +6631,7 @@ export default function DepartmentKanban() {
                                           08:00
                                         </span>
                                       ) : null}
-                                      <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} />
+                                      <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} className="order-last ml-auto shrink-0" />
                                       <span className="min-w-0 flex-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                                         {(() => {
                                           const hasMarks = typeof visibleTitle === "string" && visibleTitle.includes("[[")
@@ -6912,9 +6912,9 @@ export default function DepartmentKanban() {
                                   )}
                                 </TableCell>
                                 <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
-                                  <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>
-                                    <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} />
-                                    {renderAllTodayTaskTitle(task)}
+                                  <div className={`flex w-full items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
+                                    <span className="min-w-0 flex-1">{renderAllTodayTaskTitle(task)}</span>
+                                    <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} className="order-last ml-auto shrink-0" />
                                   </div>
                                 </TableCell>
                                 <TableCell className={TODAY_TASK_CELL_CLASS}>{confirmerLabel}</TableCell>
@@ -7049,10 +7049,7 @@ export default function DepartmentKanban() {
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
-                                <span>
-                                  <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} />
-                                  {renderAllTodayTaskTitle(task)}
-                                </span>
+                                <span className="min-w-0 flex-1">{renderAllTodayTaskTitle(task)}</span>
                                       {task.plan_note_origin_id ? (
                                         <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>PX JAV</Badge>
                                       ) : isGaTask(task) ? (
@@ -7070,6 +7067,7 @@ export default function DepartmentKanban() {
                                 {task.is_bllok ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${BLLOK_BADGE_CLASSES}`}>BLLOK</Badge>
                                 ) : null}
+                                <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} className="order-last ml-auto shrink-0" />
                               </div>
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
@@ -7181,15 +7179,13 @@ export default function DepartmentKanban() {
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
-                                <span>
-                                  <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} />
-                                  {renderAllTodayTaskTitle(task)}
-                                </span>
+                                <span className="min-w-0 flex-1">{renderAllTodayTaskTitle(task)}</span>
                                       {task.plan_note_origin_id ? (
                                         <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>PX JAV</Badge>
                                       ) : isGaTask(task) ? (
                                         <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                                 ) : null}
+                                <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} className="order-last ml-auto shrink-0" />
                               </div>
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
@@ -9216,7 +9212,7 @@ export default function DepartmentKanban() {
                                     08:00
                                   </span>
                                 ) : null}
-                                <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} />
+                                <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} className="order-last ml-auto shrink-0" />
                                 <span className="whitespace-pre-wrap break-words">
                                   {(() => {
                                     const hasMarks = typeof row.title === "string" && row.title.includes("[[")
@@ -9335,7 +9331,7 @@ export default function DepartmentKanban() {
                                     08:00
                                   </span>
                             ) : null}
-                            <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} />
+                            <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} className="order-last ml-auto shrink-0" />
                             <span className="whitespace-pre-wrap break-words">
                               {(() => {
                                 const hasMarks = typeof row.title === "string" && row.title.includes("[[")

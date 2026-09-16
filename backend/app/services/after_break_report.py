@@ -221,7 +221,10 @@ def _unfinished_priority_task_rows(
 
         # Match Common View: its 08:00 badge/filter is driven by the title marker,
         # while due_date only determines which calendar day the task belongs to.
-        is_eight_am = title_has_eight_am_indicator(task.title)
+        is_eight_am = title_has_eight_am_indicator(
+            task.title,
+            is_system_task=bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None)),
+        )
         is_deadline = bool(task.is_deadline_important)
         if not (is_eight_am or is_deadline):
             continue
@@ -286,7 +289,7 @@ def _done_am_task_rows(
     done_am: list[tuple[Task, datetime]] = []
     for task in tasks:
         if (
-            getattr(task, "system_template_origin_id", None) is not None
+            bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None))
             or getattr(task, "system_task_slot_id", None) is not None
         ):
             continue

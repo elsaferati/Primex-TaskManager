@@ -7825,7 +7825,7 @@ export default function DepartmentKanban() {
                                       08:00
                                     </span>
                                   ) : null}
-                                  <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} />
+                                  <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} className="order-last ml-auto shrink-0" />
                                   <span className="min-w-0 flex-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                                     {(() => {
                                       const hasMarks = typeof visibleTitle === "string" && visibleTitle.includes("[[")
@@ -8147,7 +8147,7 @@ export default function DepartmentKanban() {
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>{renderAllTodayTaskTitle(task)}</span>
-                                <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} />
+                                <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} className="order-last ml-auto shrink-0" />
                               </div>
                             </TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{confirmerLabel}</TableCell>
@@ -8286,7 +8286,7 @@ export default function DepartmentKanban() {
                                 <span>
                                   {renderAllTodayTaskTitle(task)}
                                 </span>
-                                <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} />
+                                <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} className="order-last ml-auto shrink-0" />
                                 {task.plan_note_origin_id ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>PX JAV</Badge>
                                 ) : isGaTask(task) ? (
@@ -8418,7 +8418,7 @@ export default function DepartmentKanban() {
                                 <span>
                                   {renderAllTodayTaskTitle(task)}
                                 </span>
-                                <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} />
+                                <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} className="order-last ml-auto shrink-0" />
                                 {task.plan_note_origin_id ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>PX JAV</Badge>
                                 ) : isGaTask(task) ? (
@@ -8525,7 +8525,7 @@ export default function DepartmentKanban() {
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>{task.title || "-"}</span>
-                                <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} />
+                                <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} className="order-last ml-auto shrink-0" />
                                 <Badge className="text-[10px] px-1.5 py-0 border-slate-200 bg-slate-50 text-slate-700">SYS</Badge>
                               </div>
                             </TableCell>
@@ -9604,7 +9604,7 @@ export default function DepartmentKanban() {
                                             ? renderMarkedNoteContent(t.title, t.title)
                                             : t.title}
                                       </div>
-                                      <TaskOneHMarkerEditor taskId={t.id} marker={t.one_h_marker} />
+                                      <TaskOneHMarkerEditor taskId={t.id} marker={t.one_h_marker} className="order-last ml-auto shrink-0" />
                                     </div>
                                   </div>
                                 <div className="sm:px-3 flex items-start">
@@ -11294,7 +11294,7 @@ export default function DepartmentKanban() {
                                     08:00
                                   </span>
                                 ) : null}
-                                <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} />
+                                <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} className="order-last ml-auto shrink-0" />
                                 <span className="whitespace-pre-wrap break-words">
                                   {row.typeLabel === "PRJK" && row.projectTitle ? (
                                     <>
@@ -11416,7 +11416,7 @@ export default function DepartmentKanban() {
                                 08:00
                               </span>
                             ) : null}
-                            <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} />
+                            <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} className="order-last ml-auto shrink-0" />
                             <span className="whitespace-pre-wrap break-words">
                               {row.typeLabel === "PRJK" && row.projectTitle ? (
                                 <>

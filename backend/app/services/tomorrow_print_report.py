@@ -493,12 +493,23 @@ def _assignees(item: dict[str, Any]) -> list[str]:
     return result
 
 
+def _is_system_task_item(item: dict[str, Any]) -> bool:
+    return bool(
+        item.get("is_system_task")
+        or item.get("isSystemTask")
+        or item.get("system_template_origin_id")
+        or item.get("systemTemplateOriginId")
+        or item.get("system_task_slot_id")
+        or item.get("systemTaskSlotId")
+    )
+
+
 def _task_title(item: dict[str, Any], *, personal: bool) -> str:
     title = _report_text(_first_line(item.get("title")))
     if personal:
-        return normalize_email_task_title(title)
+        return normalize_email_task_title(title, is_system_task=_is_system_task_item(item))
     title = re.sub(r"^[A-Z]{1,4}(?:/[A-Z]{1,4})*:\s*", "", title)
-    title = normalize_email_task_title(title)
+    title = normalize_email_task_title(title, is_system_task=_is_system_task_item(item))
     owners = _assignees(item)
     return f"{'/'.join(owners)}: {title}" if owners else title
 
@@ -551,7 +562,7 @@ def _excel_task_title(
 
 def _is_eight_am_task(item: dict[str, Any]) -> bool:
     title = " ".join(str(item.get(key) or "") for key in ("title", "task_title"))
-    if title_has_eight_am_indicator(title):
+    if title_has_eight_am_indicator(title, is_system_task=_is_system_task_item(item)):
         return True
     raw_due_date = item.get("due_date") or item.get("dueDate")
     if isinstance(raw_due_date, datetime):
@@ -617,7 +628,7 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
     if marker:
         marker_style = (
             f"{badge_base}padding:3px 8px;background-color:#EFF6FF;border:1px solid #93C5FD;"
-            "color:#0F2A5F;font-size:14px;font-weight:900;"
+            "color:#0F2A5F;font-size:16px;font-weight:900;text-shadow:0 0 0 currentColor;"
         )
         top_badges.append(
             f'<span data-task-badge="one-h-marker" style="{marker_style}">{marker}</span>'

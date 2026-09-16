@@ -3919,7 +3919,7 @@ export default function GaKaNotesPage() {
                                 </span>
                                 {note.one_h_marker ? (
                                   <span
-                                    className="inline-flex min-h-6 items-center rounded-md border border-blue-300 bg-blue-50 px-2 text-base font-black text-[#0F2A5F]"
+                                    className="inline-flex min-h-6 items-center rounded-md border border-blue-300 bg-blue-50 px-2 text-lg font-black text-[#0F2A5F] [text-shadow:0_0_0_currentColor]"
                                     title="Note symbol"
                                   >
                                     {oneHMarkerLabel(note.one_h_marker)}

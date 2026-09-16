@@ -42,6 +42,7 @@ from app.services.meetings_report import (
     _postponed_tasks_for_m3_day,
     _leave_lines,
     _render_ascii_table_html,
+    _render_table_cell_html,
     _task_owners,
     _task_covers_report_day,
     _daily_baseline_task_ids,
@@ -391,6 +392,13 @@ class MeetingsReportAttachmentTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MeetingsReportAliasDedupTests(unittest.TestCase):
+    def test_task_symbol_is_emphasized_in_report_table_titles(self) -> None:
+        rendered = _render_table_cell_html("TITULLI", "! ER/GA/KA: ODOO EXPERIENCE")
+
+        self.assertIn('data-task-symbol="true"', rendered)
+        self.assertIn("font-weight:900", rendered)
+        self.assertIn(">!</strong>", rendered)
+
     def test_section_exports_keep_email_groups_tables_and_status_colors(self) -> None:
         sections = [
             {"title": "A JEMI BRENDA MESATARES ME PROJEKTE?", "body": "(Ploteso manualisht)"},

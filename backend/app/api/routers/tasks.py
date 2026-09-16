@@ -73,8 +73,12 @@ from app.services.task_title_rules import (
 
 router = APIRouter()
 
-def _validate_eight_am_one_h_slot(title: str, slot: str | None) -> None:
-    if title_has_eight_am_indicator(title) and slot not in (None, "10:00"):
+def _validate_eight_am_one_h_slot(
+    title: str, slot: str | None, *, is_system_task: bool = False
+) -> None:
+    if title_has_eight_am_indicator(
+        title, is_system_task=is_system_task
+    ) and slot not in (None, "10:00"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="08:00 tasks are 1H tasks and must use the 10:00 slot.",
@@ -363,7 +367,7 @@ def _supports_waiting_confirmation(
     is_personal: bool | None = None,
 ) -> bool:
     """Waiting Confirmation is for special and note-origin tasks, never system tasks."""
-    if getattr(task, "system_template_origin_id", None) is not None:
+    if bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None)):
         return False
     if getattr(task, "ga_note_origin_id", None) is not None or getattr(task, "plan_note_origin_id", None) is not None:
         return True
@@ -939,7 +943,10 @@ def _task_to_out(
 ) -> TaskOut:
     return TaskOut(
         id=task.id,
-        title=_normalize_email_task_title(task.title),
+        title=_normalize_email_task_title(
+            task.title,
+            is_system_task=(task.system_template_origin_id is not None or task.system_task_slot_id is not None),
+        ),
         description=task.description,
         internal_notes=task.internal_notes,
         skill_category=task.skill_category,
@@ -2764,11 +2771,14 @@ async def update_task(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> TaskOut:
-    if payload.title is not None:
-        payload.title = _normalize_email_task_title(payload.title)
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if payload.title is not None:
+        payload.title = _normalize_email_task_title(
+            payload.title,
+            is_system_task=(task.system_template_origin_id is not None or task.system_task_slot_id is not None),
+        )
     is_assigned_to_task = await _is_user_assigned_to_task(db, task, user.id)
 
     ensure_task_editor(user, task)
@@ -2802,14 +2812,14 @@ async def update_task(
     
     # For system task status updates, allow admins and managers to bypass department check
     is_system_task_status_update = (
-        task.system_template_origin_id is not None
+        (task.system_template_origin_id is not None or task.system_task_slot_id is not None)
         and payload.status is not None
         and user.role in (UserRole.ADMIN, UserRole.MANAGER)
     )
     # Department access check removed since can_edit above already verified
     # that user is admin, manager, creator, assignee, or same-department member
 
-    if payload.status is not None and task.system_template_origin_id is not None:
+    if payload.status is not None and (task.system_template_origin_id is not None or task.system_task_slot_id is not None):
         if is_assigned_to_task:
             pass
         elif user.role in (UserRole.ADMIN, UserRole.MANAGER):
@@ -3301,7 +3311,11 @@ async def update_task(
         task.is_r1 = payload.is_r1
 
     if task.is_1h_report or task.is_r1:
-        _validate_eight_am_one_h_slot(task.title, task.one_h_report_slot)
+        _validate_eight_am_one_h_slot(
+            task.title,
+            task.one_h_report_slot,
+            is_system_task=(task.system_template_origin_id is not None or task.system_task_slot_id is not None),
+        )
 
     project_for_control: Project | None = None
     if task.project_id is not None:
@@ -3798,7 +3812,11 @@ async def update_task_one_h_report_slot(
     next_slot = _normalize_one_h_report_slot(payload.one_h_report_slot)
     if payload.one_h_report_slot is not None and next_slot is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid 1H report slot")
-    _validate_eight_am_one_h_slot(task.title, next_slot)
+    _validate_eight_am_one_h_slot(
+        task.title,
+        next_slot,
+        is_system_task=(task.system_template_origin_id is not None or task.system_task_slot_id is not None),
+    )
 
     # Current-day slots roll over to the next working day at 15:59.
     slot_date = effective_slot_date(payload.report_date)
