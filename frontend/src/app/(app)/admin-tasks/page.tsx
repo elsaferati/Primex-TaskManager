@@ -25,6 +25,7 @@ import { getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
 import { buildRepeatedTaskFirstDateMap, isRepeatedTaskInstance } from "@/lib/repeated-task-visibility"
 import { internalMeetingLegendTone, isManualInternalMeeting, meetingLegendTone } from "@/lib/meeting-tone"
 import { Plus, Pencil, Trash2 } from "lucide-react"
+import { EmbeddedPrintReportGenerator } from "../tomorrow-print-report/page"
 import type {
   DailyReportResponse,
   DailyReportSystemOccurrence,
@@ -43,7 +44,7 @@ const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_LABEL = "None (all day)"
 const TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] as const
 const SYSTEM_STATUS_OPTIONS = ["OPEN", "DONE"] as const
-type AdminTasksSectionId = "all-tasks" | "common" | "ga-time"
+type AdminTasksSectionId = "all-tasks" | "common" | "ga-time" | "one-h-print"
 const NO_PROJECT_TYPES = [
   { id: "normal", label: "Normal", description: "General tasks without a project." },
   { id: "personal", label: "Personal", description: "Personal tasks tracked only in this view." },
@@ -2052,6 +2053,7 @@ export default function AdminTasksPage() {
     "all-tasks": false,
     common: false,
     "ga-time": false,
+    "one-h-print": false,
   })
 
   const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
@@ -7073,7 +7075,16 @@ export default function AdminTasksPage() {
           </div>
           </AdminTasksSection>
         </div>
-        <div className="print-section order-3" data-print-section="common">
+        <div className="order-3 print:hidden">
+          <AdminTasksSection
+            sectionId="one-h-print"
+            title="1H SHTYPI"
+            description="Generate the same Today or Tomorrow report used by 1H SHTYPI."
+          >
+            <EmbeddedPrintReportGenerator />
+          </AdminTasksSection>
+        </div>
+        <div className="print-section order-4" data-print-section="common">
           <div className="print-only week-table-view">
             <div className="print-page">
               <div className="print-header">
