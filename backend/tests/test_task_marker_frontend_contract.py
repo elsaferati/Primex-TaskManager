@@ -62,6 +62,34 @@ def test_m2_and_m3_symbols_are_available_in_shared_editors_and_legends():
         assert "M3" in source, relative_path
 
 
+def test_marker_dropdowns_and_legends_use_the_requested_order():
+    ordered_tokens = ("QUESTION", "EXCLAMATION", "M2", "M3", "GENT", "KA", "FLAG")
+    dropdown_paths = (
+        "frontend/src/components/task-one-h-marker-editor.tsx",
+        "frontend/src/app/(app)/common/page.tsx",
+        "frontend/src/app/(app)/ga-ka-notes/page.tsx",
+        "frontend/src/app/(app)/tomorrow-print-report/page.tsx",
+    )
+    for relative_path in dropdown_paths:
+        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        positions = [source.index(f'value: "{token}"') for token in ordered_tokens]
+        assert positions == sorted(positions), relative_path
+
+    legend = (ROOT / "frontend/src/components/task-one-h-marker-legend.tsx").read_text(encoding="utf-8")
+    legend_tokens = ('["?"', '["!"', '["M2"', '["M3"', '["GENT"', '["KA"', '["⚑"')
+    positions = [legend.index(token) for token in legend_tokens]
+    assert positions == sorted(positions)
+
+
+def test_department_my_view_daily_reports_show_the_symbol_legend():
+    for department in ("development", "graphic-design", "project-content-manager"):
+        source = (
+            ROOT
+            / f"frontend/src/app/(app)/departments/{department}/department-kanban.tsx"
+        ).read_text(encoding="utf-8")
+        assert "TaskOneHMarkerLegend" in source, department
+
+
 def test_report_generation_buttons_show_progress():
     report_pages = (
         "frontend/src/app/(app)/tomorrow-print-report/page.tsx",
