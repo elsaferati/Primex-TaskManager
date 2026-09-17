@@ -37,7 +37,7 @@ const taskMarkerOptions: Array<{ value: TaskMarker; label: string }> = [
   { value: "QUESTION", label: "?" },
   { value: "EXCLAMATION", label: "!" },
   { value: "CLIENT_URGENT", label: "!!!" },
-  { value: "MONITOR", label: "◉" },
+  { value: "MONITOR", label: "👁" },
   { value: "CLOSE", label: "X" },
   { value: "M2", label: "M2" },
   { value: "M3", label: "M3" },

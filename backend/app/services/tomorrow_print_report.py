@@ -55,17 +55,20 @@ TASK_ROWS = (
 MEETING_ROWS = (("external", "TAK EXT"), ("internal", "TAK INT"))
 VALID_1H_SLOTS = {"10:00", "11:00", "11:50", "14:20", "16:00"}
 EXCLUDED_1H_MISSING_INITIALS = {"GA", "KA", "HV", "HS"}
-ONE_H_BOARD_CHECKLIST = (
+ONE_H_BOARD_PRIMARY_CHECKLIST = (
     ("Slotin paraprak/aktual", ""),
     ("A ke filluar me slotin aktual?", ""),
     ("Nese jo, kur?", ""),
     ("A kryhet sot?", ""),
     ("A kryhet kete jave?", ""),
     ("A arrihet RLZ javor?", ""),
+)
+ONE_H_BOARD_FOLLOW_UP_CHECKLIST = (
     ("Done? / Strikes?", ""),
-    ("Notes te reja? Data? AM/PM? Kujt?", ""),
+    ("Notes te reja? Data? AM/PM? Kujt", ""),
     ("BZ Notes", "Secili i lexon vet para BZ me GA"),
 )
+ONE_H_BOARD_CHECKLIST = ONE_H_BOARD_PRIMARY_CHECKLIST + ONE_H_BOARD_FOLLOW_UP_CHECKLIST
 ONE_H_STAFF_CHECKLIST = (
     ("Hap doc dhe det", ""),
     ("Share screen side by side DET/REZULTATIN", ""),
@@ -103,7 +106,7 @@ def _day_specific_question_label(report_day: date | None) -> str:
         return "E ENJTE- PYETJET E TE ENJTES"
     if report_day is not None and report_day.weekday() == 4:
         return "E PREMTE - PYETJET E TE PREMTES"
-    return ""
+    return "PYETJET SHTESE: 0"
 
 # Gmail can remove style blocks from message bodies. Keep the styles that form
 # the report grid inline so the received email matches the preview.
@@ -242,7 +245,7 @@ def _task_marker_label(item: dict[str, Any]) -> str:
         "GENT": "GENT",
         "M2": "M2",
         "M3": "M3",
-        "MONITOR": "◉",
+        "MONITOR": "👁",
         "CLOSE": "X",
         "FLAG": "⚑",
     }.get(raw, "")
@@ -270,7 +273,7 @@ def _task_marker_legend_text() -> str:
         "LEGJENDA: ? - PYETJE/PAQARTESI / "
         "! - DYSHIM/ NUK KUPTOHET DET / "
         "!!! - KLIENT/URGJENT / "
-        "◉ - KËRKON MONITORIM NGA DIKUSH TJETËR / "
+        "👁 - KËRKON MONITORIM NGA DIKUSH TJETËR / "
         "X - MBYLL DETYREN / "
         "M2 - DOREZIM DERI NE PAUZE / "
         "M3 - DOREZIM DERI NE FUND TE DITES / "
@@ -561,10 +564,10 @@ def _task_title_html(value: str, *, red_background: bool) -> str:
 
 
 def _excel_task_title(
-    value: str, *, red_background: bool, marker_label: str = ""
+    value: str, *, red_background: bool, marker_label: str = "", marker_by_ga: bool = False
 ) -> str | CellRichText:
     """Color WFC and the task symbol independently in Excel rich text."""
-    marker_token = f"[{marker_label}]" if marker_label else ""
+    marker_token = (marker_label if marker_by_ga else f"[{marker_label}]") if marker_label else ""
     marker_re = re.compile(re.escape(marker_token)) if marker_token else None
     token_re = re.compile(
         f"(?:{WFC_TOKEN_RE.pattern})|(?:{marker_re.pattern})"
@@ -575,7 +578,7 @@ def _excel_task_title(
         return value
     default_font = InlineFont(color="FFFFFFFF" if red_background else "FF000000")
     wfc_font = InlineFont(color="FFFFFF00" if red_background else "FFDC2626", b=True)
-    marker_font = InlineFont(color="FF0F2A5F", b=True)
+    marker_font = InlineFont(color="FFDC2626", b=True)
     parts: list[str | TextBlock] = []
     cursor = 0
     for match in token_re.finditer(value):
@@ -676,7 +679,7 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
     if marker:
         marker_style = (
             f"{badge_base}padding:3px 8px;background-color:#EFF6FF;border:1px solid #93C5FD;"
-            "color:#0F2A5F;font-size:16px;font-weight:900;text-shadow:0 0 0 currentColor;"
+            "color:#DC2626;font-size:16px;font-weight:900;text-shadow:0 0 0 currentColor;"
         )
         top_badges.append(
             f'<span data-task-badge="one-h-marker" style="{marker_style}">{marker}</span>'
@@ -1087,30 +1090,40 @@ def _one_h_checklists_html(report_day: date | None = None) -> str:
         title: str, questions: tuple[tuple[str, str], ...], *, board: bool = False
     ) -> str:
         board_marker = ' data-board-checklist-columns="true"' if board else ""
-        return (
-            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
-            f'data-compact-checklist-row="true"{board_marker} style="width:100%;border-collapse:collapse;">'
-            '<tr><th style="background-color:#eef2ff;border-left:5px solid #2563eb;padding:10px 12px;'
-            f'font-family:Arial,sans-serif;font-size:14px;text-align:left;">{html.escape(title)}</th></tr>'
+        content_rows = [questions]
+        if board:
+            content_rows = [ONE_H_BOARD_FOLLOW_UP_CHECKLIST, ONE_H_BOARD_PRIMARY_CHECKLIST]
+        rendered_rows = "".join(
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"'
+            + (f' data-board-checklist-section="{"follow-up" if index == 0 else "primary"}"' if board else "")
+            + f' style="width:100%;border-collapse:collapse;{("margin:0 0 6px;" if board and index == 0 else "")}">'
             '<tr><td style="border:1px solid #64748b;padding:8px 10px;font-family:Arial,sans-serif;'
-            f'font-size:12px;line-height:1.45;">{question_text(questions, extra=False)}</td></tr></table>'
+            f'font-size:12px;line-height:1.45;">{question_text(row_questions, extra=False)}</td></tr></table>'
+            for index, row_questions in enumerate(content_rows)
+        )
+        return (
+            f'<div data-compact-checklist-row="true"{board_marker}>'
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+            'style="width:100%;border-collapse:collapse;">'
+            '<tr><th style="background-color:#eef2ff;border-left:5px solid #2563eb;padding:10px 12px;'
+            f'font-family:Arial,sans-serif;font-size:14px;text-align:left;">{html.escape(title)}</th></tr></table>'
+            f'{rendered_rows}</div>'
         )
 
     day_label = _day_specific_question_label(report_day)
     staff_extra = staff_questions[len(ONE_H_STAFF_CHECKLIST):]
     board_extra = board_questions[len(ONE_H_BOARD_CHECKLIST):]
-    weekday_block = (
-        '<div data-day-specific-question-label="true" style="font-family:Arial,sans-serif;'
-        'font-size:13px;font-weight:800;color:#b91c1c;margin:0 0 7px;padding:6px 10px;'
-        'background:#fff7f7;border-left:6px solid #dc2626;">'
-        f'{html.escape(day_label)}</div>'
+    extra_columns = (
         '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
         'data-day-specific-checklist-columns="true" style="width:100%;border-collapse:collapse;margin:0 0 10px;">'
         '<tr><td width="50%" valign="top" style="width:50%;padding:0 6px 0 0;vertical-align:top;">'
-        '<div style="background:#fff7f7;border:1px solid #dc2626;border-left:6px solid #dc2626;'
-        'padding:9px 10px;font-family:Arial,sans-serif;font-size:13px;line-height:1.45;color:#b91c1c;">'
-        f'{question_text(staff_extra, extra=True)}</div></td>'
-        '<td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
+        + (
+            '<div style="background:#fff7f7;border:1px solid #dc2626;border-left:6px solid #dc2626;'
+            'padding:9px 10px;font-family:Arial,sans-serif;font-size:13px;line-height:1.45;color:#b91c1c;">'
+            f'{question_text(staff_extra, extra=True)}</div>'
+            if staff_extra else ""
+        )
+        + '</td><td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
         + (
             '<div style="background:#fff7f7;border:1px solid #dc2626;border-left:6px solid #dc2626;'
             'padding:9px 10px;font-family:Arial,sans-serif;font-size:13px;line-height:1.45;color:#b91c1c;">'
@@ -1118,7 +1131,14 @@ def _one_h_checklists_html(report_day: date | None = None) -> str:
             if board_extra else ""
         )
         + '</td></tr></table>'
-        if day_label else ""
+        if staff_extra or board_extra else ""
+    )
+    weekday_block = (
+        '<div data-day-specific-question-label="true" style="font-family:Arial,sans-serif;'
+        'font-size:13px;font-weight:800;color:#b91c1c;margin:0 0 7px;padding:6px 10px;'
+        'background:#fff7f7;border-left:6px solid #dc2626;">'
+        f'{html.escape(day_label)}</div>'
+        + extra_columns
     )
     return (
         weekday_block
@@ -1142,7 +1162,7 @@ def _task_marker_legend_html() -> str:
         ("?", "PYETJE/PAQARTESI"),
         ("!", "DYSHIM/ NUK KUPTOHET DET"),
         ("!!!", "KLIENT/URGJENT"),
-        ("◉", "KËRKON MONITORIM NGA DIKUSH TJETËR"),
+        ("👁", "KËRKON MONITORIM NGA DIKUSH TJETËR"),
         ("X", "MBYLL DETYREN"),
         ("M2", "DOREZIM DERI NE PAUZE"),
         ("M3", "DOREZIM DERI NE FUND TE DITES"),
@@ -1734,25 +1754,26 @@ def _excel_table_attachment(
         staff_extra = staff_questions[len(ONE_H_STAFF_CHECKLIST):]
         board_extra = board_questions[len(ONE_H_BOARD_CHECKLIST):]
         day_label = _day_specific_question_label(checklist_date)
-        if day_label:
+        if staff_extra or board_extra:
             sheet.merge_cells(start_row=row_number, start_column=1, end_row=row_number, end_column=8)
             label_cell = sheet.cell(row_number, 1, day_label)
             label_cell.fill = weekday_fill
             label_cell.font = Font(color="B91C1C", bold=True, size=10)
             label_cell.alignment = Alignment(vertical="center")
             label_cell.border = border
+            row_number += 1
             for start_column, end_column, questions in (
                 (1, 4, staff_extra),
                 (5, 8, board_extra),
             ):
                 sheet.merge_cells(
-                    start_row=row_number + 1,
+                    start_row=row_number,
                     start_column=start_column,
-                    end_row=row_number + 1,
+                    end_row=row_number,
                     end_column=end_column,
                 )
                 extra_cell = sheet.cell(
-                    row_number + 1,
+                    row_number,
                     start_column,
                     "\n".join(
                         f"{index}. {question}" + (f" ({description})" if description else "")
@@ -1763,12 +1784,19 @@ def _excel_table_attachment(
                 extra_cell.font = Font(color="B91C1C", bold=True, size=10)
                 extra_cell.alignment = Alignment(vertical="center", wrap_text=True)
                 extra_cell.border = border
-            sheet.row_dimensions[row_number + 1].height = 48
-            row_number += 2
+            sheet.row_dimensions[row_number].height = 48
+            row_number += 1
+        else:
+            sheet.merge_cells(start_row=2, start_column=1, end_row=2, end_column=8)
+            label_cell = sheet.cell(2, 1, day_label)
+            label_cell.fill = weekday_fill
+            label_cell.font = Font(color="B91C1C", bold=True, size=10)
+            label_cell.alignment = Alignment(vertical="center")
+            label_cell.border = border
 
         for start_column, end_column, title, questions in (
             (1, 4, "STAFF - HAPAT PER 1H", staff_questions[:len(ONE_H_STAFF_CHECKLIST)]),
-            (5, 8, "PYETJET PER 1H - BORD", board_questions[:len(ONE_H_BOARD_CHECKLIST)]),
+            (5, 8, "PYETJET PER 1H - BORD", ONE_H_BOARD_FOLLOW_UP_CHECKLIST),
         ):
             sheet.merge_cells(start_row=row_number, start_column=start_column, end_row=row_number, end_column=end_column)
             title_cell = sheet.cell(row_number, start_column, title)
@@ -1793,8 +1821,24 @@ def _excel_table_attachment(
             question_cell.font = Font(bold=True, size=10)
             question_cell.alignment = Alignment(vertical="center", wrap_text=True)
             question_cell.border = border
-        sheet.row_dimensions[row_number + 1].height = 72
-        return row_number + 2
+        sheet.row_dimensions[row_number + 1].height = 48
+        sheet.merge_cells(start_row=row_number + 2, start_column=1, end_row=row_number + 2, end_column=4)
+        staff_spacer = sheet.cell(row_number + 2, 1, "")
+        staff_spacer.border = border
+        sheet.merge_cells(start_row=row_number + 2, start_column=5, end_row=row_number + 2, end_column=8)
+        board_primary_cell = sheet.cell(
+            row_number + 2,
+            5,
+            " / ".join(
+                f"{index}. {question}" + (f" ({description})" if description else "")
+                for index, (question, description) in enumerate(ONE_H_BOARD_PRIMARY_CHECKLIST, 1)
+            ),
+        )
+        board_primary_cell.font = Font(bold=True, size=10)
+        board_primary_cell.alignment = Alignment(vertical="center", wrap_text=True)
+        board_primary_cell.border = border
+        sheet.row_dimensions[row_number + 2].height = 60
+        return row_number + 3
 
     def write_marker_legend(row_number: int) -> int:
         sheet.merge_cells(start_row=row_number, start_column=1, end_row=row_number, end_column=8)
@@ -1924,6 +1968,7 @@ def _excel_table_attachment(
                             cell_value,
                             red_background=background == DEADLINE_COLOR,
                             marker_label=marker_label,
+                            marker_by_ga=_task_marker_was_set_by_ga(item),
                         )
                     cell = sheet.cell(row_number, item_index, cell_value)
                     if not meeting:
@@ -2130,6 +2175,7 @@ def _docx_table_attachment(
     comment_initials: list[str] | None = None,
     missing_one_h_by_slot: dict[str, list[str]] | None = None,
     report_day_label: str = "SOT",
+    checklist_date: date | None = None,
 ) -> tuple[str, bytes, str]:
     """Create a landscape Word report from the same rows and colours as HTML."""
     document = Document()
@@ -2197,7 +2243,7 @@ def _docx_table_attachment(
         parts = [
             (f"{number}. [{_task_period_label(item)}]", color),
             (" [WFC]" if _task_status(item) == "WAITING_CONFIRMATION" else "", color),
-            (f" {_task_marker_text_token(item)}" if marker else "", "0F2A5F"),
+            (f" {_task_marker_text_token(item)}" if marker else "", "DC2626"),
             (f" {_task_title(item, personal=personal)}", color),
         ]
         for value, run_color in parts:
@@ -2207,7 +2253,7 @@ def _docx_table_attachment(
             run.font.name = "Arial"
             run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:ascii"), "Arial")
             run.font.size = Pt(7.5)
-            run.bold = bold or run_color == "0F2A5F"
+            run.bold = bold or run_color == "DC2626"
             run.font.color.rgb = RGBColor.from_string(run_color.removeprefix("#"))
         marker_comment = _task_marker_comment(item)
         if marker_comment:
@@ -2281,6 +2327,33 @@ def _docx_table_attachment(
     title_run.font.name = "Arial"
     title_run.font.size = Pt(16)
     title_run.bold = True
+
+    board_questions, staff_questions = _one_h_checklists_for_day(checklist_date)
+    staff_extra = staff_questions[len(ONE_H_STAFF_CHECKLIST):]
+    board_extra = board_questions[len(ONE_H_BOARD_CHECKLIST):]
+    extra_status_cell = document.add_table(rows=1, cols=1).cell(0, 0)
+    shade(extra_status_cell, "FFF7F7")
+    set_cell(
+        extra_status_cell,
+        _day_specific_question_label(checklist_date),
+        bold=True,
+        color="B91C1C",
+    )
+    if staff_extra or board_extra:
+        extra_table = document.add_table(rows=1, cols=2)
+        extra_table.style = "Table Grid"
+        set_widths(extra_table, [5.05, 5.05])
+        for cell, questions in zip(extra_table.rows[0].cells, (staff_extra, board_extra)):
+            shade(cell, "FFF7F7")
+            set_cell(
+                cell,
+                "\n".join(
+                    f"{index}. {question}" + (f" ({description})" if description else "")
+                    for index, (question, description) in enumerate(questions, 1)
+                ),
+                bold=True,
+                color="B91C1C",
+            )
 
     for closing_section in closing_sections or []:
         heading(closing_section.title, size=11)
@@ -2437,6 +2510,7 @@ def _core_png_table_attachment(
     meeting_sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]] | None = None,
     report_day_label: str = "SOT",
     missing_one_h_by_slot: dict[str, list[str]] | None = None,
+    checklist_date: date | None = None,
 ) -> tuple[str, bytes, str]:
     """Render the Today SHTYPI task grid with the same task-state colours."""
     margin = 28
@@ -2488,7 +2562,16 @@ def _core_png_table_attachment(
                 )
             layout.append((label, chunk, personal, chunk_index, max(44, 12 + max(line_counts) * 21)))
 
-    header_top, header_height = 92, 40
+    board_questions, staff_questions = _one_h_checklists_for_day(checklist_date)
+    staff_extra = staff_questions[len(ONE_H_STAFF_CHECKLIST):]
+    board_extra = board_questions[len(ONE_H_BOARD_CHECKLIST):]
+    extra_lines = [
+        f"{index}. {question}" + (f" ({description})" if description else "")
+        for questions in (staff_extra, board_extra)
+        for index, (question, description) in enumerate(questions, 1)
+    ]
+    extra_status_height = 34 + (len(extra_lines) * 22 if extra_lines else 0)
+    header_top, header_height = 92 + extra_status_height, 40
     comment_columns = comment_initials or list(COMMENT_FIXED_INITIALS)
     comment_lines = _comment_write_in_lines(comment_columns)
     comment_title_height, comment_line_height = 30, 28
@@ -2560,6 +2643,21 @@ def _core_png_table_attachment(
 
     draw.text((margin, 22), f"1H SHTYPI {report_day_label} (Shiko simbolet) - {target_date:%d.%m.%Y}", fill="#111827", font=heading)
     draw.text((margin, 59), "Current Common View state used by the 1H report", fill="#475569", font=regular)
+
+    status_top = 88
+    draw.rectangle(
+        (margin, status_top, width - margin, status_top + extra_status_height - 4),
+        fill="#FFF7F7",
+        outline="#DC2626",
+    )
+    draw.text(
+        (margin + 10, status_top + 6),
+        _day_specific_question_label(checklist_date),
+        fill="#B91C1C",
+        font=bold,
+    )
+    for index, line in enumerate(extra_lines):
+        draw.text((margin + 10, status_top + 32 + index * 22), line, fill="#B91C1C", font=small_bold)
 
     y, x = header_top, margin
     task_table_top = y
@@ -2687,7 +2785,7 @@ def _core_png_table_attachment(
                         outline="#93C5FD",
                         width=1,
                     )
-                    draw.text((badge_left + 6, text_y + 3), marker_label, fill="#0F2A5F", font=small_bold)
+                    draw.text((badge_left + 6, text_y + 3), marker_label, fill="#DC2626", font=small_bold)
                 text_y += 28
                 value = f"{item_index + 1 + chunk_index * 6}. {_task_title(item, personal=personal)}"
                 marker_comment = _task_marker_comment(item)
@@ -2882,6 +2980,7 @@ def _png_table_attachment(
     closing_sections: list[ClosingSection] | None = None,
     missing_one_h_by_slot: dict[str, list[str]] | None = None,
     report_day_label: str = "SOT",
+    checklist_date: date | None = None,
 ) -> tuple[str, bytes, str]:
     """Render one PNG containing the closing tables and the canonical task grid."""
     filename, core_bytes, mime_type = _core_png_table_attachment(
@@ -2891,6 +2990,7 @@ def _png_table_attachment(
         meeting_sections,
         report_day_label,
         missing_one_h_by_slot,
+        checklist_date,
     )
     if not closing_sections:
         return filename, core_bytes, mime_type
@@ -3113,7 +3213,9 @@ async def _build_print_report(
         *plain_checklist_lines(staff_questions[:len(ONE_H_STAFF_CHECKLIST)]),
         "",
         "PYETJET PER 1H - BORD",
-        *plain_checklist_lines(board_questions[:len(ONE_H_BOARD_CHECKLIST)]),
+        *plain_checklist_lines(ONE_H_BOARD_FOLLOW_UP_CHECKLIST),
+        "",
+        *plain_checklist_lines(ONE_H_BOARD_PRIMARY_CHECKLIST),
         "",
     ]
     plain_rows.extend(_closing_sections_plain_text(closing_sections))
@@ -3122,7 +3224,7 @@ async def _build_print_report(
         "LEGJENDA: ? - PYETJE/PAQARTESI / "
         "! - DYSHIM/ NUK KUPTOHET DET / "
         "!!! - KLIENT/URGJENT / "
-        "◉ - KËRKON MONITORIM NGA DIKUSH TJETËR / X - MBYLL DETYREN / "
+        "👁 - KËRKON MONITORIM NGA DIKUSH TJETËR / X - MBYLL DETYREN / "
         "M2 - DOREZIM DERI NE PAUZE / M3 - DOREZIM DERI NE FUND TE DITES / "
         "GENT - PYETJE/SQARIM ME GENTIN / KA - PYETJE/SQARIM ME KA / ⚑ - PYETJE/SQARIM ME GA",
         "",
@@ -3188,6 +3290,7 @@ async def _build_print_report(
                     closing_sections,
                     missing_one_h_by_slot,
                     report_day_label,
+                    checklist_date,
                 )
             )
         if include_docx:
@@ -3200,6 +3303,7 @@ async def _build_print_report(
                     comment_initials=comment_initials,
                     missing_one_h_by_slot=missing_one_h_by_slot,
                     report_day_label=report_day_label,
+                    checklist_date=checklist_date,
                 )
             )
         report["attachments"] = attachments

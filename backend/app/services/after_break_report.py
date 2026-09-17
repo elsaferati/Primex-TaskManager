@@ -98,7 +98,8 @@ SECTION_TITLE_ALIASES = {
 PERSONAL_COLUMNS = [("NR", 2), ("WHO", 20), ("DEP", 5), ("AM/PM", 5), ("TITLE", 56)]
 SYSTEM_TASK_COLUMNS = [("NR", 2), ("WHO", 20), ("DEP", 5), ("AM/PM", 5), ("TITLE", 56), ("DATA", 10)]
 UNFINISHED_PRIORITY_COLUMNS = [
-    ("NR", 2), ("KUSH", 12), ("DEP", 5), ("LLOJI", 18), ("TITULLI", 45), ("AFATI", 16),
+    ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("STATUS", 12),
+    ("LLOJI", 18), ("TITULLI", 45), ("DUE DATE", 12),
 ]
 DONE_AM_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7), ("TITULLI", 58),
@@ -125,8 +126,14 @@ def is_generated_subject(subject: str | None, day: date) -> bool:
     }
 
 
-def _ascii_table(label: str, columns: list[tuple[str, int]], rows_values: list[list[str]]) -> list[str]:
-    if not rows_values:
+def _ascii_table(
+    label: str,
+    columns: list[tuple[str, int]],
+    rows_values: list[list[str]],
+    *,
+    show_empty_table: bool = False,
+) -> list[str]:
+    if not rows_values and not show_empty_table:
         return [f"{label}: 0"]
     border = "+" + "+".join("-" * (width + 2) for _, width in columns) + "+"
     rows = [
@@ -136,7 +143,11 @@ def _ascii_table(label: str, columns: list[tuple[str, int]], rows_values: list[l
         border,
     ]
     # Keep short identity columns on one line so one logical row is not split visually.
-    no_wrap = {"NR", "WHO", "KUSH", "FROM", "PER", "DISK", "TIME", "ORA", "KOHA", "DATA", "DATE", "AFATI", "LATE"}
+    no_wrap = {"NR", "WHO", "KUSH", "FROM", "PER", "DISK", "TIME", "ORA", "KOHA", "DATA", "DATE", "DUE DATE", "AFATI", "LATE"}
+    if not rows_values:
+        empty_values = ["-" for _ in columns]
+        empty_values[-2] = "(Asnje detyre)"
+        rows_values = [empty_values]
     for values in rows_values:
         wrapped = []
         for value, (name, width) in zip(values, columns):
@@ -163,16 +174,21 @@ def _note_text(value: str | None) -> str:
 
 def _task_covers_day(task: Task, day: date) -> bool:
     """Mirror the Common View date logic so the report shows the same rows as the P: lane."""
-    single_day_only = str(task.phase or "").upper() in {"CHECK", "CONTROL"}
-    start = _local_date(task.start_date)
-    due = _local_date(task.due_date)
+    single_day_only = str(getattr(task, "phase", None) or "").upper() in {"CHECK", "CONTROL"}
+    start = _local_date(getattr(task, "start_date", None))
+    due = _local_date(getattr(task, "due_date", None))
     if not single_day_only and start and due:
         if start > due:
             start, due = due, start
         if any(current.weekday() < 5 for current in _days_between(start, due)):
             return start <= day <= due and day.weekday() < 5
         return day == start
-    source = getattr(task, "planned_for", None) or task.due_date or task.start_date or task.created_at
+    source = (
+        getattr(task, "planned_for", None)
+        or getattr(task, "due_date", None)
+        or getattr(task, "start_date", None)
+        or getattr(task, "created_at", None)
+    )
     return _local_date(source) == day
 
 
@@ -202,13 +218,9 @@ def _unfinished_priority_task_rows(
     timezone: ZoneInfo,
     department_codes: dict[Any, str] | None = None,
 ) -> list[list[str]]:
-    """Unfinished AM or AM/PM deadline/08:00 tasks due today at the M2 cutoff."""
-    selected: list[tuple[Task, datetime, str]] = []
+    """AM/AM-PM TODO or in-progress work whose due date is the report day."""
+    selected: list[tuple[Task, datetime | None, str, str]] = []
     for task in tasks:
-        # Waiting-for-client work has its own DT WFE section below; do not
-        # duplicate it in the unfinished 08:00/deadline table.
-        if _normalize_report_status(task.status) == TaskStatus.WAITING_CLIENT.value:
-            continue
         due_at = _as_timezone(task.due_date, timezone)
         if due_at is None or due_at.date() != report_day:
             continue
@@ -226,8 +238,6 @@ def _unfinished_priority_task_rows(
             is_system_task=bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None)),
         )
         is_deadline = bool(task.is_deadline_important)
-        if not (is_eight_am or is_deadline):
-            continue
 
         created_at = _as_timezone(task.created_at, timezone)
         if created_at is not None and created_at > cutoff:
@@ -236,15 +246,21 @@ def _unfinished_priority_task_rows(
         completed_at = _as_timezone(task.completed_at, timezone)
         if completed_at is not None and completed_at <= cutoff:
             continue
-        if completed_at is None and str(task.status or "").upper() in {"DONE", "COMPLETED"}:
+
+        status = _normalize_report_status(task.status)
+        # A report regenerated after the cutoff may see a task that was still
+        # open at send time as DONE. Preserve it as in-progress for that cutoff.
+        if status == "DONE" and completed_at is not None and completed_at > cutoff:
+            status = "IN_PROGRESS"
+        if status not in {"TODO", "IN_PROGRESS"}:
             continue
 
         task_type = (
             "DEADLINE / 08:00"
             if is_deadline and is_eight_am
-            else ("DEADLINE" if is_deadline else "08:00")
+            else ("DEADLINE" if is_deadline else ("08:00" if is_eight_am else "DUE SOT"))
         )
-        selected.append((task, due_at, task_type))
+        selected.append((task, due_at, task_type, status))
 
     selected.sort(
         key=lambda item: (
@@ -257,11 +273,13 @@ def _unfinished_priority_task_rows(
             str(index),
             _task_owners(task, names, assignee_ids_by_task),
             _m3_department_label(task, department_codes),
+            str(getattr(task, "finish_period", None) or "").strip().upper(),
+            status,
             task_type,
             _display_title(task.title),
-            due_at.strftime("%d.%m.%Y %H:%M"),
+            "SOT",
         ]
-        for index, (task, due_at, task_type) in enumerate(selected, start=1)
+        for index, (task, due_at, task_type, status) in enumerate(selected, start=1)
     ]
 
 
@@ -341,6 +359,47 @@ def _waiting_client_task_rows(
             _display_title(task.title),
         ]
         for index, task in enumerate(waiting, start=1)
+    ]
+
+
+async def apply_unfinished_priority_task_table(
+    db: AsyncSession,
+    sections: list[dict[str, str]],
+    report_day: date,
+) -> list[dict[str, str]]:
+    """Refresh M2 section 7 from the task state at the configured send cutoff."""
+    tasks = (await db.execute(select(Task).where(Task.is_active.is_(True)))).scalars().all()
+    names = await _assignee_names(db, tasks)
+    assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
+    await apply_weekly_planner_task_order(db, tasks, assignee_ids_by_task)
+    department_codes = {
+        department_id: code
+        for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
+    }
+    cutoff, cutoff_timezone = await _after_break_cutoff(db, report_day)
+    rows = _unfinished_priority_task_rows(
+        tasks,
+        names,
+        assignee_ids_by_task,
+        report_day,
+        cutoff,
+        cutoff_timezone,
+        department_codes,
+    )
+    body = _normalize_section(
+        _ascii_table(
+            UNFINISHED_PRIORITY_TABLE_LABEL,
+            UNFINISHED_PRIORITY_COLUMNS,
+            rows,
+            show_empty_table=True,
+        )
+    )
+    return [
+        {**section, "body": body}
+        if section.get("section_key") == UNFINISHED_PRIORITY_TABLE_LABEL
+        or section.get("title") == UNFINISHED_PRIORITY_TABLE_LABEL
+        else section
+        for section in sections
     ]
 
 
@@ -633,12 +692,35 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
     normalized: list[dict[str, str]] = []
     for title in DISPLAY_SECTION_TITLES:
         if title in by_title:
-            normalized.append(by_title[title])
+            section = by_title[title]
+            if (
+                title == SECTION_TITLES[4]
+                and section.get("body", "").strip() == f"{UNFINISHED_PRIORITY_TABLE_LABEL}: 0"
+            ):
+                section = {
+                    **section,
+                    "body": _normalize_section(
+                        _ascii_table(
+                            UNFINISHED_PRIORITY_TABLE_LABEL,
+                            UNFINISHED_PRIORITY_COLUMNS,
+                            [],
+                            show_empty_table=True,
+                        )
+                    ),
+                }
+            normalized.append(section)
             continue
         elif title in MANUAL_SECTION_TITLES:
             body = "(Ploteso manualisht)"
         elif title == SECTION_TITLES[4]:
-            body = f"{UNFINISHED_PRIORITY_TABLE_LABEL}: 0"
+            body = _normalize_section(
+                _ascii_table(
+                    UNFINISHED_PRIORITY_TABLE_LABEL,
+                    UNFINISHED_PRIORITY_COLUMNS,
+                    [],
+                    show_empty_table=True,
+                )
+            )
         elif title == SECTION_TITLES[5]:
             body = f"{DONE_AM_TABLE_LABEL}: 0"
         elif title == SECTION_TITLES[12]:
@@ -881,6 +963,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
                     UNFINISHED_PRIORITY_TABLE_LABEL,
                     UNFINISHED_PRIORITY_COLUMNS,
                     unfinished_priority_rows,
+                    show_empty_table=True,
                 )
             ),
         },

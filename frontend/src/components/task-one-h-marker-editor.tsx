@@ -15,7 +15,7 @@ const MARKER_UPDATED_EVENT = "primeflow:task-marker-updated"
 const OPTIONS: Array<{ value: TaskMarker; label: string }> = [
   { value: "QUESTION", label: "?" }, { value: "EXCLAMATION", label: "!" },
   { value: "CLIENT_URGENT", label: "!!!" },
-  { value: "MONITOR", label: "◉" }, { value: "CLOSE", label: "X" },
+  { value: "MONITOR", label: "👁" }, { value: "CLOSE", label: "X" },
   { value: "M2", label: "M2" }, { value: "M3", label: "M3" },
   { value: "GENT", label: "GENT" }, { value: "KA", label: "KA" }, { value: "FLAG", label: "⚑" },
 ]

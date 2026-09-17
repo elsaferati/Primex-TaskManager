@@ -56,7 +56,7 @@ const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "QUESTION", label: "?" },
   { value: "EXCLAMATION", label: "!" },
   { value: "CLIENT_URGENT", label: "!!!" },
-  { value: "MONITOR", label: "◉" },
+  { value: "MONITOR", label: "👁" },
   { value: "CLOSE", label: "X" },
   { value: "M2", label: "M2" },
   { value: "M3", label: "M3" },
@@ -175,7 +175,8 @@ const ONE_H_PRINT_CHECKLISTS = [
       { question: "A kryhet sot?", description: "", isExtra: false },
       { question: "A kryhet kete jave?", description: "", isExtra: false },
       { question: "A arrihet RLZ javor?", description: "", isExtra: false },
-      { question: "Done? / Strikes? / Notes te reja? Data? AM/PM? Kujt?", description: "", isExtra: false },
+      { question: "Done? / Strikes?", description: "", isExtra: false },
+      { question: "Notes te reja? Data? AM/PM? Kujt", description: "", isExtra: false },
       { question: "BZ Notes", description: "Secili i lexon vet para BZ me GA", isExtra: false },
     ],
   },
@@ -196,6 +197,8 @@ const FRIDAY_ONE_H_STAFF_QUESTIONS = [
   { question: "Emails per missing info, per me vazhdu javen tjeter", description: "", isExtra: true },
 ] as const
 
+const BOARD_PRIMARY_QUESTION_COUNT = 6
+
 const oneHPrintChecklistsForDate = (reportDay: Date) =>
   ONE_H_PRINT_CHECKLISTS.map((checklist, index) => ({
     ...checklist,
@@ -214,7 +217,7 @@ const oneHDaySpecificQuestionLabel = (reportDay: Date) =>
     ? "E ENJTE- PYETJET E TE ENJTES"
     : reportDay.getDay() === 5
       ? "E PREMTE - PYETJET E TE PREMTES"
-      : ""
+      : "PYETJET SHTESE: 0"
 
 const getNextWorkingDay = (from: Date) => {
   const next = new Date(from.getFullYear(), from.getMonth(), from.getDate())
@@ -264,13 +267,18 @@ const oneHPrintChecklistsHtml = (reportDay: Date) =>
     ({ title, questions }) => {
       const regularQuestions = questions.filter(({ isExtra }) => !isExtra)
       const extraQuestions = questions.filter(({ isExtra }) => isExtra)
-      const regularContent = regularQuestions
-        .map(({ question, description }, index) =>
-          `<span class="one-h-print-checklist-item"><strong>${index + 1}. ${escapePrintHtml(question)}</strong>${
-            description ? ` <span class="one-h-print-checklist-description">(${escapePrintHtml(description)})</span>` : ""
-          }</span>`
-        )
-        .join('<span class="one-h-print-checklist-separator"> / </span>')
+      const regularGroups = title === "PYETJET PER 1H - BORD"
+        ? [regularQuestions.slice(BOARD_PRIMARY_QUESTION_COUNT), regularQuestions.slice(0, BOARD_PRIMARY_QUESTION_COUNT)]
+        : [regularQuestions]
+      const regularContent = regularGroups.map((group, groupIndex) =>
+        `<div class="one-h-print-checklist-items" data-board-checklist-section="${groupIndex === 0 && regularGroups.length > 1 ? "follow-up" : "primary"}">${group
+          .map(({ question, description }, index) =>
+            `<span class="one-h-print-checklist-item"><strong>${index + 1}. ${escapePrintHtml(question)}</strong>${
+              description ? ` <span class="one-h-print-checklist-description">(${escapePrintHtml(description)})</span>` : ""
+            }</span>`
+          )
+          .join('<span class="one-h-print-checklist-separator"> / </span>')}</div>`
+      ).join("")
       const extraContent = extraQuestions
         .map(({ question, description }, index) =>
           `<div class="one-h-print-checklist-extra-item"><strong>${index + 1}. ${escapePrintHtml(question)}</strong>${
@@ -278,13 +286,13 @@ const oneHPrintChecklistsHtml = (reportDay: Date) =>
           }</div>`
         )
         .join("")
-      const questionContent = extraContent + regularContent
-      return `<div class="one-h-print-checklist"><div class="one-h-print-checklist-title">${escapePrintHtml(title)}</div><div class="one-h-print-checklist-items">${questionContent}</div></div>`
+      const extraTable = extraContent ? `<div class="one-h-print-checklist-items">${extraContent}</div>` : ""
+      return `<div class="one-h-print-checklist"><div class="one-h-print-checklist-title">${escapePrintHtml(title)}</div>${extraTable}${regularContent}</div>`
     }
   ).join("")}</section>`
 
 const oneHMarkerLegendHtml = () =>
-  `<div class="one-h-marker-legend"><strong>LEGJENDA:</strong><span><b>?</b> - PYETJE/PAQARTESI</span><i aria-hidden="true">/</i><span><b>!</b> - DYSHIM/ NUK KUPTOHET DET</span><i aria-hidden="true">/</i><span><b>!!!</b> - KLIENT/URGJENT</span><i aria-hidden="true">/</i><span><b>◉</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span><i aria-hidden="true">/</i><span><b>X</b> - MBYLL DETYREN</span><i aria-hidden="true">/</i><span><b class="compact-marker">M2</b> - DOREZIM DERI NE PAUZE</span><i aria-hidden="true">/</i><span><b class="compact-marker">M3</b> - DOREZIM DERI NE FUND TE DITES</span><i aria-hidden="true">/</i><span><b class="compact-marker">GENT</b> - PYETJE/SQARIM ME GENTIN</span><i aria-hidden="true">/</i><span><b class="compact-marker">KA</b> - PYETJE/SQARIM ME KA</span><i aria-hidden="true">/</i><span><b>⚑</b> - PYETJE/SQARIM ME GA</span></div>`
+  `<div class="one-h-marker-legend"><strong>LEGJENDA:</strong><span><b>?</b> - PYETJE/PAQARTESI</span><i aria-hidden="true">/</i><span><b>!</b> - DYSHIM/ NUK KUPTOHET DET</span><i aria-hidden="true">/</i><span><b>!!!</b> - KLIENT/URGJENT</span><i aria-hidden="true">/</i><span><b>👁</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span><i aria-hidden="true">/</i><span><b>X</b> - MBYLL DETYREN</span><i aria-hidden="true">/</i><span><b class="compact-marker">M2</b> - DOREZIM DERI NE PAUZE</span><i aria-hidden="true">/</i><span><b class="compact-marker">M3</b> - DOREZIM DERI NE FUND TE DITES</span><i aria-hidden="true">/</i><span><b class="compact-marker">GENT</b> - PYETJE/SQARIM ME GENTIN</span><i aria-hidden="true">/</i><span><b class="compact-marker">KA</b> - PYETJE/SQARIM ME KA</span><i aria-hidden="true">/</i><span><b>⚑</b> - PYETJE/SQARIM ME GA</span></div>`
 
 function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
   return (
@@ -297,23 +305,30 @@ function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
       {oneHPrintChecklistsForDate(reportDay).map(({ title, questions }) => (
         <div key={title} className="one-h-print-checklist">
           <div className="one-h-print-checklist-title">{title}</div>
-          <div className="one-h-print-checklist-items">
+          {questions.some(({ isExtra }) => isExtra) ? <div className="one-h-print-checklist-items">
             {questions.filter(({ isExtra }) => isExtra).map(({ question, description }, index) => (
               <div key={question} className="one-h-print-checklist-extra-item">
                 <strong>{index + 1}. {question}</strong>
                 {description ? <span className="one-h-print-checklist-description"> ({description})</span> : null}
               </div>
             ))}
-            {questions.filter(({ isExtra }) => !isExtra).map(({ question, description }, index) => (
-              <React.Fragment key={question}>
-                {index > 0 ? <span className="one-h-print-checklist-separator"> / </span> : null}
-                <span className="one-h-print-checklist-item">
-                  <strong>{index + 1}. {question}</strong>
-                  {description ? <span className="one-h-print-checklist-description"> ({description})</span> : null}
-                </span>
-              </React.Fragment>
-            ))}
-          </div>
+          </div> : null}
+          {(title === "PYETJET PER 1H - BORD"
+            ? [questions.filter(({ isExtra }) => !isExtra).slice(BOARD_PRIMARY_QUESTION_COUNT), questions.filter(({ isExtra }) => !isExtra).slice(0, BOARD_PRIMARY_QUESTION_COUNT)]
+            : [questions.filter(({ isExtra }) => !isExtra)]
+          ).map((group, groupIndex) => (
+            <div key={`${title}-${groupIndex}`} className="one-h-print-checklist-items" data-board-checklist-section={title === "PYETJET PER 1H - BORD" && groupIndex === 0 ? "follow-up" : "primary"}>
+              {group.map(({ question, description }, index) => (
+                <React.Fragment key={question}>
+                  {index > 0 ? <span className="one-h-print-checklist-separator"> / </span> : null}
+                  <span className="one-h-print-checklist-item">
+                    <strong>{index + 1}. {question}</strong>
+                    {description ? <span className="one-h-print-checklist-description"> ({description})</span> : null}
+                  </span>
+                </React.Fragment>
+              ))}
+            </div>
+          ))}
         </div>
       ))}
     </section>
@@ -330,7 +345,7 @@ function OneHMarkerLegend() {
       <i aria-hidden="true">/</i>
       <span><b>!!!</b> - KLIENT/URGJENT</span>
       <i aria-hidden="true">/</i>
-      <span><b>◉</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span>
+      <span><b>👁</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span>
       <i aria-hidden="true">/</i>
       <span><b>X</b> - MBYLL DETYREN</span>
       <i aria-hidden="true">/</i>
@@ -5277,7 +5292,7 @@ export default function CommonViewPage() {
   .print-task-badge { display:inline-block; margin:0 4px 3px 0; padding:2px 5px; border-radius:999px; font-size:8px; font-weight:800; line-height:1; white-space:nowrap; }
   .print-task-badge.period { background:#e0f2fe; border:1px solid #bae6fd; color:#0369a1; }
   .print-task-badge.wfc { background:#ffedd5; border:1px solid #fb923c; color:#c2410c; }
-  .print-task-badge.marker { padding:2px 7px; background:#eff6ff; border:1px solid #93c5fd; color:#0f2a5f; font-size:14px; font-weight:900; text-shadow:0 0 0 currentColor; }
+  .print-task-badge.marker { padding:2px 7px; background:#eff6ff; border:1px solid #93c5fd; color:#dc2626; font-size:14px; font-weight:900; text-shadow:0 0 0 currentColor; }
 </style></head><body>
   <div class="print-header"><div></div><div class="print-title">1H SHTYPI — ${escapePrintHtml(reportDate)}</div><div class="print-date">${escapePrintHtml(formatDateTimeDMY(new Date()))}</div></div>
   ${oneHPrintChecklistsHtml(deliveryDate)}
@@ -11214,7 +11229,7 @@ export default function CommonViewPage() {
           border-radius: 999px;
           background: #eff6ff;
           border: 1px solid #93c5fd;
-          color: #0f2a5f;
+          color: #dc2626;
           font-weight: 900;
           font-size: 16px;
           text-shadow: 0 0 0 currentColor;
@@ -11227,7 +11242,7 @@ export default function CommonViewPage() {
           opacity: 0.65;
         }
         .oneh-marker-select option {
-          color: #0f2a5f;
+          color: #dc2626;
           font-weight: 900;
           font-size: 16px;
         }
@@ -12658,13 +12673,13 @@ export default function CommonViewPage() {
                 value={oneHMarkerFilter}
                 onChange={(event) => setOneHMarkerFilter(event.target.value as OneHMarkerFilter)}
                 aria-label="Filter tasks by symbol"
-                style={{ width: "125px", color: "#0F2A5F", fontWeight: 800 }}
+                style={{ width: "125px", color: ONE_H_MARKER_OPTIONS.some((option) => option.value === oneHMarkerFilter) ? "#DC2626" : "#0F2A5F", fontWeight: 800 }}
               >
                 <option value="all">All</option>
                 <option value="with">All with symbols</option>
                 <option value="none">No symbol</option>
                 {ONE_H_MARKER_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                  <option key={option.value} value={option.value} style={{ color: "#DC2626", fontWeight: 900 }}>{option.label}</option>
                 ))}
               </select>
             </label>

@@ -39,7 +39,7 @@ const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "QUESTION", label: "?" },
   { value: "EXCLAMATION", label: "!" },
   { value: "CLIENT_URGENT", label: "!!!" },
-  { value: "MONITOR", label: "◉" },
+  { value: "MONITOR", label: "👁" },
   { value: "CLOSE", label: "X" },
   { value: "M2", label: "M2" },
   { value: "M3", label: "M3" },
@@ -3323,7 +3323,7 @@ export default function GaKaNotesPage() {
              <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
              <span><b className="text-base font-black text-red-600">!!!</b> - KLIENT/URGJENT</span>
              <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
-             <span><b className="text-base font-black text-red-600">◉</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span>
+             <span><b className="text-base font-black text-red-600">👁</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span>
              <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
              <span><b className="text-base font-black text-red-600">X</b> - MBYLL DETYREN</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
@@ -3356,7 +3356,7 @@ export default function GaKaNotesPage() {
                       ["?", "PYETJE/PAQARTESI"],
                       ["!", "DYSHIM/ NUK KUPTOHET DET"],
                       ["!!!", "KLIENT/URGJENT"],
-                      ["◉", "KËRKON MONITORIM NGA DIKUSH TJETËR"],
+                      ["👁", "KËRKON MONITORIM NGA DIKUSH TJETËR"],
                       ["X", "MBYLL DETYREN"],
                       ["M2", "DOREZIM DERI NE PAUZE"],
                       ["M3", "DOREZIM DERI NE FUND TE DITES"],
@@ -3988,7 +3988,7 @@ export default function GaKaNotesPage() {
                                 {note.one_h_marker ? (
                                   <button
                                     type="button"
-                                    className="inline-flex min-h-6 shrink-0 items-center rounded-md border border-blue-300 bg-blue-50 px-2 text-lg font-black text-[#0F2A5F] [text-shadow:0_0_0_currentColor]"
+                                    className="inline-flex min-h-6 shrink-0 items-center rounded-md border border-blue-300 bg-blue-50 px-2 text-lg font-black text-red-600 [text-shadow:0_0_0_currentColor]"
                                     title={note.one_h_marker_comment || "Note symbol"}
                                     onClick={() => { if (note.one_h_marker_comment) window.prompt("Symbol comment (copy with Ctrl+C):", note.one_h_marker_comment) }}
                                   >

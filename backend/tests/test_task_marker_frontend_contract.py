@@ -72,11 +72,11 @@ def test_monitor_close_and_symbol_comments_are_available_everywhere():
     )
     for relative_path in paths:
         source = (ROOT / relative_path).read_text(encoding="utf-8")
-        assert "MONITOR" in source or "◉" in source, relative_path
+        assert "MONITOR" in source or "👁" in source, relative_path
         assert "CLOSE" in source or "MBYLL DETYREN" in source, relative_path
         assert "comment" in source.lower(), relative_path
     legend = (ROOT / "frontend/src/components/task-one-h-marker-legend.tsx").read_text(encoding="utf-8")
-    assert "◉" in legend
+    assert "👁" in legend
     assert "MBYLL DETYREN" in legend
 
 
