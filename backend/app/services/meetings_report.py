@@ -2881,7 +2881,7 @@ def _is_m3_start_due_table(caption: str) -> bool:
 
 
 def _split_leading_task_marker(value: str) -> tuple[str, str] | None:
-    match = re.match(r"^(⚑|GENT|KA|[!?])\s+(.+)$", str(value or ""))
+    match = re.match(r"^(\(?\s*(?:!!!|GENT|M2|M3|KA|👁|◉|⚑|X|!|\?)\s*\)?)\s+(.+)$", str(value or ""))
     return (match.group(1), match.group(2)) if match else None
 
 
@@ -2897,7 +2897,7 @@ def _render_table_cell_html(
             marker, task_title = marked
             return (
                 '<strong data-task-symbol="true" style="display:inline-block;margin-right:4px;'
-                'font-size:1.18em;font-weight:900;line-height:1;text-shadow:0 0 0 currentColor;">'
+                'color:#DC2626;font-size:1.18em;font-weight:900;line-height:1;text-shadow:0 0 0 currentColor;">'
                 f"{html.escape(marker)}</strong>{html.escape(task_title).replace(chr(10), '<br>')}"
             )
     if not _is_stacked_start_due_cell(header, value):
@@ -2974,7 +2974,7 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
             row_tone = "product-negative"
         # Deadline and 08:00 report tables have an explicit visual contract;
         # ordinary task statuses must not replace their red treatment/frame.
-        if tone in {"deadline", "eight-am"}:
+        if tone in {"deadline", "eight-am"} and type_index is None:
             row_tone = tone
         row_tones.append(row_tone)
         highlighted_meeting_rows.append(is_highlighted_meeting)
@@ -3478,7 +3478,7 @@ def _section_report_table_model(lines: list[str], tone: str = "") -> tuple[list[
                 row_tone = meeting_tone
         if products_index is not None and _has_negative_product_delta(row[products_index]):
             row_tone = "product-negative"
-        if tone in {"deadline", "eight-am"}:
+        if tone in {"deadline", "eight-am"} and type_index is None:
             row_tone = tone
         if status_index is not None:
             row = [cell for index, cell in enumerate(row) if index != status_index]
@@ -3819,7 +3819,9 @@ def render_section_report_docx(
                 marker, task_title = marked
                 cell.text = ""
                 paragraph = cell.paragraphs[0]
-                paragraph.add_run(f"{marker} ")
+                marker_run = paragraph.add_run(f"{marker} ")
+                marker_run.bold = True
+                marker_run.font.color.rgb = RGBColor.from_string("DC2626")
                 paragraph.add_run(task_title)
                 return
         if not _is_stacked_start_due_cell(header, value):
@@ -3916,6 +3918,7 @@ def render_section_report_docx(
                     marker_run = cell.paragraphs[0].runs[0]
                     marker_run.bold = True
                     marker_run.font.size = Pt(11)
+                    marker_run.font.color.rgb = RGBColor.from_string("DC2626")
                 set_width(cell, column_widths[column])
         document.add_paragraph().paragraph_format.space_after = Pt(1)
 
@@ -4145,7 +4148,17 @@ def render_section_report_png(
                         draw.text((x + 6, y + 34), due_line, fill=cell_color, font=cell_font)
                     else:
                         for line_index, text in enumerate(cells[index]):
-                            draw.text((x + 6, y + 5 + line_index * 22), text, fill=cell_color, font=cell_font)
+                            text_x = x + 6
+                            text_y = y + 5 + line_index * 22
+                            marked = _split_leading_task_marker(text) if header_name == "TITLE" and line_index == 0 else None
+                            if marked:
+                                marker, task_title = marked
+                                marker_text = f"{marker} "
+                                draw.text((text_x, text_y), marker_text, fill="#DC2626", font=bold)
+                                text_x += int(draw.textlength(marker_text, font=bold))
+                                draw.text((text_x, text_y), task_title, fill=cell_color, font=cell_font)
+                            else:
+                                draw.text((text_x, text_y), text, fill=cell_color, font=cell_font)
                     x = right
                 y += row_height
             y += 14

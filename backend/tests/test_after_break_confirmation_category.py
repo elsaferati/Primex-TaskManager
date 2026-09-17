@@ -6,6 +6,9 @@ from zoneinfo import ZoneInfo
 from app.services.after_break_report import (
     DISPLAY_SECTION_TITLES,
     SECTION_TITLES,
+    UNFINISHED_PRIORITY_COLUMNS,
+    UNFINISHED_PRIORITY_TABLE_LABEL,
+    _ascii_table,
     _blue_note_rows,
     _format_confirmation_questions,
     _done_am_task_rows,
@@ -162,29 +165,54 @@ class UnfinishedPriorityTaskRowsTests(unittest.TestCase):
             self._task("Done after 08:00", 2, completed_at=datetime(2026, 8, 24, 13, 21, tzinfo=timezone), status="DONE"),
             self._task("Due at eight without marker", 8),
             self._task("Not priority", 15),
+            self._task("In progress due today", 15, status="IN_PROGRESS"),
+            self._task("Waiting confirmation due today", 15, status="WAITING_CONFIRMATION"),
+            self._task("Waiting client due today", 15, status="WAITING_CLIENT"),
             self._task("Wrong day 08:00", 2, due_date=datetime(2026, 8, 25, 2, 0, tzinfo=timezone)),
+            self._task(
+                "Future deadline",
+                15,
+                is_deadline_important=True,
+                start_date=datetime(2026, 8, 24, 8, 0, tzinfo=timezone),
+                due_date=datetime(2026, 8, 25, 15, 0, tzinfo=timezone),
+            ),
             self._task("Created after 08:00", 2, created_at=datetime(2026, 8, 24, 13, 21, tzinfo=timezone)),
         ]
 
         rows = _unfinished_priority_task_rows(tasks, {}, {}, date(2026, 8, 24), cutoff, timezone)
-        rows_by_title = {row[4]: row for row in rows}
+        rows_by_title = {row[6]: row for row in rows}
 
         self.assertEqual(
             set(rows_by_title),
             {
                 "Open deadline", "Open AM/PM deadline", "Open 08:00 title", "08:00 Open EM title",
-                "Both 08:00", "Done after 08:00",
+                "Both 08:00", "Done after 08:00", "Due at eight without marker", "Not priority",
+                "In progress due today",
             },
         )
-        self.assertEqual(rows_by_title["Open deadline"][3], "DEADLINE")
-        self.assertEqual(rows_by_title["Open 08:00 title"][3], "08:00")
-        self.assertEqual(rows_by_title["08:00 Open EM title"][3], "08:00")
-        self.assertEqual(rows_by_title["Both 08:00"][3], "DEADLINE / 08:00")
-        self.assertEqual(rows_by_title["Done after 08:00"][5], "24.08.2026 02:00")
+        self.assertEqual(rows_by_title["Open deadline"][5], "DEADLINE")
+        self.assertEqual(rows_by_title["Open 08:00 title"][5], "08:00")
+        self.assertEqual(rows_by_title["08:00 Open EM title"][5], "08:00")
+        self.assertEqual(rows_by_title["Both 08:00"][5], "DEADLINE / 08:00")
+        self.assertEqual(rows_by_title["Due at eight without marker"][5], "DUE SOT")
+        self.assertEqual(rows_by_title["In progress due today"][4], "IN_PROGRESS")
+        self.assertEqual(rows_by_title["Done after 08:00"][4], "IN_PROGRESS")
+        self.assertEqual(rows_by_title["Done after 08:00"][7], "SOT")
         self.assertEqual(
-            [row[3] for row in rows],
-            ["08:00", "08:00", "08:00", "DEADLINE / 08:00", "DEADLINE", "DEADLINE"],
+            [row[5] for row in rows],
+            ["08:00", "08:00", "08:00", "DEADLINE / 08:00", "DEADLINE", "DEADLINE", "DUE SOT", "DUE SOT", "DUE SOT"],
         )
+
+    def test_empty_unfinished_priority_section_keeps_the_full_table(self) -> None:
+        rows = _ascii_table(
+            UNFINISHED_PRIORITY_TABLE_LABEL,
+            UNFINISHED_PRIORITY_COLUMNS,
+            [],
+            show_empty_table=True,
+        )
+
+        self.assertIn("DUE DATE", rows[2])
+        self.assertTrue(any("(Asnje detyre)" in row for row in rows))
 
     def test_08_rows_use_a_border_while_deadlines_keep_the_red_fill(self) -> None:
         html = _render_ascii_table_html(
@@ -200,6 +228,26 @@ class UnfinishedPriorityTaskRowsTests(unittest.TestCase):
         self.assertEqual(html.count('class="deadline"'), 1)
         self.assertLess(html.index("Eight task"), html.index("Both task"))
         self.assertLess(html.index("Both task"), html.index("Deadline task"))
+
+    def test_due_today_rows_keep_status_color_while_priority_rows_keep_priority_style(self) -> None:
+        lines = _ascii_table(
+            UNFINISHED_PRIORITY_TABLE_LABEL,
+            UNFINISHED_PRIORITY_COLUMNS,
+            [
+                ["1", "EF", "DEV", "AM", "TODO", "08:00", "Eight task", "SOT"],
+                ["2", "RA", "DEV", "AM/PM", "IN_PROGRESS", "DEADLINE", "Deadline task", "SOT"],
+                ["3", "DV", "PCM", "AM", "TODO", "DUE SOT", "Due task", "SOT"],
+            ],
+            show_empty_table=True,
+        )
+
+        html = _render_ascii_table_html(lines)
+
+        self.assertEqual(html.count('class="eight-am"'), 1)
+        self.assertEqual(html.count('class="deadline"'), 1)
+        self.assertEqual(html.count('class="todo"'), 1)
+        self.assertIn("DUE DATE", html)
+        self.assertIn("SOT", html)
 
 
 class DoneAmTaskRowsTests(unittest.TestCase):

@@ -70,7 +70,7 @@ ONE_H_MARKER_SYMBOLS = {
     "GENT": "GENT",
     "M2": "M2",
     "M3": "M3",
-    "MONITOR": "◉",
+    "MONITOR": "👁",
     "CLOSE": "X",
     "FLAG": "⚑",
 }
@@ -78,7 +78,7 @@ ONE_H_MARKER_LEGEND = (
     ("?", "PYETJE/PAQARTESI"),
     ("!", "DYSHIM/ NUK KUPTOHET DET"),
     ("!!!", "KLIENT/URGJENT"),
-    ("◉", "KËRKON MONITORIM NGA DIKUSH TJETËR"),
+    ("👁", "KËRKON MONITORIM NGA DIKUSH TJETËR"),
     ("X", "MBYLL DETYREN"),
     ("M2", "DOREZIM DERI NE PAUZE"),
     ("M3", "DOREZIM DERI NE FUND TE DITES"),
@@ -146,7 +146,8 @@ def _board_reminder_questions(report_day: date | None = None) -> list[ReportRemi
         ReportReminderQuestion(text="A kryhet sot?"),
         ReportReminderQuestion(text="A kryhet kete jave?"),
         ReportReminderQuestion(text="A arrihet RLZ javor?"),
-        ReportReminderQuestion(text="Done? / Strikes? / Notes te reja? Data? AM/PM? Kujt?"),
+        ReportReminderQuestion(text="Done? / Strikes?"),
+        ReportReminderQuestion(text="Notes te reja? Data? AM/PM? Kujt"),
         ReportReminderQuestion(text="BZ Notes", guidance="Secili i lexon vet para BZ me GA"),
     ]
     if report_day is not None and report_day.weekday() == 3:
@@ -166,12 +167,23 @@ def _partition_reminder_questions(
     )
 
 
+def _split_board_regular_questions(
+    questions: list[ReportReminderQuestion],
+) -> tuple[list[tuple[int, ReportReminderQuestion]], list[tuple[int, ReportReminderQuestion]]]:
+    """Return Board follow-up questions first and primary questions second."""
+    regular = [question for question in questions if not question.is_extra]
+    follow_up_texts = {"Done? / Strikes?", "Notes te reja? Data? AM/PM? Kujt", "BZ Notes"}
+    follow_up = [question for question in regular if question.text in follow_up_texts]
+    primary = [question for question in regular if question.text not in follow_up_texts]
+    return list(enumerate(follow_up, 1)), list(enumerate(primary, 1))
+
+
 def _day_specific_question_label(report_day: date | None) -> str:
     if report_day is not None and report_day.weekday() == 3:
         return "E ENJTE- PYETJET E TE ENJTES"
     if report_day is not None and report_day.weekday() == 4:
         return "E PREMTE - PYETJET E TE PREMTES"
-    return ""
+    return "PYETJET SHTESE: 0"
 
 
 class ReportDocument(BaseModel):
@@ -600,8 +612,9 @@ def render_plain_text(document: ReportDocument) -> str:
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
         (REMINDER_SECTION_TITLE, document.reminders),
     )
-    if any(question.is_extra for _, questions in reminder_groups for question in questions):
-        blocks.append(_day_specific_question_label(document.report_date))
+    has_extra_questions = any(question.is_extra for _, questions in reminder_groups for question in questions)
+    blocks.append(_day_specific_question_label(document.report_date))
+    if has_extra_questions:
         for reminder_title, questions in reminder_groups:
             extra_questions, _ = _partition_reminder_questions(questions)
             if not extra_questions:
@@ -616,11 +629,14 @@ def render_plain_text(document: ReportDocument) -> str:
         if not questions:
             continue
         reminder_lines = [reminder_title]
-        _, regular_questions = _partition_reminder_questions(questions)
-        for index, question in regular_questions:
-            reminder_lines.append(f"{index}. {question.text}")
-            if question.guidance:
-                reminder_lines.append(f"   {question.guidance}")
+        groups = _split_board_regular_questions(questions) if reminder_title == BOARD_REMINDER_SECTION_TITLE else (_partition_reminder_questions(questions)[1],)
+        for group_index, regular_questions in enumerate(groups):
+            if group_index:
+                reminder_lines.append("")
+            for index, question in regular_questions:
+                reminder_lines.append(f"{index}. {question.text}")
+                if question.guidance:
+                    reminder_lines.append(f"   {question.guidance}")
         blocks.append("\n".join(reminder_lines))
     for section in document.sections:
         lines = [section.title]
@@ -680,7 +696,7 @@ def render_html(
         return (
             '<span data-task-symbol="true" style="display:inline-block;min-width:22px;'
             'margin-right:7px;padding:2px 6px;border:1px solid #93c5fd;border-radius:5px;'
-            'background-color:#eff6ff;color:#0f2a5f;font-size:16px;font-weight:900;'
+            'background-color:#eff6ff;color:#dc2626;font-size:16px;font-weight:900;'
             f'line-height:1;text-align:center;">{html.escape(symbol)}</span>'
         )
 
@@ -796,6 +812,7 @@ def render_html(
         show_title: bool = True,
         show_extra: bool = True,
         show_regular: bool = True,
+        split_board: bool = False,
     ) -> str:
         def reminder_card(
             indexed_questions: list[tuple[int, ReportReminderQuestion]], *, extra: bool
@@ -839,10 +856,17 @@ def render_html(
             )
 
         extra_questions, regular_questions = _partition_reminder_questions(questions)
+        regular_cards = ""
+        if show_regular:
+            if split_board:
+                follow_up_questions, primary_questions = _split_board_regular_questions(questions)
+                regular_cards = reminder_card(follow_up_questions, extra=False) + reminder_card(primary_questions, extra=False)
+            else:
+                regular_cards = reminder_card(regular_questions, extra=False)
         return (
             (section_title_block(title) if show_title else "")
             + (reminder_card(extra_questions, extra=True) if show_extra else "")
-            + (reminder_card(regular_questions, extra=False) if show_regular else "")
+            + regular_cards
         )
 
     def board_reminder_column(
@@ -852,6 +876,7 @@ def render_html(
             '<div data-board-reminder-columns="true">'
             + reminder_column(
                 BOARD_REMINDER_SECTION_TITLE, questions, show_extra=show_extra
+                , split_board=True
             )
             + '</div>'
         )
@@ -900,18 +925,19 @@ def render_html(
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
     )
 
-    if any(
+    has_extra_questions = any(
         question.is_extra
         for _, questions in reminder_groups
         for question in questions
-    ):
-        body_chunks.append(
-            '<div data-day-specific-question-label="true" '
-            'style="font-family:Arial,sans-serif;font-size:13px;font-weight:800;'
-            'color:#b91c1c;margin:0 0 7px;padding:6px 10px;background:#fff7f7;'
-            'border-left:6px solid #dc2626;">'
-            f'{html.escape(_day_specific_question_label(document.report_date))}</div>'
-        )
+    )
+    body_chunks.append(
+        '<div data-day-specific-question-label="true" '
+        'style="font-family:Arial,sans-serif;font-size:13px;font-weight:800;'
+        'color:#b91c1c;margin:0 0 7px;padding:6px 10px;background:#fff7f7;'
+        'border-left:6px solid #dc2626;">'
+        f'{html.escape(_day_specific_question_label(document.report_date))}</div>'
+    )
+    if has_extra_questions:
         body_chunks.append(
             '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
             'data-day-specific-reminder-columns="true" style="width:100%;border-collapse:collapse;">'
@@ -1132,18 +1158,19 @@ def render_docx(document: ReportDocument) -> bytes:
                 )
         doc.add_paragraph().paragraph_format.space_after = Pt(0)
 
-    if any(
+    has_extra_questions = any(
         question.is_extra
         for questions in (document.board_reminders, document.reminders)
         for question in questions
-    ):
-        day_label = doc.add_paragraph()
-        day_label_run = day_label.add_run(
-            _day_specific_question_label(document.report_date)
-        )
-        day_label_run.bold = True
-        day_label_run.font.size = Pt(10)
-        day_label_run.font.color.rgb = RGBColor.from_string("B91C1C")
+    )
+    day_label = doc.add_paragraph()
+    day_label_run = day_label.add_run(
+        _day_specific_question_label(document.report_date)
+    )
+    day_label_run.bold = True
+    day_label_run.font.size = Pt(10)
+    day_label_run.font.color.rgb = RGBColor.from_string("B91C1C")
+    if has_extra_questions:
         for _, questions in reminder_groups:
             extra_questions, _ = _partition_reminder_questions(questions)
             add_reminder_card(extra_questions, extra=True)
@@ -1156,8 +1183,9 @@ def render_docx(document: ReportDocument) -> bytes:
         reminder_run = reminder_header.paragraphs[0].add_run(reminder_title)
         reminder_run.bold = True
         reminder_run.font.size = Pt(13)
-        _, regular_questions = _partition_reminder_questions(questions)
-        add_reminder_card(regular_questions, extra=False)
+        regular_groups = _split_board_regular_questions(questions) if reminder_title == BOARD_REMINDER_SECTION_TITLE else (_partition_reminder_questions(questions)[1],)
+        for regular_questions in regular_groups:
+            add_reminder_card(regular_questions, extra=False)
     for section in document.sections:
         doc.add_paragraph()
         section_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
@@ -1183,7 +1211,7 @@ def render_docx(document: ReportDocument) -> bytes:
                     marker_run = card_cell.paragraphs[0].add_run(f"{task.one_h_marker} ")
                     marker_run.bold = True
                     marker_run.font.size = Pt(12)
-                    marker_run.font.color.rgb = RGBColor.from_string("0F2A5F")
+                    marker_run.font.color.rgb = RGBColor.from_string("DC2626")
                 add_marked_runs(card_cell.paragraphs[0], heading or task.title, task.marked_title, bold=True, color="#050505")
                 for item in detail_lines:
                     detail = card_cell.add_paragraph()
@@ -1364,18 +1392,19 @@ def render_png(document: ReportDocument) -> bytes:
             line_y += 28
         y += card_height + 12
 
-    if any(
+    has_extra_questions = any(
         question.is_extra
         for _, questions in reminder_groups
         for question in questions
-    ):
-        draw.text(
-            (margin + 5, y),
-            _day_specific_question_label(document.report_date),
-            fill="#b91c1c",
-            font=bold,
-        )
-        y += 38
+    )
+    draw.text(
+        (margin + 5, y),
+        _day_specific_question_label(document.report_date),
+        fill="#b91c1c",
+        font=bold,
+    )
+    y += 38
+    if has_extra_questions:
         for _, questions in reminder_groups:
             extra_questions, _ = _partition_reminder_questions(questions)
             draw_reminder_card(extra_questions, extra=True)
@@ -1387,8 +1416,9 @@ def render_png(document: ReportDocument) -> bytes:
         draw.rectangle((margin, y, margin + 7, y + 48), fill="#2563eb")
         draw.text((margin + 18, y + 11), reminder_title, fill="#0f172a", font=bold)
         y += 62
-        _, regular_questions = _partition_reminder_questions(questions)
-        draw_reminder_card(regular_questions, extra=False)
+        regular_groups = _split_board_regular_questions(questions) if reminder_title == BOARD_REMINDER_SECTION_TITLE else (_partition_reminder_questions(questions)[1],)
+        for regular_questions in regular_groups:
+            draw_reminder_card(regular_questions, extra=False)
         y += 14
     for section in document.sections:
         draw.rectangle((margin, y, width - margin, y + 48), fill="#eef2ff")
@@ -1417,7 +1447,7 @@ def render_png(document: ReportDocument) -> bytes:
                 for title_index, line in enumerate(title_lines):
                     title_x = margin + 25
                     if title_index == 0 and task.one_h_marker:
-                        draw.text((title_x, line_y), task.one_h_marker, fill="#0f2a5f", font=bold)
+                        draw.text((title_x, line_y), task.one_h_marker, fill="#dc2626", font=bold)
                         marker_bounds = draw.textbbox((title_x, line_y), task.one_h_marker, font=bold)
                         title_x = marker_bounds[2] + 10
                     draw_line_with_marks(title_x, line_y, line, task.marked_title, bold, "#050505")

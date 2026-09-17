@@ -41,7 +41,7 @@ def test_task_marker_legend_explains_the_report_symbols() -> None:
     assert "?</strong> - PYETJE/PAQARTESI" in legend_html
     assert "!</strong> - DYSHIM/ NUK KUPTOHET DET" in legend_html
     assert "!!!</strong> - KLIENT/URGJENT" in legend_html
-    assert "◉</strong> - KËRKON" in legend_html
+    assert "👁</strong> - KËRKON" in legend_html
     assert "X</strong> - MBYLL DETYREN" in legend_html
     assert "⚑</strong> - PYETJE/SQARIM ME GA" in legend_html
     assert "KA</strong> - PYETJE/SQARIM ME KA" in legend_html
@@ -318,53 +318,56 @@ def test_excel_task_grid_has_thick_header_outer_frame_and_category_edges() -> No
     )
     sheet = load_workbook(BytesIO(content)).active
 
-    # Row 5 is the task header; rows 6-7 are one multi-line category; row 8 is the next category.
-    assert sheet["A5"].border.top.style == "medium"
-    assert sheet["A5"].border.bottom.style == "medium"
-    assert sheet["A5"].border.left.style == "medium"
-    assert sheet["H5"].border.right.style == "medium"
-    assert sheet["C6"].border.top.style == "medium"
-    assert sheet["C6"].border.bottom.style == "thin"
-    assert sheet["C7"].border.top.style == "thin"
-    assert sheet["C7"].border.bottom.style == "medium"
-    assert sheet["C8"].border.top.style == "medium"
+    # Row 6 is the task header; rows 7-8 are one multi-line category; row 9 is the next category.
+    assert sheet["A6"].border.top.style == "medium"
+    assert sheet["A6"].border.bottom.style == "medium"
+    assert sheet["A6"].border.left.style == "medium"
+    assert sheet["H6"].border.right.style == "medium"
+    assert sheet["C7"].border.top.style == "medium"
+    assert sheet["C7"].border.bottom.style == "thin"
+    assert sheet["C8"].border.top.style == "thin"
     assert sheet["C8"].border.bottom.style == "medium"
-    assert sheet["A8"].border.left.style == "medium"
-    assert sheet["H8"].border.right.style == "medium"
+    assert sheet["C9"].border.top.style == "medium"
+    assert sheet["C9"].border.bottom.style == "medium"
+    assert sheet["A9"].border.left.style == "medium"
+    assert sheet["H9"].border.right.style == "medium"
 
 
 def test_one_h_checklists_render_side_by_side_before_the_task_grid() -> None:
     checklists_html = _one_h_checklists_html()
 
+    assert checklists_html.count("PYETJET SHTESE: 0") == 1
+    assert 'data-day-specific-question-label="true"' in checklists_html
+    assert 'data-day-specific-checklist-columns="true"' not in checklists_html
     assert 'data-one-h-checklist-columns="true"' in checklists_html
     assert 'width="50%"' in checklists_html
     assert "PYETJET PER 1H - BORD" in checklists_html
     assert "STAFF - HAPAT PER 1H" in checklists_html
     assert "Slotin paraprak/aktual" in checklists_html
     assert 'data-board-checklist-columns="true"' in checklists_html
-    assert "7. Done? / Strikes?" in checklists_html
-    assert "8. Notes te reja? Data? AM/PM? Kujt?" in checklists_html
-    assert "9. BZ Notes" in checklists_html
+    assert "1. Done? / Strikes?" in checklists_html
+    assert "2. Notes te reja? Data? AM/PM? Kujt" in checklists_html
+    assert "3. BZ Notes" in checklists_html
     assert "Secili i lexon vet para BZ me GA" in checklists_html
     assert "Share screen side by side DET/REZULTATIN" in checklists_html
     assert "4. BZ Det nga Stafi per GA" in checklists_html
     assert "Komunikimi GA temas Det nga Stafi/ KA email" in checklists_html
     assert checklists_html.count('data-compact-checklist-row="true"') == 2
+    assert checklists_html.index('data-board-checklist-section="follow-up"') < checklists_html.index('data-board-checklist-section="primary"')
     assert 'font-size:20px;font-weight:900' in checklists_html
 
     _, content, _ = _excel_table_attachment([], [], date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
+    assert sheet["A2"].value == "PYETJET SHTESE: 0"
     assert sheet["A3"].value == "STAFF - HAPAT PER 1H"
     assert sheet["E3"].value == "PYETJET PER 1H - BORD"
     assert sheet["A4"].value.startswith("1. Hap doc dhe det / 2. Share screen")
     assert "4. BZ Det nga Stafi per GA (Komunikimi GA temas Det nga Stafi/ KA email)" in sheet["A4"].value
-    assert sheet["E4"].value.startswith("1. Slotin paraprak/aktual / 2. A ke filluar")
-    assert "7. Done? / Strikes?" in sheet["E4"].value
-    assert "8. Notes te reja? Data? AM/PM? Kujt?" in sheet["E4"].value
-    assert "9. BZ Notes (Secili i lexon vet para BZ me GA)" in sheet["E4"].value
-    assert sheet["B5"].value == "LLOJI DHE SLOTI"
-    assert sheet["C5"].value == "TASKS"
-    assert "C5:H5" in {str(cell_range) for cell_range in sheet.merged_cells.ranges}
+    assert sheet["E4"].value == "1. Done? / Strikes? / 2. Notes te reja? Data? AM/PM? Kujt / 3. BZ Notes (Secili i lexon vet para BZ me GA)"
+    assert sheet["E5"].value.startswith("1. Slotin paraprak/aktual / 2. A ke filluar")
+    assert sheet["B6"].value == "LLOJI DHE SLOTI"
+    assert sheet["C6"].value == "TASKS"
+    assert "C6:H6" in {str(cell_range) for cell_range in sheet.merged_cells.ranges}
 
 
 def test_thursday_checklists_add_week_closing_questions_in_html_and_excel() -> None:
@@ -393,7 +396,8 @@ def test_thursday_checklists_add_week_closing_questions_in_html_and_excel() -> N
     assert sheet["A5"].value == "STAFF - HAPAT PER 1H"
     assert sheet["E5"].value == "PYETJET PER 1H - BORD"
     assert sheet["A6"].value.startswith("1. Hap doc dhe det")
-    assert sheet["E6"].value.startswith("1. Slotin paraprak/aktual")
+    assert sheet["E6"].value == "1. Done? / Strikes? / 2. Notes te reja? Data? AM/PM? Kujt / 3. BZ Notes (Secili i lexon vet para BZ me GA)"
+    assert sheet["E7"].value.startswith("1. Slotin paraprak/aktual")
     assert sheet["A3"].font.color.rgb == "00B91C1C"
     assert sheet["A4"].fill.fgColor.rgb == "00FFF7F7"
 
@@ -415,6 +419,8 @@ def test_tomorrow_report_uses_target_day_for_thursday_questions() -> None:
     assert "Emails per missing info, per me vazhdu javen tjeter" in sent_wednesday["plain_text"]
     assert sent_wednesday["plain_text"].count("E ENJTE- PYETJET E TE ENJTES") == 1
     assert "Planifikimi javor short" not in sent_tuesday["html"]
+    assert "PYETJET SHTESE: 0" in sent_tuesday["html"]
+    assert "PYETJET SHTESE: 0" in sent_tuesday["plain_text"]
     thursday_excel = load_workbook(BytesIO(sent_wednesday["attachments"][0][1])).active
     thursday_excel_values = [
         str(cell.value or "") for row in thursday_excel.iter_rows() for cell in row
@@ -480,6 +486,8 @@ def test_tomorrow_report_sent_friday_does_not_use_friday_questions_for_monday() 
     assert report["target_date"] == "2026-09-07"
     assert "E PREMTE - PYETJET E TE PREMTES" not in report["html"]
     assert "Barazimi i planifikimit javor - next week" not in report["html"]
+    assert report["html"].count("PYETJET SHTESE: 0") == 1
+    assert report["plain_text"].count("PYETJET SHTESE: 0") == 1
 
 
 def test_today_report_puts_thursday_questions_under_the_weekday_title() -> None:
@@ -570,9 +578,9 @@ def test_task_cards_show_their_am_pm_period_in_email_and_excel() -> None:
         [("1H 10:00", tasks, False)], [], date(2026, 8, 14)
     )
     sheet = load_workbook(BytesIO(content)).active
-    assert "[AM]\n" in sheet["C6"].value
-    assert "[PM]\n" in sheet["D6"].value
-    assert "[AM/PM]\n" in sheet["E6"].value
+    assert "[AM]\n" in sheet["C7"].value
+    assert "[PM]\n" in sheet["D7"].value
+    assert "[AM/PM]\n" in sheet["E7"].value
 
     _, png, _ = _png_table_attachment(
         [("1H 10:00", tasks, False)], date(2026, 8, 14)
@@ -595,7 +603,7 @@ def test_one_h_marker_is_a_separate_badge_next_to_am_pm() -> None:
     assert '>(?)</span>' in report_html
     assert 'data-task-badge="finish-period"' in report_html
     assert 'data-task-badge="one-h-marker"' in report_html
-    assert ">◉</span>" in report_html
+    assert ">👁</span>" in report_html
     assert "KOMENT SIMBOLI:</strong> Check again with KA" in report_html
     assert 'data-task-marker-comment="Check again with KA"' in report_html
 
@@ -603,10 +611,10 @@ def test_one_h_marker_is_a_separate_badge_next_to_am_pm() -> None:
         [("1H 10:00", tasks, False)], [], date(2026, 8, 14)
     )
     sheet = load_workbook(BytesIO(content)).active
-    assert "[AM] [⚑]\n" in sheet["C6"].value
-    assert "[PM] [◉]\n" in sheet["D6"].value
-    assert "KOMENT SIMBOLI: Check again with KA" in sheet["D6"].value
-    assert "[AM] (?)\n" in sheet["E6"].value
+    assert "[AM] [⚑]\n" in sheet["C7"].value
+    assert "[PM] [👁]\n" in sheet["D7"].value
+    assert "KOMENT SIMBOLI: Check again with KA" in sheet["D7"].value
+    assert "[AM] (?)\n" in sheet["E7"].value
 
 
 def test_0800_and_am_pm_badges_keep_their_distinct_designs_together() -> None:
@@ -683,14 +691,14 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
 
     _, content, _ = _excel_table_attachment([("DEADLINE / 08:00", tasks, False)], [], date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
-    assert sheet["C6"].fill.fgColor.rgb.endswith("DC2626")
-    assert "[START: 13.08.2026]" in sheet["C6"].value
-    assert "[DUE: SOT]" in sheet["C6"].value
-    assert "[START: 14.08.2026]" in sheet["D6"].value
-    assert "[DUE: SOT]" in sheet["D6"].value
-    assert "DUE TODAY" not in sheet["C6"].value
-    assert "[08:00]" in sheet["D6"].value
-    assert sheet["D6"].border.left.color.rgb.endswith("DC2626")
+    assert sheet["C7"].fill.fgColor.rgb.endswith("DC2626")
+    assert "[START: 13.08.2026]" in sheet["C7"].value
+    assert "[DUE: SOT]" in sheet["C7"].value
+    assert "[START: 14.08.2026]" in sheet["D7"].value
+    assert "[DUE: SOT]" in sheet["D7"].value
+    assert "DUE TODAY" not in sheet["C7"].value
+    assert "[08:00]" in sheet["D7"].value
+    assert sheet["D7"].border.left.color.rgb.endswith("DC2626")
 
 
 def test_ga_personal_purple_overrides_deadline_red_in_email_and_excel() -> None:
@@ -716,8 +724,8 @@ def test_ga_personal_purple_overrides_deadline_red_in_email_and_excel() -> None:
 
     _, content, _ = _excel_table_attachment(rows, [], date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
-    assert sheet["C6"].fill.fgColor.rgb.endswith("D8B4FE")
-    assert sheet["C7"].fill.fgColor.rgb.endswith("DC2626")
+    assert sheet["C7"].fill.fgColor.rgb.endswith("D8B4FE")
+    assert sheet["C8"].fill.fgColor.rgb.endswith("DC2626")
 
 
 def test_done_task_stays_green_even_when_it_is_a_deadline() -> None:
@@ -741,7 +749,7 @@ def test_done_task_stays_green_even_when_it_is_a_deadline() -> None:
 
     _, content, _ = _excel_table_attachment(rows, [], date(2026, 9, 3))
     sheet = load_workbook(BytesIO(content), rich_text=True).active
-    assert sheet["C6"].fill.fgColor.rgb.endswith("C4FDC4")
+    assert sheet["C7"].fill.fgColor.rgb.endswith("C4FDC4")
 
 
 def test_wfc_title_token_is_red_and_uses_white_highlight_on_red_deadline_cards() -> None:
@@ -768,12 +776,12 @@ def test_wfc_title_token_is_red_and_uses_white_highlight_on_red_deadline_cards()
 
     _, content, _ = _excel_table_attachment(rows, [], date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content), rich_text=True).active
-    assert isinstance(sheet["C6"].value, CellRichText)
     assert isinstance(sheet["C7"].value, CellRichText)
     assert isinstance(sheet["C8"].value, CellRichText)
-    normal_wfc = next(block for block in sheet["C6"].value if getattr(block, "text", "") == "WFC")
-    red_card_wfc = next(block for block in sheet["C7"].value if getattr(block, "text", "") == "WFC")
-    purple_card_wfc = next(block for block in sheet["C8"].value if getattr(block, "text", "") == "WFC")
+    assert isinstance(sheet["C9"].value, CellRichText)
+    normal_wfc = next(block for block in sheet["C7"].value if getattr(block, "text", "") == "WFC")
+    red_card_wfc = next(block for block in sheet["C8"].value if getattr(block, "text", "") == "WFC")
+    purple_card_wfc = next(block for block in sheet["C9"].value if getattr(block, "text", "") == "WFC")
     assert normal_wfc.font.color.rgb == "FFDC2626"
     assert red_card_wfc.font.color.rgb == "FFFFFF00"
     assert purple_card_wfc.font.color.rgb == "FFDC2626"
@@ -1004,9 +1012,9 @@ def test_excel_status_colours_and_done_overrides_ga_personal() -> None:
     )
 
     sheet = load_workbook(BytesIO(content)).active
-    assert sheet["C6"].fill.fgColor.rgb.endswith("FFC4ED")
-    assert sheet["D6"].fill.fgColor.rgb.endswith("FFFF00")
-    assert sheet["C7"].fill.fgColor.rgb.endswith("C4FDC4")
+    assert sheet["C7"].fill.fgColor.rgb.endswith("FFC4ED")
+    assert sheet["D7"].fill.fgColor.rgb.endswith("FFFF00")
+    assert sheet["C8"].fill.fgColor.rgb.endswith("C4FDC4")
 
 
 def test_done_tasks_are_excluded_but_other_statuses_remain() -> None:
@@ -1108,10 +1116,10 @@ def test_non_daily_or_weekly_meetings_get_blue_borders_in_email_and_excel() -> N
 
     _, content, _ = _excel_table_attachment([], meetings, date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
-    assert sheet["C8"].border.left.color.rgb.endswith("2563EB")
-    assert sheet["C8"].fill.fgColor.rgb.endswith("DCECFF")
-    assert sheet["D8"].fill.fgColor.rgb.endswith("C9A98A")
-    assert sheet["D8"].border.left.style == "thin"
+    assert sheet["C9"].border.left.color.rgb.endswith("2563EB")
+    assert sheet["C9"].fill.fgColor.rgb.endswith("DCECFF")
+    assert sheet["D9"].fill.fgColor.rgb.endswith("C9A98A")
+    assert sheet["D9"].border.left.style == "thin"
 
 
 def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
@@ -1326,9 +1334,11 @@ def test_word_export_preserves_task_markers_and_unavailable_meeting_users() -> N
     task_cell = next(cell for cell in cells if "Task with marker" in cell.text)
     marker_run = next(run for paragraph in task_cell.paragraphs for run in paragraph.runs if "[?]" in run.text)
     assert marker_run.bold
-    assert str(marker_run.font.color.rgb) == "0F2A5F"
+    assert str(marker_run.font.color.rgb) == "DC2626"
     ga_task_cell = next(cell for cell in cells if "GA task with marker" in cell.text)
     assert "(?)" in ga_task_cell.text
+    ga_marker_run = next(run for paragraph in ga_task_cell.paragraphs for run in paragraph.runs if "(?)" in run.text)
+    assert str(ga_marker_run.font.color.rgb) == "DC2626"
     assert "[(?)]" not in ga_task_cell.text
     user_cell = next(cell for cell in cells if cell.text == "LH/DV")
     user_runs = {run.text: run for paragraph in user_cell.paragraphs for run in paragraph.runs}
