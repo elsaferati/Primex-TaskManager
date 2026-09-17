@@ -245,7 +245,7 @@ def build_realization_workbook(
             "MANAGER_CONFIRMED": "Konfirmuar nga menaxheri",
         }
         long_answer_keys = {
-            "task_status",
+            "plan_completed",
             "week_positive",
             "week_problems",
             "repeated_after_clarification",
@@ -804,7 +804,10 @@ def build_realization_workbook(
         end_row=question_row,
         end_column=4,
     )
-    guide.cell(question_row, 1, "15 PYETJET E RAPORTIT")
+    question_count = sum(
+        len(question_keys) for _section_title, question_keys in REPORT_QUESTION_SECTIONS
+    )
+    guide.cell(question_row, 1, f"{question_count} PYETJET E RAPORTIT")
     _header(guide.cell(question_row, 1))
     question_number = 1
     for section_title, question_keys in REPORT_QUESTION_SECTIONS:

@@ -105,7 +105,7 @@ DONE_AM_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7), ("TITULLI", 58),
 ]
 WAITING_CLIENT_COLUMNS = [
-    ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7), ("TITULLI", 58),
+    ("NR", 2), ("KUSH", 12), ("DEP", 5), ("START", 8), ("AM/PM", 5), ("LLOJI", 7), ("TITULLI", 58),
 ]
 PERSONAL_GROUPS = [
     ("TODO", "TODO"),
@@ -341,9 +341,24 @@ def _waiting_client_task_rows(
     tasks: list[Task],
     names: dict[Any, str],
     assignee_ids_by_task: dict[Any, set[Any]],
+    report_day: date,
     department_codes: dict[Any, str] | None = None,
 ) -> list[list[str]]:
     """All active tasks currently waiting for action or information from the client."""
+    week_start = report_day - timedelta(days=report_day.weekday())
+    previous_week_start = week_start - timedelta(days=7)
+    next_week_start = week_start + timedelta(days=7)
+
+    def start_week_label(task: Task) -> str:
+        start_day = _local_date(getattr(task, "start_date", None))
+        if start_day is None:
+            return "No start"
+        if week_start <= start_day < next_week_start:
+            return "This W"
+        if previous_week_start <= start_day < week_start:
+            return "Last W"
+        return "Older" if start_day < previous_week_start else "Future"
+
     waiting = [
         task for task in tasks
         if _normalize_report_status(task.status) == TaskStatus.WAITING_CLIENT.value
@@ -354,6 +369,7 @@ def _waiting_client_task_rows(
             str(index),
             _task_owners(task, names, assignee_ids_by_task),
             _m3_department_label(task, department_codes),
+            start_week_label(task),
             _m3_am_pm_label(task),
             _m3_task_type_label(task),
             _display_title(task.title),
@@ -404,18 +420,22 @@ async def apply_unfinished_priority_task_table(
 
 
 async def apply_waiting_client_task_table(
-    db: AsyncSession, sections: list[dict[str, str]]
+    db: AsyncSession, sections: list[dict[str, str]], report_day: date
 ) -> list[dict[str, str]]:
     """Refresh DT WFE in existing M2 drafts without replacing manual sections."""
     tasks = (await db.execute(select(Task).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
-    await apply_weekly_planner_task_order(db, tasks, assignee_ids_by_task)
     department_codes = {
         department_id: code
         for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
     }
-    rows = _waiting_client_task_rows(tasks, names, assignee_ids_by_task, department_codes)
+    # Use the exact same department mapping for both the visible DEP column and
+    # the Weekly Planner department/user ordering metadata.
+    await apply_weekly_planner_task_order(
+        db, tasks, assignee_ids_by_task, department_codes
+    )
+    rows = _waiting_client_task_rows(tasks, names, assignee_ids_by_task, report_day, department_codes)
     body = _normalize_section(
         _ascii_table(WAITING_CLIENT_TABLE_LABEL, WAITING_CLIENT_COLUMNS, rows)
     )
@@ -881,11 +901,13 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
     tasks = (await db.execute(select(Task).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
-    await apply_weekly_planner_task_order(db, tasks, assignee_ids_by_task)
     department_codes = {
         department_id: code
         for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
     }
+    await apply_weekly_planner_task_order(
+        db, tasks, assignee_ids_by_task, department_codes
+    )
     cutoff, cutoff_timezone = await _after_break_cutoff(db, report_day)
     unfinished_priority_rows = _unfinished_priority_task_rows(
         tasks,
@@ -908,6 +930,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         tasks,
         names,
         assignee_ids_by_task,
+        report_day,
         department_codes,
     )
     meetings = (await db.execute(select(Meeting).where(Meeting.starts_at.is_not(None)))).scalars().all()

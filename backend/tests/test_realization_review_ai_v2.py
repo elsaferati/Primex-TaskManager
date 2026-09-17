@@ -187,19 +187,22 @@ class TestManualQuestionPhilosophy(unittest.TestCase):
         decision = evaluate_policy(person["counters"], CRITERIA)
         return {row["key"]: row for row in build_questions(person, decision, build_albanian_narrative(person))}
 
-    def test_sections_two_and_three_are_manual(self) -> None:
+    def test_judgment_questions_are_manual_and_discipline_is_automatic(self) -> None:
         questions = self._questions()
         for key in {
             "requested_extra_tasks", "helped_colleague", "extra_engagement", "gave_proposal",
-            "respected_meetings", "closed_tasks", "frequent_delays", "unexpected_absences",
+            "week_positive", "week_problems", "affected_other_plan", "repeated_after_clarification",
         }:
             self.assertEqual(questions[key]["source_status"], "MANUAL_UNANSWERED", key)
             self.assertIn("auto_value", questions[key])
+        for key in {"respected_meetings", "closed_tasks", "frequent_delays", "unexpected_absences"}:
+            self.assertTrue(questions[key]["source_status"].startswith("AUTO"), key)
 
     def test_missing_mandatory_answers_blocks_completeness(self) -> None:
         missing = missing_manual_question_keys({"requested_extra_tasks", "helped_colleague"})
         self.assertEqual(len(missing), len(MANDATORY_MANUAL_QUESTION_KEYS) - 2)
-        self.assertIn("respected_meetings", missing)
+        self.assertNotIn("respected_meetings", missing)
+        self.assertEqual(len(MANDATORY_MANUAL_QUESTION_KEYS), 8)
 
     def test_append_only_answer_model_has_audit_chain(self) -> None:
         columns = RealizationQuestionAnswer.__table__.columns

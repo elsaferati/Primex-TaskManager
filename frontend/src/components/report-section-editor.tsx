@@ -88,6 +88,7 @@ function normalizeHeader(value: string) {
     TOTALI: "COUNT",
     LLOJI: "TYPE",
     KRIJUAR: "ADDED",
+    START: "ADDED",
     TIPI: "TYPE",
     PRODUKTE: "PRODUCTS",
   }
@@ -768,7 +769,7 @@ export function ReportSectionPreview({
                             <label className="flex flex-col gap-1 text-left">
                               <span>{trimTableCell(cell) || "-"}</span>
                               <select
-                                aria-label="Filter by created week"
+                                aria-label="Filter by week"
                                 value={createdWeekFilter}
                                 onChange={(event) => setCreatedWeekFilter(event.target.value as "all" | "this" | "last")}
                                 className="h-6 rounded border border-slate-300 bg-white px-1 text-[10px] font-medium text-slate-700"

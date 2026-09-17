@@ -50,7 +50,7 @@ function canCreatePimImageTestTaskForMeeting(meeting: Meeting): boolean {
 type PersonalTaskGroup = "GA" | "KA" | "GENT" | "PX"
 type PersonalRowId = "personalGA" | "personalKA" | "personalGENT" | "personalPX"
 type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
-type OneHMarkerFilter = "all" | "with" | "none" | OneHMarker
+type OneHMarkerFilter = "none" | OneHMarker
 
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "QUESTION", label: "?" },
@@ -64,6 +64,7 @@ const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "KA", label: "KA" },
   { value: "FLAG", label: "⚑" },
 ]
+const ONE_H_MARKER_VALUES = ONE_H_MARKER_OPTIONS.map((option) => option.value)
 
 const getOneHMarkerLabel = (value?: OneHMarker | null) =>
   ONE_H_MARKER_OPTIONS.find((option) => option.value === value)?.label || ""
@@ -1679,7 +1680,9 @@ export default function CommonViewPage() {
   const [typeFilters, setTypeFilters] = React.useState<Set<CommonType>>(new Set())
   const [typeMultiMode, setTypeMultiMode] = React.useState(false)
   const [colorFilter, setColorFilter] = React.useState<CommonColorFilter>("all")
-  const [oneHMarkerFilter, setOneHMarkerFilter] = React.useState<OneHMarkerFilter>("all")
+  const [oneHMarkerFilters, setOneHMarkerFilters] = React.useState<Set<OneHMarkerFilter>>(new Set())
+  const [oneHMarkerMenuOpen, setOneHMarkerMenuOpen] = React.useState(false)
+  const [kaGentFilterActive, setKaGentFilterActive] = React.useState(false)
   const [taskFocusFilter, setTaskFocusFilter] = React.useState<CommonTaskFocusFilter>("all")
   const [newTaskCategoryFilters, setNewTaskCategoryFilters] = React.useState<Set<CommonTaskNewCategory>>(
     () => new Set(COMMON_TASK_NEW_CATEGORY_OPTIONS.map((option) => option.value))
@@ -1699,6 +1702,7 @@ export default function CommonViewPage() {
   const singleDayPrintRef = React.useRef<HTMLDivElement | null>(null)
   const singleDayPrintContentRef = React.useRef<HTMLDivElement | null>(null)
   const commonUserFilterRef = React.useRef<HTMLDivElement | null>(null)
+  const oneHMarkerFilterRef = React.useRef<HTMLDivElement | null>(null)
   const [exportingMeetingExcel, setExportingMeetingExcel] = React.useState(false)
 
   // Modal state
@@ -4550,10 +4554,20 @@ export default function CommonViewPage() {
       colorFilter === "all" || getCommonTaskColor(entry) === colorFilter
     const matchesOneHMarkerFilter = (entry: FastTaskEntry) => {
       const marker = entry.oneHMarker || null
-      if (oneHMarkerFilter === "all") return true
-      if (oneHMarkerFilter === "with") return marker !== null
-      if (oneHMarkerFilter === "none") return marker === null
-      return marker === oneHMarkerFilter
+      if (oneHMarkerFilters.size === 0) return true
+      if (marker === null) return oneHMarkerFilters.has("none")
+      return oneHMarkerFilters.has(marker)
+    }
+    const matchesKaGentFilter = (entry: FastTaskEntry, includePersonalGroup = false) => {
+      if (!kaGentFilterActive) return true
+      if (entry.oneHMarker === "KA" || entry.oneHMarker === "GENT") return true
+      if (
+        isWaitingConfirmationTask(entry) &&
+        (entry.confirmationOwner === "KA" || entry.confirmationOwner === "GENT")
+      ) return true
+      if (!includePersonalGroup || entry.isPersonalTask === false) return false
+      const personalGroup = getPersonalTaskGroup(entry)
+      return personalGroup === "KA" || personalGroup === "GENT"
     }
     const matchesTaskFocusFilter = (entry: FastTaskEntry) => {
       if (taskFocusFilter === "new") {
@@ -4585,6 +4599,7 @@ export default function CommonViewPage() {
       .filter(matchesTaskFocusFilter)
       .filter(matchesColorFilter)
       .filter(matchesOneHMarkerFilter)
+      .filter((x) => matchesKaGentFilter(x))
       .map(narrowAssigneesForSelectedUser)
     const oneH = commonData.oneH
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -4593,6 +4608,7 @@ export default function CommonViewPage() {
       .filter(matchesTaskFocusFilter)
       .filter(matchesColorFilter)
       .filter(matchesOneHMarkerFilter)
+      .filter((x) => matchesKaGentFilter(x))
       .map(narrowAssigneesForSelectedUser)
     const personal = commonData.personal
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -4601,6 +4617,7 @@ export default function CommonViewPage() {
       .filter(matchesTaskFocusFilter)
       .filter(matchesColorFilter)
       .filter(matchesOneHMarkerFilter)
+      .filter((x) => matchesKaGentFilter(x, true))
       .map(narrowAssigneesForSelectedUser)
     const r1 = commonData.r1
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -4609,6 +4626,7 @@ export default function CommonViewPage() {
       .filter(matchesTaskFocusFilter)
       .filter(matchesColorFilter)
       .filter(matchesOneHMarkerFilter)
+      .filter((x) => matchesKaGentFilter(x))
       .map(narrowAssigneesForSelectedUser)
     const external = commonData.external
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -4703,7 +4721,7 @@ export default function CommonViewPage() {
       fullyCoveredDates,
       hiddenUsersByDate,
     }
-  }, [colorFilter, commonData, newTaskCategoryFilters, oneHMarkerFilter, selectedCommonUserId, selectedDates, taskFocusFilter, users, weekISOs])
+  }, [colorFilter, commonData, kaGentFilterActive, newTaskCategoryFilters, oneHMarkerFilters, selectedCommonUserId, selectedDates, taskFocusFilter, users, weekISOs])
 
   const allUsersLeaveByDate = React.useMemo(() => {
     const datesToUse = selectedDates.size ? Array.from(selectedDates) : weekISOs
@@ -4746,6 +4764,17 @@ export default function CommonViewPage() {
     if (selectedCommonUserId === "__all__") return "All users"
     return commonUserFilterOptions.find((option) => option.id === selectedCommonUserId)?.label || "All users"
   }, [commonUserFilterOptions, selectedCommonUserId])
+  const oneHMarkerFilterLabel = React.useMemo(() => {
+    if (oneHMarkerFilters.size === 0) return "All"
+    const hasEverySymbol = ONE_H_MARKER_VALUES.every((marker) => oneHMarkerFilters.has(marker))
+    if (hasEverySymbol && !oneHMarkerFilters.has("none")) return "All with symbols"
+    if (oneHMarkerFilters.size === 1) {
+      const selected = Array.from(oneHMarkerFilters)[0]
+      if (selected === "none") return "No symbol"
+      return getOneHMarkerLabel(selected)
+    }
+    return `${oneHMarkerFilters.size} selected`
+  }, [oneHMarkerFilters])
   const filteredDiamondItems = React.useMemo(
     () =>
       diamondItems.filter(
@@ -4882,6 +4911,27 @@ export default function CommonViewPage() {
         return s
       })
     }
+  }
+
+  const toggleOneHMarkerFilter = (filter: OneHMarkerFilter) => {
+    setOneHMarkerFilters((previous) => {
+      const next = new Set(previous)
+      if (next.has(filter)) next.delete(filter)
+      else next.add(filter)
+      return next
+    })
+  }
+
+  const toggleAllOneHMarkerFilters = () => {
+    setOneHMarkerFilters((previous) => {
+      const next = new Set(previous)
+      const hasEverySymbol = ONE_H_MARKER_VALUES.every((marker) => next.has(marker))
+      for (const marker of ONE_H_MARKER_VALUES) {
+        if (hasEverySymbol) next.delete(marker)
+        else next.add(marker)
+      }
+      return next
+    })
   }
 
   const selectAll = () => {
@@ -5681,7 +5731,7 @@ export default function CommonViewPage() {
       return []
     }
 
-    const visibleRows = swimlaneRows.filter((row) => showCard(row.id))
+    const visibleRows = swimlaneRows.filter((row) => showCard(row.id, row.items.length))
     const columns = ["NR", "LLOJI", ...exportISOs.map((iso) => `${getDayCode(fromISODate(iso))} = ${formatDateHuman(iso)}`)]
     const rows = visibleRows.map((row, rowIndex) => [
       String(rowIndex + 1),
@@ -6071,8 +6121,12 @@ export default function CommonViewPage() {
     }
   }
 
-  const showCard = (type: CommonType) => {
+  const showCard = (type: CommonType, itemCount?: number) => {
     if (taskFocusFilter !== "all" && !isFastTaskRowId(type)) return false
+    if (oneHMarkerFilters.size > 0 || kaGentFilterActive) {
+      if (!isFastTaskRowId(type)) return false
+      if (itemCount === 0) return false
+    }
     if (type === "waitingClient") {
       if (typeFilters.size === 0) return true
       return (["blocked", "oneH", "personal", "r1"] as CommonType[]).some((taskType) => typeFilters.has(taskType))
@@ -7427,6 +7481,24 @@ export default function CommonViewPage() {
   }, [commonUserMenuOpen])
 
   React.useEffect(() => {
+    if (!oneHMarkerMenuOpen) return
+    const handlePointerDown = (event: MouseEvent) => {
+      const menu = oneHMarkerFilterRef.current
+      if (!menu || menu.contains(event.target as Node)) return
+      setOneHMarkerMenuOpen(false)
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOneHMarkerMenuOpen(false)
+    }
+    document.addEventListener("mousedown", handlePointerDown)
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [oneHMarkerMenuOpen])
+
+  React.useEffect(() => {
     if (!externalMeetingPersonsOpen) return
     const closePersonsMenu = () => {
       setExternalMeetingPersonsOpen(false)
@@ -8502,7 +8574,7 @@ export default function CommonViewPage() {
   const renderSingleDayPrintRows = (rowIds: readonly CommonType[]) =>
     orderCommonRowsForPrint(
       swimlaneRows
-        .filter((row) => showCard(row.id))
+        .filter((row) => showCard(row.id, row.items.length))
         .filter((row) => rowIds.includes(row.id))
     )
       .flatMap((row, rowIndex) => {
@@ -11833,6 +11905,58 @@ export default function CommonViewPage() {
           background: #2563eb;
           color: #fff;
         }
+        .marker-filter-button {
+          width: 150px;
+          color: #0f2a5f;
+          font-weight: 800;
+        }
+        .marker-filter-menu {
+          left: auto;
+          right: 0;
+          width: 190px;
+          max-height: 390px;
+          overflow-y: auto;
+        }
+        .marker-filter-option {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          border-radius: 6px;
+          padding: 7px 8px;
+          color: #0f172a;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+        }
+        .marker-filter-option:hover {
+          background: #eff6ff;
+          color: #1d4ed8;
+        }
+        .marker-filter-option input {
+          width: 14px;
+          height: 14px;
+          margin: 0;
+          accent-color: #2563eb;
+        }
+        .marker-filter-footer {
+          position: sticky;
+          bottom: -4px;
+          display: flex;
+          justify-content: flex-end;
+          border-top: 1px solid #e2e8f0;
+          background: #fff;
+          padding: 6px 4px 2px;
+        }
+        .marker-filter-footer button {
+          border: 0;
+          border-radius: 6px;
+          background: #2563eb;
+          color: #fff;
+          padding: 5px 10px;
+          font-size: 11px;
+          font-weight: 800;
+          cursor: pointer;
+        }
         .toolbar-group .chip-row {
           margin-right: 0;
         }
@@ -12666,23 +12790,65 @@ export default function CommonViewPage() {
             </div>
           </div>
           <div className="toolbar-group">
-            <label className="flex items-center gap-2 text-sm font-semibold">
-              Symbol
-              <select
-                className="input"
-                value={oneHMarkerFilter}
-                onChange={(event) => setOneHMarkerFilter(event.target.value as OneHMarkerFilter)}
-                aria-label="Filter tasks by symbol"
-                style={{ width: "125px", color: ONE_H_MARKER_OPTIONS.some((option) => option.value === oneHMarkerFilter) ? "#DC2626" : "#0F2A5F", fontWeight: 800 }}
+            <div className="user-filter-control marker-filter-control" ref={oneHMarkerFilterRef}>
+              <span>Symbol</span>
+              <button
+                className={`user-filter-button marker-filter-button ${oneHMarkerMenuOpen ? "active" : ""}`}
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded={oneHMarkerMenuOpen}
+                onClick={() => setOneHMarkerMenuOpen((open) => !open)}
               >
-                <option value="all">All</option>
-                <option value="with">All with symbols</option>
-                <option value="none">No symbol</option>
-                {ONE_H_MARKER_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value} style={{ color: "#DC2626", fontWeight: 900 }}>{option.label}</option>
-                ))}
-              </select>
-            </label>
+                <span
+                  className={ONE_H_MARKER_OPTIONS.some((option) => option.label === oneHMarkerFilterLabel) ? "text-red-600" : undefined}
+                >
+                  {oneHMarkerFilterLabel}
+                </span>
+                <span className="user-filter-chevron" aria-hidden="true">v</span>
+              </button>
+              {oneHMarkerMenuOpen ? (
+                <div className="user-filter-menu marker-filter-menu" role="listbox" aria-multiselectable="true">
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={oneHMarkerFilters.size === 0}
+                    className={`user-filter-option ${oneHMarkerFilters.size === 0 ? "active" : ""}`}
+                    onClick={() => setOneHMarkerFilters(new Set())}
+                  >
+                    All
+                  </button>
+                  <label className="marker-filter-option">
+                    <input
+                      type="checkbox"
+                      checked={ONE_H_MARKER_VALUES.every((marker) => oneHMarkerFilters.has(marker))}
+                      onChange={toggleAllOneHMarkerFilters}
+                    />
+                    <span>All with symbols</span>
+                  </label>
+                  <label className="marker-filter-option">
+                    <input
+                      type="checkbox"
+                      checked={oneHMarkerFilters.has("none")}
+                      onChange={() => toggleOneHMarkerFilter("none")}
+                    />
+                    <span>No symbol</span>
+                  </label>
+                  {ONE_H_MARKER_OPTIONS.map((option) => (
+                    <label key={option.value} className="marker-filter-option">
+                      <input
+                        type="checkbox"
+                        checked={oneHMarkerFilters.has(option.value)}
+                        onChange={() => toggleOneHMarkerFilter(option.value)}
+                      />
+                      <span className="font-black text-red-600">{option.label}</span>
+                    </label>
+                  ))}
+                  <div className="marker-filter-footer">
+                    <button type="button" onClick={() => setOneHMarkerMenuOpen(false)}>Done</button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
           <div style={{ position: "relative", display: "inline-flex", alignItems: "center", width: "auto" }}>
             <input
@@ -12736,6 +12902,19 @@ export default function CommonViewPage() {
               <line x1="8" y1="2" x2="8" y2="6"></line>
               <line x1="3" y1="10" x2="21" y2="10"></line>
             </svg>
+          </div>
+          <div className="toolbar-group">
+            <div className="chip-row">
+              <button
+                className={`chip ${kaGentFilterActive ? "active" : ""}`}
+                type="button"
+                aria-pressed={kaGentFilterActive}
+                onClick={() => setKaGentFilterActive((active) => !active)}
+                title="Show personal, symbol and WFC tasks for both KA and GENT"
+              >
+                KA/GENT
+              </button>
+            </div>
           </div>
           <button className="btn-outline" type="button" onClick={selectAll}>
             All days
@@ -15245,7 +15424,7 @@ export default function CommonViewPage() {
                 </tr>
               </thead>
               <tbody>
-                {orderCommonRowsForPrint(swimlaneRows.filter((row) => showCard(row.id)))
+                {orderCommonRowsForPrint(swimlaneRows.filter((row) => showCard(row.id, row.items.length)))
                   .map((row, rowIndex) => {
                     const includeOneH = typeFilters.size === 0 || typeFilters.has("oneH")
                     const includeR1 = typeFilters.size === 0 || typeFilters.has("r1")
@@ -15888,7 +16067,7 @@ export default function CommonViewPage() {
           </div>
           <div className={`swimlane-board ${allDaysSelected ? "hide-when-all-days" : ""}`}>
             {swimlaneRows
-              .filter((row) => showCard(row.id))
+              .filter((row) => showCard(row.id, row.items.length))
               .map((row, rowIndex) => {
                 const cells = buildSwimlaneCells(row.items, swimlaneColumnCount)
                 const hasSubtext = Boolean(swimlaneHeaderSubtext[row.id])

@@ -628,7 +628,12 @@ export default function AfterBreakReportPage() {
                         onSave={applySectionEditor}
                       />
                     ) : (
-                      <ReportSectionPreview body={reportSectionPreviewText(section.body)} />
+                      <ReportSectionPreview
+                        body={reportSectionPreviewText(section.body)}
+                        filterCreatedWeek={[section.section_key, section.title].some(
+                          (value) => value?.trim().toUpperCase() === "DT WFE",
+                        )}
+                      />
                     )}
                   </div>
                 </React.Fragment>

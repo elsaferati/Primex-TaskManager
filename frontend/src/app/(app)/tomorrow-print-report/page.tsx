@@ -73,7 +73,15 @@ function formatDateTime(value?: string | null) {
   return value ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "-"
 }
 
-export function PrintReportPage({ today = false }: { today?: boolean }) {
+export function PrintReportPage({
+  today = false,
+  embedded = false,
+  modeControl,
+}: {
+  today?: boolean
+  embedded?: boolean
+  modeControl?: React.ReactNode
+}) {
   const API = today ? "/today-print-report" : "/tomorrow-print-report"
   const reportName = today ? "1H SHTYPI SOT (Shiko simbolet)" : "1H SHTYPI NESER (Shiko simbolet)"
   const { apiFetch, user, loading: authLoading } = useAuth()
@@ -100,6 +108,10 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
   }, [])
 
   const load = React.useCallback(async () => {
+    if (embedded) {
+      setLoading(false)
+      return
+    }
     if (!canManage) {
       setLoading(false)
       return
@@ -115,7 +127,7 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
     } finally {
       setLoading(false)
     }
-  }, [API, apiFetch, applySettings, canManage, reportName])
+  }, [API, apiFetch, applySettings, canManage, embedded, reportName])
 
   React.useEffect(() => { void load() }, [load])
 
@@ -412,6 +424,59 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
 
   if (!authLoading && !user) return <div className="rounded-lg border bg-white p-8">Sign in to access {reportName}.</div>
 
+  const markerFilterControl = (
+    <label className="flex items-center gap-2 rounded-md border border-blue-300 bg-blue-50 px-3 text-sm font-medium text-[#0F2A5F]">
+      Symbol
+      <select
+        className="h-8 bg-transparent text-sm font-black text-[#0F2A5F] outline-none"
+        value={markerFilter}
+        onChange={(event) => setMarkerFilter(event.target.value as TaskMarkerFilter)}
+        aria-label="Filter tasks by symbol"
+      >
+        <option value="all">All</option>
+        <option value="with">All with symbols</option>
+        <option value="none">No symbol</option>
+        {taskMarkerOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    </label>
+  )
+
+  const generatedPreview = preview ? (
+    <div ref={previewRef} className="space-y-3 rounded-lg border bg-white p-4">
+      <div>
+        <h2 className="font-semibold">Generated email</h2>
+        <p className="text-sm text-muted-foreground">{preview.subject}</p>
+      </div>
+      <iframe
+        ref={previewFrameRef}
+        onLoad={setupPreviewMarkerControls}
+        title={`${reportName} generated email`}
+        srcDoc={preview.html}
+        className="h-[620px] w-full rounded border bg-white"
+      />
+    </div>
+  ) : null
+
+  if (embedded) {
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {modeControl}
+          {preview ? markerFilterControl : null}
+          <Button
+            variant="outline"
+            onClick={() => void generateReport()}
+            disabled={!user || generatingAction !== null}
+          >
+            <RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} />
+            {generatingAction === "generate" ? "Generating..." : "Generate"}
+          </Button>
+        </div>
+        {generatedPreview}
+      </div>
+    )
+  }
+
   return (
     <div className="mx-auto max-w-[1400px] space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -420,20 +485,7 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
           <p className="text-sm text-muted-foreground">{today ? "Today's Common View tasks and meetings, sent at 09:00 Monday-Friday." : "Next-working-day tasks and meetings, sent as an HTML email."}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <label className="flex items-center gap-2 rounded-md border border-blue-300 bg-blue-50 px-3 text-sm font-medium text-[#0F2A5F]">
-            Symbol
-            <select
-              className="h-8 bg-transparent text-sm font-black text-[#0F2A5F] outline-none"
-              value={markerFilter}
-              onChange={(event) => setMarkerFilter(event.target.value as TaskMarkerFilter)}
-              aria-label="Filter tasks by symbol"
-            >
-              <option value="all">All</option>
-              <option value="with">All with symbols</option>
-              <option value="none">No symbol</option>
-              {taskMarkerOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </label>
+          {preview ? markerFilterControl : null}
           <Button variant="outline" onClick={() => void generateReport(true)} disabled={!user || generatingAction !== null}>{generatingAction === "preview" ? <RefreshCw className="animate-spin" /> : <Eye />} {generatingAction === "preview" ? "Generating..." : "Preview email"}</Button>
           <Button variant="outline" onClick={() => void generateReport()} disabled={!user || generatingAction !== null}><RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} /> {generatingAction === "generate" ? "Generating..." : "Generate"}</Button>
           {canManage ? <Button onClick={() => void sendNow()} disabled={sending}><Send /> {sending ? "Sending..." : "Send now"}</Button> : null}
@@ -468,9 +520,7 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
         </div>
       ) : canManage ? <div className="rounded-lg border bg-white p-8 text-sm text-muted-foreground">{loading ? "Loading settings..." : "No settings available."}</div> : null}
 
-      {preview ? (
-        <div ref={previewRef} className="space-y-3 rounded-lg border bg-white p-4"><div><h2 className="font-semibold">Generated email</h2><p className="text-sm text-muted-foreground">{preview.subject}</p></div><iframe ref={previewFrameRef} onLoad={setupPreviewMarkerControls} title={`${reportName} generated email`} srcDoc={preview.html} className="h-[620px] w-full rounded border bg-white" /></div>
-      ) : null}
+      {generatedPreview}
 
       {canManage ? <div className="rounded-lg border bg-white p-4">
         <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Delivery history</h2><p className="text-sm text-muted-foreground">Last 50 attempts</p></div><Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}><RefreshCw className={loading ? "animate-spin" : ""} /> Refresh</Button></div>
@@ -482,4 +532,40 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
 
 export default function TomorrowPrintReportPage() {
   return <PrintReportPage />
+}
+
+export function EmbeddedPrintReportGenerator() {
+  const [mode, setMode] = React.useState<"today" | "tomorrow">("today")
+
+  const modeControl = (
+    <div className="flex items-center gap-2" role="group" aria-label="Select 1H SHTYPI report day">
+      <Button
+        type="button"
+        size="sm"
+        variant={mode === "today" ? "default" : "outline"}
+        aria-pressed={mode === "today"}
+        onClick={() => setMode("today")}
+      >
+        Today
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant={mode === "tomorrow" ? "default" : "outline"}
+        aria-pressed={mode === "tomorrow"}
+        onClick={() => setMode("tomorrow")}
+      >
+        Tomorrow
+      </Button>
+    </div>
+  )
+
+  return (
+    <PrintReportPage
+      key={mode}
+      today={mode === "today"}
+      embedded
+      modeControl={modeControl}
+    />
+  )
 }

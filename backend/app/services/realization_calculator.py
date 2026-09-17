@@ -25,8 +25,11 @@ from app.services.realization_policy import evaluate_policy
 
 QUESTION_LABELS = {
     "task_status": "Statusi i detyrave",
-    "new_tasks_added": "Detyra të reja shtuar?",
-    "approved_postponement": "Shtyrje me konfirmim?",
+    "plan_completed": "A janë përfunduar detyrat sipas planit?",
+    "no_progress_tasks": "A ka detyra që nuk kanë pasur fare progres?",
+    "in_progress_tasks": "A ka detyra që mbesin në proces edhe për këtë javë?",
+    "new_tasks_added": "A i janë shtuar punëtorit detyra të reja gjatë javës?",
+    "approved_postponement": "A ka ndryshuar prioriteti ose ka shtyrje me konfirmim?",
     "requested_extra_tasks": "Kërkoi detyra shtesë?",
     "helped_colleague": "Ndihmoi koleg?",
     "extra_engagement": "Angazhim ekstra?",
@@ -46,7 +49,16 @@ QUESTION_LABELS = {
 }
 
 REPORT_QUESTION_SECTIONS = [
-    ("1. DETYRAT", ["task_status", "new_tasks_added", "approved_postponement"]),
+    (
+        "1. DETYRAT",
+        [
+            "plan_completed",
+            "no_progress_tasks",
+            "in_progress_tasks",
+            "new_tasks_added",
+            "approved_postponement",
+        ],
+    ),
     (
         "2. ANGAZHIMI",
         ["requested_extra_tasks", "helped_colleague", "extra_engagement", "gave_proposal"],
@@ -66,10 +78,6 @@ MANUAL_BOOLEAN_QUESTION_KEYS = {
     "helped_colleague",
     "extra_engagement",
     "gave_proposal",
-    "respected_meetings",
-    "closed_tasks",
-    "frequent_delays",
-    "unexpected_absences",
     "affected_other_plan",
     "repeated_after_clarification",
 }
@@ -149,19 +157,28 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
             and item.get("attribution") == "added_after_weekly_plan"
         }
     )
-    latest = max(timeline, key=lambda item: str(item.get("date") or ""), default={})
-
     def count(name: str, fallback: int = 0) -> int:
         return int(person.get(name, counters.get(name, fallback)) or 0)
 
-    weekly_planned = count("weekly_planned_count")
-    weekly_completed = count("weekly_completed_count")
-    weekly_added = count("weekly_additional_count")
-    weekly_fast = count("weekly_fast_task_count")
-    today_planned = count("daily_planned_count", int(latest.get("planned_count") or 0))
-    today_completed = count(
-        "daily_completed_count", int(latest.get("completed_count") or 0)
+    is_daily = bool(person.get("date"))
+    weekly_planned = count(
+        "daily_planned_count" if is_daily else "weekly_planned_count"
     )
+    weekly_completed = count(
+        "daily_completed_count" if is_daily else "weekly_completed_count"
+    )
+    weekly_added = (
+        int(counters.get("additional_count", 0) or 0)
+        if is_daily
+        else count("weekly_additional_count")
+    )
+    weekly_fast = (
+        int(counters.get("fast_task_count", 0) or 0)
+        if is_daily
+        else count("weekly_fast_task_count")
+    )
+    no_progress_count = int(counters.get("no_progress_count", 0) or 0)
+    in_progress_count = int(counters.get("in_progress_count", 0) or 0)
 
     timeline_attendance = [
         item
@@ -182,6 +199,7 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
     tardiness = sum(
         str(item.get("type") or "").upper() == "VONESE" for item in attendance
     )
+    delay_threshold = 1 if is_daily else 3
     raw_absences = [
         item
         for item in attendance
@@ -245,16 +263,25 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
 
     return [
         _question(
-            "task_status",
+            "plan_completed",
             {
-                "weekly_planned": weekly_planned,
-                "weekly_completed": weekly_completed,
-                "weekly_remaining": max(0, weekly_planned - weekly_completed),
-                "today_planned": today_planned,
-                "today_completed": today_completed,
-                "today_in_progress": counters.get("in_progress_count", 0),
-                "today_no_progress": counters.get("no_progress_count", 0),
+                "answer": weekly_planned > 0 and weekly_completed >= weekly_planned,
+                "planned": weekly_planned,
+                "completed": weekly_completed,
+                "remaining": max(0, weekly_planned - weekly_completed),
             },
+            evidence_ids=task_ids,
+            answer_type="object",
+        ),
+        _question(
+            "no_progress_tasks",
+            {"answer": no_progress_count > 0, "count": no_progress_count},
+            evidence_ids=task_ids,
+            answer_type="object",
+        ),
+        _question(
+            "in_progress_tasks",
+            {"answer": in_progress_count > 0, "count": in_progress_count},
             evidence_ids=task_ids,
             answer_type="object",
         ),
@@ -310,7 +337,7 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
             evidence_ids=ids(proposals),
             answer_type="boolean",
         ),
-        _manual_question(
+        _question(
             "respected_meetings",
             # No missed-meeting evidence means meetings were respected by
             # default — matching the manual process, which only flags this
@@ -320,7 +347,7 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
             explanation="Ka evidencë për takim të humbur." if missed_meetings else "",
             answer_type="boolean",
         ),
-        _manual_question(
+        _question(
             "closed_tasks",
             {
                 "all_closed": weekly_planned > 0 and weekly_completed >= weekly_planned,
@@ -332,13 +359,18 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
             explanation="Gjendje operative deri në snapshot-in e fundit, jo FINAL.",
             answer_type="object",
         ),
-        _manual_question(
+        _question(
             "frequent_delays",
-            {"attendance_tardiness": tardiness, "frequent": tardiness >= 3, "threshold": 3},
+            {
+                "answer": tardiness >= delay_threshold,
+                "attendance_tardiness": tardiness,
+                "frequent": tardiness >= delay_threshold,
+                "threshold": delay_threshold,
+            },
             evidence_ids=[str(item.get("id")) for item in attendance if item.get("id")],
             answer_type="object",
         ),
-        _manual_question(
+        _question(
             "unexpected_absences",
             len(unexcused_absences) if not raw_absences or verified_absences else None,
             source_status=(
@@ -440,25 +472,37 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
     ]
     repeated = [item for item in negative if item["category"] == "REPEATED_PROBLEM"]
     missed_meetings = [item for item in negative if item["category"] == "MISSED_MEETING"]
-    task_status = {
-        "planned": c.get("planned_count", 0),
-        "completed_on_time": c.get("completed_on_time_count", 0),
-        "completed_late": c.get("completed_late_count", 0),
-        "in_progress": c.get("in_progress_count", 0),
-        "pending": c.get("pending_confirmation_count", 0),
-        "no_progress": c.get("no_progress_count", 0),
-        "late_open": c.get("late_open_count", 0),
-        "approved_postponements": c.get("approved_postponement_count", 0),
-        "unapproved_postponements": c.get("unapproved_postponement_count", 0),
-    }
+    planned_count = int(c.get("planned_count", 0) or 0)
+    completed_count = int(c.get("completed_on_time_count", 0) or 0) + int(
+        c.get("completed_late_count", 0) or 0
+    )
+    no_progress_count = int(c.get("no_progress_count", 0) or 0)
+    in_progress_count = int(c.get("in_progress_count", 0) or 0)
     closed = (
         c.get("planned_count", 0) == c.get("accounted_planned_count", 0)
     )
     absence_needs_review = c.get("absence_needs_review_count", 0)
     questions = [
         _question(
-            "task_status",
-            task_status,
+            "plan_completed",
+            {
+                "answer": planned_count > 0 and completed_count >= planned_count,
+                "planned": planned_count,
+                "completed": completed_count,
+                "remaining": max(0, planned_count - completed_count),
+            },
+            evidence_ids=planned_task_ids,
+            answer_type="object",
+        ),
+        _question(
+            "no_progress_tasks",
+            {"answer": no_progress_count > 0, "count": no_progress_count},
+            evidence_ids=planned_task_ids,
+            answer_type="object",
+        ),
+        _question(
+            "in_progress_tasks",
+            {"answer": in_progress_count > 0, "count": in_progress_count},
             evidence_ids=planned_task_ids,
             answer_type="object",
         ),
@@ -513,7 +557,7 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
             evidence_ids=[str(item["id"]) for item in proposals],
             answer_type="boolean",
         ),
-        _manual_question(
+        _question(
             "respected_meetings",
             # No missed-meeting evidence means meetings were respected by
             # default — matching the manual process, which only flags this
@@ -532,22 +576,24 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
             ),
             answer_type="boolean",
         ),
-        _manual_question(
+        _question(
             "closed_tasks",
             closed,
             evidence_ids=planned_task_ids,
             answer_type="boolean",
         ),
-        _manual_question(
+        _question(
             "frequent_delays",
             {
+                "answer": int(c.get("tardiness_count", 0) or 0) >= 3,
                 "attendance_tardiness": c.get("tardiness_count", 0),
                 "tasks_completed_late": c.get("completed_late_count", 0),
                 "tasks_late_open": c.get("late_open_count", 0),
+                "threshold": 3,
             },
             answer_type="object",
         ),
-        _manual_question(
+        _question(
             "unexpected_absences",
             None if absence_needs_review else c.get("unexcused_absence_days", 0),
             source_status="AUTO_NEEDS_CONFIRMATION" if absence_needs_review else "AUTO",

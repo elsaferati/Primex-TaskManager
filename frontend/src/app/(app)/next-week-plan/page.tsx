@@ -2571,6 +2571,9 @@ export default function NextWeekPlanPage() {
                 Numbers
               </Button>
               <span className="text-xs text-muted-foreground">Select text for bold, or lines for bullets/numbers.</span>
+              <Button className="ml-auto h-8 sm:hidden" onClick={() => void createNote()} disabled={posting}>
+                {posting ? "Saving..." : "Save note"}
+              </Button>
             </div>
             <Textarea
               ref={contentTextareaRef}
@@ -2629,7 +2632,7 @@ export default function NextWeekPlanPage() {
               </div>
             )}
           </div>
-          <div className="flex justify-start">
+          <div className="hidden justify-start sm:flex">
             <Button onClick={() => void createNote()} disabled={posting}>
               {posting ? "Saving..." : "Save note"}
             </Button>

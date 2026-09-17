@@ -155,7 +155,7 @@ async def _draft_with_questions(db: AsyncSession, row: AfterBreakReportDraft) ->
     sections = normalize_after_break_report_sections(sections)
     sections = await apply_1h_confirmation_questions(db, sections)
     sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
-    sections = await apply_waiting_client_task_table(db, sections)
+    sections = await apply_waiting_client_task_table(db, sections, row.report_date)
     sections = await merge_common_view_manual_sections(db, sections, "after_break", row.sections)
     return _draft(row, sections)
 
@@ -331,7 +331,7 @@ async def preview_draft(
         db, normalize_after_break_report_sections(row.sections)
     )
     sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
-    sections = await apply_waiting_client_task_table(db, sections)
+    sections = await apply_waiting_client_task_table(db, sections, row.report_date)
     return {
         "plain_text": render_plain_text(row.subject, row.report_date, sections),
         "html": render_html(row.subject, row.report_date, sections),
@@ -354,7 +354,7 @@ async def send_draft(
         db, normalize_after_break_report_sections(row.sections)
     )
     sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
-    sections = await apply_waiting_client_task_table(db, sections)
+    sections = await apply_waiting_client_task_table(db, sections, row.report_date)
     row.sections = sections
     plain_text = render_plain_text(row.subject, row.report_date, sections)
     html_body = render_html(row.subject, row.report_date, sections)
