@@ -11,6 +11,7 @@ from app.models.ga_note import GaNote
 from app.models.plan_note import PlanNote
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
 from app.models.enums import TaskFinishPeriod, TaskPriority, TaskStatus
 from app.services.one_h_slots import current_effective_slot_date
@@ -394,6 +395,46 @@ def apply_ga_note_shared_task_fields(
         if changed:
             updated_count += 1
     return updated_count
+
+
+async def sync_ga_note_assignee_report_slots(
+    db: AsyncSession,
+    tasks: list[Task],
+    assignee_ids: list[uuid.UUID],
+) -> None:
+    """Save explicitly edited slots for the same workday used by report views."""
+    selected_assignees = set(assignee_ids)
+    selected_tasks = {
+        task.id: task
+        for task in tasks
+        if task.is_active and task.assigned_to in selected_assignees
+    }
+    if not selected_tasks:
+        return
+
+    slot_date = current_effective_slot_date()
+    existing_rows = (
+        await db.execute(
+            select(TaskOneHReportSlot).where(
+                TaskOneHReportSlot.task_id.in_(selected_tasks),
+                TaskOneHReportSlot.report_date == slot_date,
+            )
+        )
+    ).scalars().all()
+    existing_by_task = {row.task_id: row for row in existing_rows}
+    for task_id, task in selected_tasks.items():
+        existing = existing_by_task.get(task_id)
+        if task.one_h_report_slot is None:
+            if existing is not None:
+                await db.delete(existing)
+        elif existing is None:
+            db.add(TaskOneHReportSlot(
+                task_id=task_id,
+                report_date=slot_date,
+                one_h_report_slot=task.one_h_report_slot,
+            ))
+        else:
+            existing.one_h_report_slot = task.one_h_report_slot
 
 
 def apply_ga_note_assignee_execution_states(

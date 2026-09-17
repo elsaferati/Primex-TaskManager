@@ -88,6 +88,8 @@ class GaNoteTaskSummaryOut(BaseModel):
     is_deadline_important: bool
     is_bllok: bool
     is_1h_report: bool
+    one_h_report_slot: str | None = None
+    one_h_marker: str | None = None
     is_r1: bool
     is_personal: bool
     created_at: datetime

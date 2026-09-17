@@ -50,7 +50,11 @@ from pydantic import BaseModel, Field
 from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, notification_task_preview, publish_notification
 from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
-from app.services.task_daily_progress import upsert_explicit_task_daily_status, upsert_task_daily_progress
+from app.services.task_daily_progress import (
+    sync_task_daily_finish_period,
+    upsert_explicit_task_daily_status,
+    upsert_task_daily_progress,
+)
 from app.services.task_date_window import task_date_window_filter
 from app.services.task_marker import active_one_h_marker, sync_task_marker
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
@@ -1676,6 +1680,9 @@ async def list_task_summaries_by_ga_notes(
             Task.is_deadline_important,
             Task.is_bllok,
             Task.is_1h_report,
+            Task.one_h_report_slot,
+            Task.one_h_marker,
+            Task.one_h_marker_date,
             Task.is_r1,
             Task.is_personal,
             Task.created_at,
@@ -1703,6 +1710,8 @@ async def list_task_summaries_by_ga_notes(
             is_deadline_important=task.is_deadline_important,
             is_bllok=task.is_bllok,
             is_1h_report=task.is_1h_report,
+            one_h_report_slot=task.one_h_report_slot,
+            one_h_marker=active_one_h_marker(task),
             is_r1=task.is_r1,
             is_personal=task.is_personal,
             created_at=task.created_at,
@@ -3175,6 +3184,14 @@ async def update_task(
             task_id=task.id,
             day_date=today,
             status=task.status,
+            finish_period=progress_finish_period,
+            finish_period_is_set=finish_period_set,
+        )
+    elif finish_period_set:
+        await sync_task_daily_finish_period(
+            db,
+            task_id=task.id,
+            day_date=_realization_today(),
             finish_period=progress_finish_period,
         )
 

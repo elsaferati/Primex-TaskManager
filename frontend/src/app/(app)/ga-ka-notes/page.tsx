@@ -1222,6 +1222,7 @@ export default function GaKaNotesPage() {
   const [taskDateLeaveItems, setTaskDateLeaveItems] = React.useState<CommonLeaveItem[]>([])
   const [noteTaskInfo, setNoteTaskInfo] = React.useState<Map<string, NoteTaskInfo>>(new Map())
   const [editNoteId, setEditNoteId] = React.useState<string | null>(null)
+  const [loadingEditNote, setLoadingEditNote] = React.useState(false)
   const [editContent, setEditContent] = React.useState("")
   const [editNoteOneHMarker, setEditNoteOneHMarker] = React.useState<OneHMarker | typeof ONE_H_MARKER_NONE>(ONE_H_MARKER_NONE)
   const [editDoneRanges, setEditDoneRanges] = React.useState<DoneMarkRange[]>([])
@@ -1660,6 +1661,7 @@ export default function GaKaNotesPage() {
     } else {
       setNoteTaskInfo(map)
     }
+    return map
   }, [apiFetch])
 
   useVisibleRefresh(async () => {
@@ -2044,25 +2046,38 @@ export default function GaKaNotesPage() {
     }))
   }
 
-  const openEditNote = (note: GaNote) => {
-    const parsedContent = parseMarkedNoteContentWithProgress(note.content)
-    setEditNoteId(note.id)
-    editContentLatestRef.current = parsedContent.text
-    editDictationSelectionRef.current = {
-      start: parsedContent.text.length,
-      end: parsedContent.text.length,
+  const openEditNote = async (note: GaNote) => {
+    if (loadingEditNote) return
+    setLoadingEditNote(true)
+    try {
+      const freshTaskInfo = await loadNoteTasks([note.id])
+      if (!freshTaskInfo) {
+        toast.error("Failed to load the latest task changes. Please try again.")
+        return
+      }
+      const parsedContent = parseMarkedNoteContentWithProgress(note.content)
+      setEditNoteId(note.id)
+      editContentLatestRef.current = parsedContent.text
+      editDictationSelectionRef.current = {
+        start: parsedContent.text.length,
+        end: parsedContent.text.length,
+      }
+      setEditContent(parsedContent.text)
+      setEditNoteOneHMarker(note.one_h_marker ?? ONE_H_MARKER_NONE)
+      setEditDoneRanges(parsedContent.doneRanges)
+      setEditAddedRanges(parsedContent.addedRanges)
+      const taskInfo = freshTaskInfo.get(note.id)
+      setEditDescription(taskInfo?.description || "")
+      setEditTaskProjectId(taskInfo?.taskProjectId ?? note.project_id ?? "NONE")
+      setEditTaskAssigneeStates(taskInfo?.assigneeStates ?? {})
+      setEditTaskAssigneeIds(
+        Array.from(new Set((taskInfo?.assignees ?? []).map((assignee) => assignee.id).filter(Boolean)))
+      )
+    } catch {
+      toast.error("Failed to load the latest task changes. Please try again.")
+    } finally {
+      setLoadingEditNote(false)
     }
-    setEditContent(parsedContent.text)
-    setEditNoteOneHMarker(note.one_h_marker ?? ONE_H_MARKER_NONE)
-    setEditDoneRanges(parsedContent.doneRanges)
-    setEditAddedRanges(parsedContent.addedRanges)
-    const taskInfo = noteTaskInfo.get(note.id)
-    setEditDescription(taskInfo?.description || "")
-    setEditTaskProjectId(taskInfo?.taskProjectId ?? note.project_id ?? "NONE")
-    setEditTaskAssigneeStates(taskInfo?.assigneeStates ?? {})
-    setEditTaskAssigneeIds(
-      Array.from(new Set((taskInfo?.assignees ?? []).map((assignee) => assignee.id).filter(Boolean)))
-    )
   }
 
   const handleEditContentChange = (nextContent: string) => {
@@ -3855,7 +3870,7 @@ export default function GaKaNotesPage() {
                     const hasTask = Boolean(note.is_converted_to_task || taskInfo?.taskId)
                     const taskTypeLabels = taskInfo?.taskTypeLabels ?? []
                     const canAddAttachments = !isPxJavNote && !isClosed && aggregatedStatus !== "DONE"
-                    const editDisabled = isClosed
+                    const editDisabled = isClosed || loadingEditNote
                     const editDisabledTitle = isClosed
                       ? "Edit disabled when note is closed"
                       : "Edit"
@@ -3957,7 +3972,7 @@ export default function GaKaNotesPage() {
                                   className={`h-7 w-7 shrink-0 ${editDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
                                   aria-label={editDisabledTitle}
                                   title={editDisabledTitle}
-                                  onClick={() => !editDisabled && openEditNote(note)}
+                                  onClick={() => !editDisabled && void openEditNote(note)}
                                 >
                                   <Pencil className="h-4 w-4" />
                                 </Button>
@@ -4311,7 +4326,7 @@ export default function GaKaNotesPage() {
                               aria-label={editDisabledTitle}
                               title={editDisabledTitle}
                               className={`h-7 w-7 shrink-0 ${editDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
-                              onClick={() => !editDisabled && openEditNote(note)}
+                              onClick={() => !editDisabled && void openEditNote(note)}
                             >
                               <Pencil className="h-4 w-4" />
                             </Button>
