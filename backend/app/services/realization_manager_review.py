@@ -17,6 +17,7 @@ from app.models.user import User
 M3_MANAGER_REVIEW_SOURCE = "M3_MANAGER_REVIEW"
 M3_MANAGER_REVIEW_DIMENSIONS = {"PLANNING", "REALIZATION"}
 M3_MANAGER_REVIEW_MARKERS = {"POSITIVE", "NEGATIVE"}
+M3_MANAGER_REVIEW_RATINGS = {"GOOD": "Mirë", "VERY_GOOD": "Shumë mirë", "ACTION_REQUIRED": "Kërkon veprim", "BAD": "Keq"}
 
 
 def is_m3_manager_review(observation: RealizationObservation | dict) -> bool:
@@ -78,11 +79,15 @@ async def build_manager_review_response(
         dimension = review_dimension(row)
         if dimension is None or row.marker not in M3_MANAGER_REVIEW_MARKERS:
             return None
+        rating = (row.evidence_json or {}).get("review_rating")
+        if rating not in M3_MANAGER_REVIEW_RATINGS:
+            rating = "GOOD" if row.marker == "POSITIVE" else "ACTION_REQUIRED"
         return {
+            "rating": rating,
             "id": row.id,
             "dimension": dimension,
             "marker": row.marker,
-            "label": "Mirë" if row.marker == "POSITIVE" else "Duhet përmirësim",
+            "label": M3_MANAGER_REVIEW_RATINGS[rating],
             "comment": row.comment or "",
             "created_by_user_id": row.created_by,
             "created_by_name": names.get(row.created_by, "Përdorues i panjohur"),
@@ -117,7 +122,12 @@ async def upsert_manager_review(
     marker: str,
     comment: str,
     actor_id: uuid.UUID,
+    rating: str | None = None,
 ) -> RealizationObservation:
+    if rating is not None:
+        if rating not in M3_MANAGER_REVIEW_RATINGS:
+            raise ValueError("Invalid manager review rating")
+        marker = "POSITIVE" if rating in {"GOOD", "VERY_GOOD"} else "NEGATIVE"
     now = datetime.now(timezone.utc)
     rows = await manager_review_rows(
         db, period_id=period_id, user_id=user_id, for_update=True
@@ -140,6 +150,7 @@ async def upsert_manager_review(
         comment=comment.strip(),
         evidence_json={
             "review_dimension": dimension,
+            **({"review_rating": rating} if rating is not None else {}),
             "review_source": M3_MANAGER_REVIEW_SOURCE,
             **(
                 {"supersedes_observation_id": str(previous.id)}

@@ -23,6 +23,53 @@ from app.services.daily_realization_close_state import resolve_daily_close_state
 DAY = date(2026, 8, 26)
 
 
+@pytest.mark.parametrize("leave_day, expected_planned", [(DAY, 1), (date(2026, 8, 27), 3)])
+def test_live_daily_excludes_full_day_leave_and_people_without_tasks(monkeypatch, leave_day, expected_planned):
+    import asyncio
+    from app.models.user import User
+    from app.services import daily_realization_live as live_service
+    from app.services.realization_people import CommonLeaveCoverage
+
+    department_id = uuid.uuid4()
+    active, on_leave, empty = [
+        SimpleNamespace(id=uuid.uuid4(), full_name=name)
+        for name in ("Active", "PV", "Empty")
+    ]
+    users = [active, on_leave, empty]
+    def planned_task():
+        return {"task_id": str(uuid.uuid4()), "planned_due_date": DAY.isoformat()}
+    baseline = SimpleNamespace(id=uuid.uuid4(), captured_at=datetime(2026, 8, 26, tzinfo=timezone.utc), payload={"people": [
+        {"user_id": str(active.id), "tasks": [planned_task()]},
+        {"user_id": str(on_leave.id), "tasks": [planned_task(), planned_task()]},
+    ]})
+
+    async def load_people(*args, **kwargs):
+        return users, {on_leave.id: CommonLeaveCoverage(frozenset({leave_day}), ())}
+    monkeypatch.setattr(live_service, "load_active_users_and_common_leave", load_people)
+
+    class Result:
+        def __init__(self, rows=(), scalar=None):
+            self.rows, self.scalar = rows, scalar
+        def scalar_one_or_none(self): return self.scalar
+        def scalars(self): return self
+        def all(self): return self.rows
+
+    class Session:
+        async def execute(self, statement):
+            entity = statement.column_descriptions[0]["entity"]
+            if entity is DailyPlannerSnapshot: return Result(scalar=baseline)
+            if entity is User: return Result(users)
+            return Result()
+
+    result = asyncio.run(live_service.build_live_daily_realization(
+        Session(), department_id=department_id, day=DAY,
+    ))
+    expected_users = {str(active.id)} | ({str(on_leave.id)} if leave_day != DAY else set())
+    assert {person["user_id"] for person in result["people"]} == expected_users
+    assert result["metrics"]["original_planned_count"] == expected_planned
+    assert result["metrics"]["raw_plan_realization"] == 0
+
+
 def case(**overrides):
     values = dict(
         day=DAY, in_baseline=True, original_due_date=DAY, current_due_date=DAY,
@@ -69,8 +116,31 @@ def test_definition_of_done_metrics_keeps_extra_out_of_raw_denominator():
     assert metrics["postponed_count"] == 1
     assert metrics["no_progress_count"] == 1
     assert metrics["additional_completed_count"] == 2
-    assert metrics["raw_plan_realization"] == 62.5
+    assert metrics["raw_plan_realization"] == 87.5
     assert metrics["total_completed_today_count"] == 7
+
+
+def test_extra_total_includes_open_tasks_and_extra_done_includes_early_and_late():
+    metrics = calculate_daily_metrics([
+        {"classification": "REALIZED_AS_PLANNED", "in_original_plan": True},
+        {"classification": "ADDITIONAL_COMPLETED", "in_original_plan": False},
+        {"classification": "COMPLETED_LATE", "in_original_plan": False},
+        {"classification": "COMPLETED_EARLY", "in_original_plan": False},
+        {"classification": "IN_PROGRESS", "in_original_plan": False},
+        {"classification": "ADDED_DURING_DAY", "in_original_plan": False},
+        {"classification": "ADDED_DURING_DAY", "in_original_plan": False, "current_status": "IN_PROGRESS"},
+        {"classification": "REASSIGNED_IN", "in_original_plan": False, "completed_delta": 1},
+        {"classification": "WAITING_CONFIRMATION", "in_original_plan": False},
+    ])
+    assert metrics["additional_count"] == 8
+    assert metrics["additional_completed_count"] == 3
+    assert metrics["additional_in_progress_count"] == 3
+    assert metrics["additional_no_progress_count"] == 2
+    assert metrics["additional_count"] == sum(metrics[key] for key in (
+        "additional_completed_count", "additional_in_progress_count", "additional_no_progress_count"
+    ))
+    assert metrics["total_completed_today_count"] == 4
+    assert metrics["original_planned_count"] == 1
 
 
 def test_adjusted_metric_excludes_only_approved_scope_change():
@@ -83,6 +153,21 @@ def test_adjusted_metric_excludes_only_approved_scope_change():
     assert metrics["raw_plan_realization"] == 70.0
     assert metrics["adjusted_denominator"] == 8
     assert metrics["adjusted_plan_realization"] == 87.5
+
+
+def test_daily_extra_completions_count_but_realization_never_exceeds_100():
+    rows = [
+        {"classification": "REALIZED_AS_PLANNED", "in_original_plan": True},
+        {"classification": "NO_PROGRESS", "in_original_plan": True},
+        {"classification": "ADDITIONAL_COMPLETED", "in_original_plan": False},
+    ]
+    assert calculate_daily_metrics(rows)["raw_plan_realization"] == 100
+    rows.append({"classification": "ADDITIONAL_COMPLETED", "in_original_plan": False})
+    metrics = calculate_daily_metrics(rows)
+    assert metrics["total_completed_today_count"] == 3
+    assert metrics["additional_completed_count"] == 2
+    assert metrics["raw_plan_realization"] == 100
+    assert metrics["adjusted_plan_realization"] == 100
 
 
 def test_zero_denominators_are_na_not_false_success():

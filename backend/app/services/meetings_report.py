@@ -37,6 +37,7 @@ from app.services.std_feedback_tickets import std_tickets_report_section
 from app.services.system_task_schedule import matches_template_date
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
 from app.services.task_marker import active_one_h_marker
+from app.services.task_product_counts import task_product_counts
 
 REPORT_TYPE = "meetings_report"
 SECTION_TITLES = [
@@ -889,19 +890,7 @@ def _m3_product_counts(task: Task) -> tuple[int, int] | None:
     ``daily_products`` is the day's planned count; the completed count is stored
     in ``internal_notes`` as ``completed_products=N``.
     """
-    planned = getattr(task, "daily_products", None)
-    if planned is None:
-        return None
-    planned = int(planned)
-    if planned <= 0:
-        return None
-    match = COMPLETED_PRODUCTS.search(getattr(task, "internal_notes", None) or "")
-    if not match:
-        return planned, 0
-    try:
-        return planned, max(0, int(match.group(1)))
-    except ValueError:
-        return planned, 0
+    return task_product_counts(task)
 
 
 def _m3_product_delta_label(task: Task) -> str:

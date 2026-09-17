@@ -2,20 +2,24 @@ from __future__ import annotations
 
 import unittest
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.sql import Select
 
 from app.api.routers.tasks import _GA_NOTE_SHARED_TASK_FIELDS
+from app.api.routers.tasks import GaNoteTaskBatchRequest, list_task_summaries_by_ga_notes
 from app.models.enums import ProjectPhaseStatus, TaskFinishPeriod, TaskPriority, TaskStatus
 from app.models.task import Task
+from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.services.ga_note_task_instances import (
     GaNoteAssigneeExecutionState,
     apply_ga_note_assignee_execution_states,
     apply_ga_note_shared_task_fields,
     reconcile_ga_note_task_assignees,
     reconcile_plan_note_task_assignees,
+    sync_ga_note_assignee_report_slots,
 )
 
 
@@ -33,15 +37,21 @@ class _ScalarResult:
 class _FakeSession:
     def __init__(self, select_batches):
         self._select_batches = list(select_batches)
-        self.added: list[Task] = []
+        self.added: list[Task | TaskOneHReportSlot] = []
+        self.deleted = []
+        self.statements = []
 
     async def execute(self, statement, *_args, **_kwargs):
+        self.statements.append(statement)
         if isinstance(statement, Select):
             return _ScalarResult(self._select_batches.pop(0))
         return _ScalarResult([])
 
     def add(self, value):
         self.added.append(value)
+
+    async def delete(self, value):
+        self.deleted.append(value)
 
     async def flush(self):
         for task in self.added:
@@ -74,6 +84,85 @@ def _task(note_id: uuid.UUID, owner_id: uuid.UUID, status: TaskStatus) -> Task:
 
 
 class TestGaNoteTaskInstances(unittest.IsolatedAsyncioTestCase):
+    async def test_note_editor_reload_returns_saved_slots_and_active_symbols(self) -> None:
+        day = date(2026, 9, 16)
+        for source in ("ga_note_origin_id", "plan_note_origin_id"):
+            with self.subTest(source=source):
+                note_id = uuid.uuid4()
+                owner_a, owner_b = uuid.uuid4(), uuid.uuid4()
+                task_a = _task(note_id, owner_a, TaskStatus.TODO)
+                task_b = _task(note_id, owner_b, TaskStatus.IN_PROGRESS)
+                if source == "plan_note_origin_id":
+                    for task in (task_a, task_b):
+                        task.ga_note_origin_id = None
+                        task.plan_note_origin_id = note_id
+                for task in (task_a, task_b):
+                    task.created_at = task.updated_at = datetime(2026, 9, 16, tzinfo=timezone.utc)
+                    task.one_h_marker = "FLAG"
+                    task.one_h_marker_date = day
+                task_b.one_h_report_slot = "14:20"
+                task_b.one_h_marker_date = date(2026, 9, 15)
+                apply_ga_note_assignee_execution_states(
+                    [task_a, task_b],
+                    [GaNoteAssigneeExecutionState(
+                        assignee_id=owner_a,
+                        status=TaskStatus.TODO,
+                        one_h_report_slot="11:50",
+                        one_h_report_slot_is_set=True,
+                        is_1h_report=True,
+                    )],
+                )
+                session = _FakeSession([[task_a, task_b]])
+                payload_fields = {"ga_note_origin_ids": []}
+                payload_fields[source.replace("_id", "_ids")] = [note_id]
+                payload = GaNoteTaskBatchRequest(**payload_fields)
+                with patch("app.api.routers.tasks._assignees_for_tasks", new=AsyncMock(return_value={})), \
+                     patch("app.services.task_marker.current_effective_slot_date", return_value=day):
+                    summaries = await list_task_summaries_by_ga_notes(payload, db=session, _=None)
+
+                by_owner = {item.assigned_to: item.model_dump() for item in summaries}
+                self.assertEqual(by_owner[owner_a]["one_h_report_slot"], "11:50")
+                self.assertEqual(by_owner[owner_b]["one_h_report_slot"], "14:20")
+                self.assertEqual(by_owner[owner_a]["one_h_marker"], "FLAG")
+                self.assertIsNone(by_owner[owner_b]["one_h_marker"])
+                # These columns must be eagerly loaded to avoid async lazy-load errors.
+                selected_columns = str(session.statements[0]).split("FROM")[0]
+                for column in ("one_h_report_slot", "one_h_marker", "one_h_marker_date"):
+                    self.assertIn(f"tasks.{column}", selected_columns)
+
+    async def test_note_editor_syncs_only_explicit_slots_for_effective_report_day(self) -> None:
+        owners = [uuid.uuid4() for _ in range(4)]
+        tasks = [_task(uuid.uuid4(), owner, TaskStatus.TODO) for owner in owners]
+        tasks[0].one_h_report_slot = "11:50"
+        tasks[1].one_h_report_slot = "16:00"
+        tasks[2].one_h_report_slot = None
+        tasks[3].one_h_report_slot = "10:00"
+        day = date(2026, 9, 17)
+        existing = TaskOneHReportSlot(task_id=tasks[1].id, report_date=day, one_h_report_slot="14:20")
+        cleared = TaskOneHReportSlot(task_id=tasks[2].id, report_date=day, one_h_report_slot="11:00")
+        session = _FakeSession([[existing, cleared]])
+        with patch("app.services.ga_note_task_instances.current_effective_slot_date", return_value=day):
+            await sync_ga_note_assignee_report_slots(session, tasks, owners[:3])
+
+        self.assertEqual(len(session.added), 1)
+        self.assertEqual(session.added[0].task_id, tasks[0].id)
+        self.assertEqual(session.added[0].report_date, day)
+        self.assertEqual(session.added[0].one_h_report_slot, "11:50")
+        self.assertEqual(existing.one_h_report_slot, "16:00")
+        self.assertEqual(session.deleted, [cleared])
+        params = session.statements[0].compile().params
+        self.assertIn(day, params.values())
+        self.assertIn([task.id for task in tasks[:3]], params.values())
+
+    async def test_note_editor_omitted_slots_do_not_modify_report_history(self) -> None:
+        task = _task(uuid.uuid4(), uuid.uuid4(), TaskStatus.TODO)
+        task.one_h_report_slot = "14:20"
+        session = _FakeSession([])
+        await sync_ga_note_assignee_report_slots(session, [task], [])
+        self.assertEqual(session.statements, [])
+        self.assertEqual(session.added, [])
+        self.assertEqual(session.deleted, [])
+
     def test_finance_execution_fields_are_editable_on_ga_task_copy(self) -> None:
         self.assertNotIn("description", _GA_NOTE_SHARED_TASK_FIELDS)
         self.assertNotIn("one_h_report_slot", _GA_NOTE_SHARED_TASK_FIELDS)

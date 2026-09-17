@@ -4,7 +4,7 @@ import hashlib
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Iterable
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -283,6 +283,42 @@ def _text_points(value: str | None, *, field_name: str) -> tuple[str, list[Strik
     points = [point for point, _start, _end in _point_entries(raw, field_name=field_name)]
     current_done = set(_struck_points_by_identity(raw, field_name=field_name))
     return heading, points, current_done
+
+
+def count_struck_points_for_day(
+    text: str | None, events: Iterable[TaskStrikeEvent], *, day: date,
+    field_name: str = "DESCRIPTION", allow_undated: bool = False,
+) -> int:
+    """Count distinct struck points for this local day, including legacy notes."""
+    from zoneinfo import ZoneInfo
+    from app.config import settings
+
+    zone = ZoneInfo(settings.REALIZATION_TIMEZONE)
+    start = datetime.combine(day, time.min, tzinfo=zone)
+    end = datetime.combine(day, time.max, tzinfo=zone)
+    events = list(events)
+    _, marked = render_text_for_interval(text, events, interval_start=start, interval_end=end, field_name=field_name)
+    completed = 0
+    for match in re.finditer(r"\[\[done:(?:blue|green)\]\](.*?)\[\[/done\]\]([^\n]*)", marked, re.DOTALL):
+        timestamp = strike_timestamp_datetime(match.group(1) + match.group(2), report_at=end)
+        if timestamp is None or timestamp.date() <= day:
+            completed += 1
+    if allow_undated:
+        # Grey can mean a known previous day or an undated legacy strike.
+        # Only the latter may fall back to this task's scheduled day.
+        _, points, current_done = _text_points(text, field_name=field_name)
+        known = {event.point_key for event in events if getattr(event, "field_name", "DESCRIPTION") == field_name}
+        known_texts = {
+            _normalise(getattr(event, "point_text", "")).casefold()
+            for event in events if getattr(event, "field_name", "DESCRIPTION") == field_name
+        }
+        for point in points:
+            if point.key in current_done and point.key not in known and point.legacy_key not in known:
+                full = _normalise(point.text).casefold()
+                without_marker = re.sub(r"^(?:\d+\.|[•*-])\s*", "", full)
+                if not ({full, without_marker} & known_texts) and strike_timestamp_datetime(point.text, report_at=end) is None:
+                    completed += 1
+    return completed
 
 
 def render_text_for_interval(

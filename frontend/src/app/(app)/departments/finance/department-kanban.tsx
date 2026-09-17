@@ -842,6 +842,7 @@ export default function DepartmentKanban() {
                     <TableHead>Start Date</TableHead>
                     <TableHead>Due Date</TableHead>
                     <TableHead>Late</TableHead>
+                    <TableHead>Symbol</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="min-w-[170px]">Arsyeja</TableHead>
                     <TableHead className="min-w-[190px]">Koment</TableHead>
@@ -860,7 +861,6 @@ export default function DepartmentKanban() {
                                 ? renderMarkedNoteContent(row.title, row.title)
                                 : row.title}
                             </span>
-                            <TaskOneHMarkerEditor taskId={row.task.id} marker={row.task.one_h_marker} className="order-last ml-auto shrink-0" />
                           </div>
                         </TableCell>
                         <TableCell className="w-16 min-w-16 max-w-16 px-0 text-center">
@@ -930,6 +930,13 @@ export default function DepartmentKanban() {
                             "-"
                           )}
                         </TableCell>
+                        <TableCell className="w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
+                          {row.typeLabel === "SYS" ? (
+                            <span className="text-xs font-semibold text-slate-600">SYS</span>
+                          ) : (
+                            <TaskOneHMarkerEditor taskId={row.task.id} marker={row.task.one_h_marker} className="mx-auto shrink-0" />
+                          )}
+                        </TableCell>
                         <TableCell>
                           <span className={`inline-flex rounded px-2 py-1 text-xs font-medium uppercase ${row.statusClassName}`}>
                             {row.status}
@@ -985,7 +992,7 @@ export default function DepartmentKanban() {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={14} className="py-8 text-center text-sm text-slate-500">
+                      <TableCell colSpan={15} className="py-8 text-center text-sm text-slate-500">
                         No Finance tasks match the selected filters.
                       </TableCell>
                     </TableRow>

@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock, Mock
 
 from app.api.routers.planners import _override_daily_status_from_progress, _status_for_day
 from app.models.enums import TaskStatus
-from app.services.task_daily_progress import _derive_daily_status, upsert_explicit_task_daily_status
+from app.services.task_daily_progress import (
+    _derive_daily_status,
+    sync_task_daily_finish_period,
+    upsert_explicit_task_daily_status,
+)
 
 
 class TestDeriveDailyStatus(unittest.TestCase):
@@ -65,6 +69,51 @@ class TestCompletedTaskStatusForDay(unittest.TestCase):
 
 
 class TestExplicitDailyStatusSync(unittest.IsolatedAsyncioTestCase):
+    async def test_explicit_period_changes_replace_the_old_period_and_keep_products(self) -> None:
+        for status in (TaskStatus.TODO, TaskStatus.WAITING_CLIENT, TaskStatus.DONE):
+            for period, expected in (("PM", "PM"), ("AM", "AM"), (None, "ALL")):
+                with self.subTest(status=status, period=period):
+                    existing = SimpleNamespace(
+                        completed_value=2, total_value=5, completed_delta=2,
+                        daily_status=status.value, finish_period="AM",
+                    )
+                    result = Mock()
+                    result.scalar_one_or_none.return_value = existing
+                    db = SimpleNamespace(execute=AsyncMock(return_value=result), add=Mock())
+                    await upsert_explicit_task_daily_status(
+                        db, task_id=uuid.uuid4(), day_date=date(2026, 9, 16),
+                        status=status, finish_period=period, finish_period_is_set=True,
+                    )
+                    self.assertEqual(existing.finish_period, expected)
+                    self.assertEqual(existing.daily_status, status.value)
+                    self.assertEqual((existing.completed_value, existing.total_value, existing.completed_delta), (2, 5, 2))
+                    db.add.assert_not_called()
+
+    async def test_period_only_edit_keeps_daily_status_and_product_counts(self) -> None:
+        existing = SimpleNamespace(
+            completed_value=2, total_value=5, completed_delta=2,
+            daily_status="WAITING_CLIENT", finish_period="AM",
+        )
+        result = Mock()
+        result.scalar_one_or_none.return_value = existing
+        db = SimpleNamespace(execute=AsyncMock(return_value=result), add=Mock())
+        await sync_task_daily_finish_period(
+            db, task_id=uuid.uuid4(), day_date=date(2026, 9, 16), finish_period="PM",
+        )
+        self.assertEqual(existing.finish_period, "PM")
+        self.assertEqual(existing.daily_status, "WAITING_CLIENT")
+        self.assertEqual((existing.completed_value, existing.total_value, existing.completed_delta), (2, 5, 2))
+        db.add.assert_not_called()
+
+    async def test_period_only_edit_does_not_create_a_status_record(self) -> None:
+        result = Mock()
+        result.scalar_one_or_none.return_value = None
+        db = SimpleNamespace(execute=AsyncMock(return_value=result), add=Mock())
+        await sync_task_daily_finish_period(
+            db, task_id=uuid.uuid4(), day_date=date(2026, 9, 16), finish_period="PM",
+        )
+        db.add.assert_not_called()
+
     async def test_existing_progress_keeps_product_counts_and_becomes_done(self) -> None:
         existing = SimpleNamespace(
             completed_value=2,

@@ -371,15 +371,51 @@ export function TaskEditDialog({
               <TaskSkillField value={skillCategory} onChange={setSkillCategory} disabled={saving} />
             </div>
 
-            {isFastTask(task) ? (
+            <div className={`grid gap-4 md:col-span-2 ${waitingNeedsConfirmer ? "sm:grid-cols-3" : "md:grid-cols-2"}`}>
+              {isFastTask(task) ? (
+                <div className="space-y-2">
+                  <Label>Type</Label>
+                  <Select value={fastTaskType} onValueChange={(value) => setFastTaskType(value as FastTaskTypeValue)}>
+                    <SelectTrigger disabled={saving} className="w-full min-w-0 [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:truncate">
+                      <SelectValue placeholder="Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {FAST_TASK_TYPES.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
+
+              {isProjectTask(task) ? (
+                <div className="space-y-2">
+                  <Label>Type</Label>
+                  <Select value={projectTaskType} onValueChange={(value) => setProjectTaskType(value as ProjectTaskTypeValue)}>
+                    <SelectTrigger disabled={saving} className="w-full min-w-0 [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:truncate">
+                      <SelectValue placeholder="Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PROJECT_TASK_TYPES.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
+
               <div className="space-y-2">
-                <Label>Type</Label>
-                <Select value={fastTaskType} onValueChange={(value) => setFastTaskType(value as FastTaskTypeValue)}>
-                  <SelectTrigger disabled={saving}>
-                    <SelectValue placeholder="Type" />
+                <Label>Status</Label>
+                <Select value={statusValue} onValueChange={(value) => setStatusValue(value as TaskStatusValue)}>
+                  <SelectTrigger disabled={saving} className="w-full min-w-0 [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:truncate">
+                    <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
-                    {FAST_TASK_TYPES.map((option) => (
+                    {statusOptions.map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>
@@ -387,63 +423,29 @@ export function TaskEditDialog({
                   </SelectContent>
                 </Select>
               </div>
-            ) : null}
 
-            {isProjectTask(task) ? (
-              <div className="space-y-2">
-                <Label>Type</Label>
-                <Select value={projectTaskType} onValueChange={(value) => setProjectTaskType(value as ProjectTaskTypeValue)}>
-                  <SelectTrigger disabled={saving}>
-                    <SelectValue placeholder="Type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PROJECT_TASK_TYPES.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : null}
-
-            <div className="space-y-2">
-              <Label>Status</Label>
-              <Select value={statusValue} onValueChange={(value) => setStatusValue(value as TaskStatusValue)}>
-                <SelectTrigger disabled={saving}>
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  {statusOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {waitingNeedsConfirmer ? (
+                <div className="space-y-2">
+                  <Label title="Manager/Admin/GA">Confirm by</Label>
+                  <Select
+                    value={confirmationAssigneeId || "__none__"}
+                    onValueChange={(value) => setConfirmationAssigneeId(value === "__none__" ? "" : value)}
+                  >
+                    <SelectTrigger disabled={saving} className="w-full min-w-0 [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:truncate">
+                      <SelectValue placeholder="Select confirmer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Select confirmer</SelectItem>
+                      {confirmerCandidates.map((candidate) => (
+                        <SelectItem key={candidate.id} value={candidate.id}>
+                          {candidate.full_name || candidate.username || "-"}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
             </div>
-
-            {waitingNeedsConfirmer ? (
-              <div className="space-y-2">
-                <Label>Confirm by (Manager/Admin/GA)</Label>
-                <Select
-                  value={confirmationAssigneeId || "__none__"}
-                  onValueChange={(value) => setConfirmationAssigneeId(value === "__none__" ? "" : value)}
-                >
-                  <SelectTrigger disabled={saving}>
-                    <SelectValue placeholder="Select confirmer" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Select confirmer</SelectItem>
-                    {confirmerCandidates.map((candidate) => (
-                      <SelectItem key={candidate.id} value={candidate.id}>
-                        {candidate.full_name || candidate.username || "-"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : null}
 
             <div className="space-y-2">
               <Label htmlFor="task-edit-start-date">Start date</Label>

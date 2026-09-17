@@ -953,6 +953,17 @@ const gaTimeEntryDisplayContent = (entry: GaTimeSlotEntry) =>
     ? entry.content.replace(/^\s*REMINDER\s*:?\s*/i, "R: ")
     : entry.content
 
+function GaTimeEntryContent({ entry }: { entry: GaTimeSlotEntry }) {
+  const content = gaTimeEntryDisplayContent(entry)
+  const plainContent = getPlainGaTimeRichText(content)
+  const isReminder = entry.source_type === "reminder" || /^\s*R\s*:/i.test(plainContent)
+  return (
+    <span className={isReminder ? "ga-time-reminder-preview" : undefined} title={isReminder ? plainContent : undefined}>
+      <GaTimeRichTextContent value={content} backgroundColor={entry.background_color} />
+    </span>
+  )
+}
+
 function GaTimeRichTextEditor({
   value,
   onChange,
@@ -7335,7 +7346,7 @@ export default function AdminTasksPage() {
                                       className="ga-time-entry"
                                       style={gaTimeEntryStyle(entry)}
                                     >
-                                      <GaTimeRichTextContent value={gaTimeEntryDisplayContent(entry)} backgroundColor={entry.background_color} />
+                                      <GaTimeEntryContent entry={entry} />
                                     </div>
                                   ))}
                                 {!entries.length && !meetings.length && !slot.isSpecial ? (
@@ -7759,7 +7770,7 @@ export default function AdminTasksPage() {
                                       setGaTimeEditingId(entry.id)
                                     }}
                                   >
-                                    <GaTimeRichTextContent value={gaTimeEntryDisplayContent(entry)} backgroundColor={entry.background_color} />
+                                    <GaTimeEntryContent entry={entry} />
                                   </span>
                                   {canEditGaTimeSlots && !isImported ? (
                                     <button
@@ -9194,6 +9205,17 @@ export default function AdminTasksPage() {
         }
         .admin-week-table .ga-time-entry-text:disabled {
           cursor: default;
+        }
+        .admin-week-table .ga-time-reminder-preview {
+          display: -webkit-box;
+          -webkit-box-orient: vertical;
+          -webkit-line-clamp: 3;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          overflow-wrap: anywhere;
+          white-space: normal;
+          width: 100%;
+          min-width: 0;
         }
         .admin-week-table .ga-time-input {
           width: 100%;

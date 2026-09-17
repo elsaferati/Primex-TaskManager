@@ -42,12 +42,13 @@ from app.services.ga_note_task import ga_note_default_task_description, ga_note_
 from app.services.one_h_slots import current_effective_slot_date
 from app.services.task_marker import active_one_h_marker, marker_is_by_ga, normalize_marker_comment, note_bundle_marker_update, sync_note_task_marker
 from app.services.task_strike_events import record_description_strike_events, record_title_strike_events
-from app.services.task_daily_progress import upsert_explicit_task_daily_status
+from app.services.task_daily_progress import sync_task_daily_finish_period, upsert_explicit_task_daily_status
 from app.services.ga_note_task_instances import (
     GaNoteAssigneeExecutionState,
     apply_ga_note_assignee_execution_states,
     apply_ga_note_shared_task_fields,
     reconcile_ga_note_task_assignees,
+    sync_ga_note_assignee_report_slots,
 )
 from app.services.notifications import (
     add_notification,
@@ -603,6 +604,10 @@ async def update_ga_note_task_bundle(
                 task.id: task.status.value if isinstance(task.status, TaskStatus) else str(task.status)
                 for task in active_tasks
             }
+            period_before_by_task_id = {
+                task.id: getattr(task.finish_period, "value", task.finish_period)
+                for task in active_tasks
+            }
             for item in payload.assignee_states:
                 if item.status == TaskStatus.WAITING_CONFIRMATION:
                     await _validate_waiting_confirmation_assignee(db, item.confirmation_assignee_id)
@@ -630,6 +635,15 @@ async def update_ga_note_task_bundle(
                     for item in payload.assignee_states
                 ],
             )
+            await sync_ga_note_assignee_report_slots(
+                db,
+                active_tasks,
+                [
+                    item.assignee_id
+                    for item in payload.assignee_states
+                    if "one_h_report_slot" in item.model_fields_set
+                ],
+            )
             tasks_by_assignee = {
                 task.assigned_to: task
                 for task in active_tasks
@@ -641,6 +655,14 @@ async def update_ga_note_task_bundle(
                 if matching_task is None:
                     continue
                 if status_before_by_task_id.get(matching_task.id) == item.status.value:
+                    next_period = item.finish_period.value if item.finish_period else None
+                    if period_before_by_task_id.get(matching_task.id) != next_period:
+                        await sync_task_daily_finish_period(
+                            db,
+                            task_id=matching_task.id,
+                            day_date=today,
+                            finish_period=next_period,
+                        )
                     continue
                 await upsert_explicit_task_daily_status(
                     db,
@@ -648,6 +670,7 @@ async def update_ga_note_task_bundle(
                     day_date=today,
                     status=item.status,
                     finish_period=item.finish_period.value if item.finish_period else None,
+                    finish_period_is_set="finish_period" in item.model_fields_set,
                 )
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

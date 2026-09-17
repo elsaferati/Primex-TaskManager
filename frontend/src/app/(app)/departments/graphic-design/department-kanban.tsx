@@ -1307,6 +1307,7 @@ export default function DepartmentKanban() {
   const [editTaskDescription, setEditTaskDescription] = React.useState("")
   const [editTaskType, setEditTaskType] = React.useState<(typeof NO_PROJECT_TYPES)[number]["id"]>("normal")
   const [editTaskStatus, setEditTaskStatus] = React.useState<string>("TODO")
+  const [editTaskConfirmationAssigneeId, setEditTaskConfirmationAssigneeId] = React.useState("")
   const [editTaskStartDate, setEditTaskStartDate] = React.useState("")
   const [editTaskDueDate, setEditTaskDueDate] = React.useState("")
   const [editTaskFinishPeriod, setEditTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
@@ -5186,6 +5187,7 @@ export default function DepartmentKanban() {
         ? statusValue
         : "TODO"
     )
+    setEditTaskConfirmationAssigneeId(task.confirmation_assignee_id || "")
     setEditTaskStartDate(toDateInputValue(task.start_date))
     setEditTaskDueDate(toDateInputValue(task.due_date))
     setEditTaskFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
@@ -5212,6 +5214,7 @@ export default function DepartmentKanban() {
     setEditTaskDescription("")
     setEditTaskType("normal")
     setEditTaskStatus("TODO")
+    setEditTaskConfirmationAssigneeId("")
     setEditTaskStartDate("")
     setEditTaskDueDate("")
     setEditTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
@@ -5232,6 +5235,11 @@ export default function DepartmentKanban() {
 
   const updateNoProjectTask = async () => {
     if (!editingTaskId || !editTaskTitle.trim() || !editTaskStartDate) return
+    const confirmationValidation = validateWaitingConfirmation(editTaskStatus, editTaskConfirmationAssigneeId)
+    if (confirmationValidation) {
+      toast.error(confirmationValidation)
+      return
+    }
     setUpdatingTask(true)
     try {
       const editingTask = noProjectTasks.find((candidate) => candidate.id === editingTaskId) || null
@@ -5266,6 +5274,9 @@ export default function DepartmentKanban() {
             finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
             is_deadline_important: editTaskDeadlineImportant,
           }
+      if (isWaitingConfirmation(editTaskStatus)) {
+        payload.confirmation_assignee_id = editTaskConfirmationAssigneeId
+      }
       if (assigneesChanged && editingTask?.ga_note_origin_id) {
         const membershipRes = await replaceGaNoteTaskAssignees(
           apiFetch,
@@ -5461,6 +5472,9 @@ export default function DepartmentKanban() {
             is_1h_report: allTodayEditType === "hourly",
             is_r1: allTodayEditType === "r1",
             is_personal: allTodayEditType === "personal",
+            ...(isWaitingConfirmation(allTodayEditStatus)
+              ? { confirmation_assignee_id: allTodayEditConfirmationAssigneeId }
+              : {}),
           } : {
             title: buildMarkedAppendOnlyText(editingTask?.title, allTodayEditTitle.trim()),
             description: allTodayEditDescription.trim() || null,
@@ -6521,6 +6535,7 @@ export default function DepartmentKanban() {
                           <col className="w-[44px]" />
                           <col className="w-[52px]" />
                           <col />
+                          <col className="w-[100px]" />
                           <col className="w-[92px]" />
                           <col className="w-[86px]" />
                           <col className="w-[64px]" />
@@ -6539,6 +6554,7 @@ export default function DepartmentKanban() {
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">NLL</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-nowrap">AM/PM</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Titulli</th>
+                            <th className="border border-slate-200 px-2 py-2 text-center text-xs uppercase">SIMBOLI</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">STATUSI</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">1H SLOT</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
@@ -6633,7 +6649,6 @@ export default function DepartmentKanban() {
                                           08:00
                                         </span>
                                       ) : null}
-                                      <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} className="order-last ml-auto shrink-0" />
                                       <span className="min-w-0 flex-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                                         {(() => {
                                           const hasMarks = typeof visibleTitle === "string" && visibleTitle.includes("[[")
@@ -6662,6 +6677,13 @@ export default function DepartmentKanban() {
                                         </button>
                                       ) : null}
                                     </div>
+                                  </td>
+                                  <td className="border border-slate-200 w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
+                                    {row.typeLabel === "SYS" ? (
+                                      <span className="text-xs font-semibold text-slate-600">SYS</span>
+                                    ) : (
+                                      <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} className="mx-auto shrink-0" />
+                                    )}
                                   </td>
                                   <td
                                     className={`border border-slate-200 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(normalizeDailyReportStatusKey(row.status))}`}
@@ -6728,7 +6750,7 @@ export default function DepartmentKanban() {
                             })
                           ) : (
                             <tr>
-                              <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={13}>
+                              <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={14}>
                                 No data available.
                               </td>
                             </tr>
@@ -6862,7 +6884,7 @@ export default function DepartmentKanban() {
                       >
                         <TableHeader>
                           <TableRow className="bg-slate-50">
-                            {["NR", "TYPE", "DEPARTMENT", "PROJECT", "ASSIGNED", "TASK TITLE", "CONFIRMER", "STATUS", "START", "DUE", "ACTIONS"].map((label) => (
+                            {["NR", "TYPE", "DEPARTMENT", "PROJECT", "ASSIGNED", "TASK TITLE", "CONFIRMER", "SYMBOL", "STATUS", "START", "DUE", "ACTIONS"].map((label) => (
                               <TableHead
                                 key={label}
                                 className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -6916,10 +6938,12 @@ export default function DepartmentKanban() {
                                 <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                                   <div className={`flex w-full items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                     <span className="min-w-0 flex-1">{renderAllTodayTaskTitle(task)}</span>
-                                    <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} className="order-last ml-auto shrink-0" />
                                   </div>
                                 </TableCell>
                                 <TableCell className={TODAY_TASK_CELL_CLASS}>{confirmerLabel}</TableCell>
+                                <TableCell className="w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
+                                  <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} className="mx-auto shrink-0" />
+                                </TableCell>
                                 <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
                                   {waitingConfirmationStatusLabel(task)}
                                 </TableCell>
@@ -6994,7 +7018,7 @@ export default function DepartmentKanban() {
                           <col className="w-[100px]" />
                           <col className="w-[90px]" />
                           <col className="w-[860px]" />
-                          <col className="w-[90px]" />
+                          <col className="w-[100px]" />
                           <col className="w-[80px]" />
                           <col className="w-[92px]" />
                           <col className="w-[92px]" />
@@ -7003,7 +7027,7 @@ export default function DepartmentKanban() {
                         </colgroup>
                         <TableHeader>
                           <TableRow className="bg-slate-50">
-                        {["NR", "PROJECT TITLE", "PHASE", "ASSIGNED", "TASK TITLE", "STATUS", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
+                        {["NR", "PROJECT TITLE", "PHASE", "ASSIGNED", "TASK TITLE", "SYMBOL", "STATUS", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
                               <TableHead
                                 key={label}
                                 className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -7069,8 +7093,10 @@ export default function DepartmentKanban() {
                                 {task.is_bllok ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${BLLOK_BADGE_CLASSES}`}>BLLOK</Badge>
                                 ) : null}
-                                <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} className="order-last ml-auto shrink-0" />
                               </div>
+                            </TableCell>
+                            <TableCell className="w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
+                              <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} className="mx-auto shrink-0" />
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
                               {reportStatusLabel(taskStatusValue(task))}
@@ -7140,7 +7166,7 @@ export default function DepartmentKanban() {
                       >
                         <TableHeader>
                           <TableRow className="bg-slate-50">
-                            {["NR", "TYPE", "ASSIGNED", "TASK TITLE", "STATUS", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
+                            {["NR", "TYPE", "ASSIGNED", "TASK TITLE", "SYMBOL", "STATUS", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
                               <TableHead
                                 key={label}
                                 className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -7187,8 +7213,10 @@ export default function DepartmentKanban() {
                                       ) : isGaTask(task) ? (
                                         <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                                 ) : null}
-                                <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} className="order-last ml-auto shrink-0" />
                               </div>
+                            </TableCell>
+                            <TableCell className="w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
+                              <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} className="mx-auto shrink-0" />
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
                               {reportStatusLabel(taskStatusValue(task))}
@@ -7248,7 +7276,7 @@ export default function DepartmentKanban() {
                       >
                         <TableHeader>
                           <TableRow className="bg-slate-50">
-                        {["NR", "ASSIGNED", "TASK TITLE", "STATUS", "PRIORITY", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
+                        {["NR", "ASSIGNED", "TASK TITLE", "SYMBOL", "STATUS", "PRIORITY", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
                               <TableHead
                                 key={label}
                                 className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -7291,6 +7319,9 @@ export default function DepartmentKanban() {
                                 <span>{task.title || "-"}</span>
                                 <Badge className="text-[10px] px-1.5 py-0 border-slate-200 bg-slate-50 text-slate-700">SYS</Badge>
                               </div>
+                            </TableCell>
+                            <TableCell className="w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
+                              <span className="text-xs font-semibold text-slate-600">SYS</span>
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
                               {reportStatusLabel(taskStatusValue(task))}
@@ -7382,11 +7413,11 @@ export default function DepartmentKanban() {
                         />
                       )}
                     </div>
-                    <div className="grid gap-4 md:grid-cols-2">
+                    <div className={isWaitingConfirmation(allTodayEditStatus) ? "grid gap-3 sm:grid-cols-[minmax(0,0.6fr)_minmax(0,1.4fr)_minmax(0,1fr)]" : "grid gap-4 md:grid-cols-2"}>
                       <div className="space-y-2">
                         <Label className="text-slate-700">Type</Label>
                         <Select value={allTodayEditType} onValueChange={(value) => setAllTodayEditType(value as AllTodayEditTypeId)}>
-                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                          <SelectTrigger className="w-full min-w-0 border-slate-200 focus:border-slate-400 rounded-xl [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:truncate">
                             <SelectValue placeholder="Select type" />
                           </SelectTrigger>
                           <SelectContent>
@@ -7404,7 +7435,7 @@ export default function DepartmentKanban() {
                       <div className="space-y-2">
                         <Label className="text-slate-700">Status</Label>
                         <Select value={allTodayEditStatus} onValueChange={setAllTodayEditStatus}>
-                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                          <SelectTrigger className="w-full min-w-0 border-slate-200 focus:border-slate-400 rounded-xl [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:truncate">
                             <SelectValue placeholder="Select status" />
                           </SelectTrigger>
                           <SelectContent>
@@ -7416,6 +7447,30 @@ export default function DepartmentKanban() {
                           </SelectContent>
                         </Select>
                       </div>
+
+                      {isWaitingConfirmation(allTodayEditStatus) ? (
+                        <div className="space-y-2">
+                          <Label className="text-slate-700" title="Manager/Admin/GA">Confirm by</Label>
+                          <Select
+                            value={allTodayEditConfirmationAssigneeId || "__none__"}
+                            onValueChange={(value) =>
+                              setAllTodayEditConfirmationAssigneeId(value === "__none__" ? "" : value)
+                            }
+                          >
+                            <SelectTrigger className="w-full min-w-0 border-slate-200 focus:border-slate-400 rounded-xl [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:truncate">
+                              <SelectValue placeholder="Select confirmer" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">Select confirmer</SelectItem>
+                              {confirmerCandidates.map((candidate) => (
+                                <SelectItem key={candidate.id} value={candidate.id}>
+                                  {candidate.full_name || candidate.username || "-"}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : null}
                     </div>
                     <div
                       className={`space-y-2 rounded-xl border p-3 ${
@@ -7449,29 +7504,6 @@ export default function DepartmentKanban() {
                             : "Optional now; it becomes required when Status is Done."}
                       </p>
                     </div>
-                    {isWaitingConfirmation(allTodayEditStatus) ? (
-                      <div className="space-y-2">
-                        <Label className="text-slate-700">Confirm by (Manager/Admin/GA)</Label>
-                        <Select
-                          value={allTodayEditConfirmationAssigneeId || "__none__"}
-                          onValueChange={(value) =>
-                            setAllTodayEditConfirmationAssigneeId(value === "__none__" ? "" : value)
-                          }
-                        >
-                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
-                            <SelectValue placeholder="Select confirmer" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">Select confirmer</SelectItem>
-                            {confirmerCandidates.map((candidate) => (
-                              <SelectItem key={candidate.id} value={candidate.id}>
-                                {candidate.full_name || candidate.username || "-"}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    ) : null}
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
                         <Label className="text-slate-700">Finish by (optional)</Label>
@@ -8028,11 +8060,11 @@ export default function DepartmentKanban() {
                           <BoldOnlyEditor value={editTaskDescription} onChange={setEditTaskDescription} />
                         )}
                         </div>
-                        <div className="grid gap-4 md:grid-cols-2">
+                        <div className={isWaitingConfirmation(editTaskStatus) ? "grid gap-3 sm:grid-cols-[minmax(0,0.6fr)_minmax(0,1.4fr)_minmax(0,1fr)]" : "grid gap-4 md:grid-cols-2"}>
                           <div className="space-y-2">
                             <Label className="text-slate-700">Type</Label>
                           <Select value={editTaskType} onValueChange={(value) => setEditTaskType(value as typeof editTaskType)}>
-                              <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                              <SelectTrigger className="w-full min-w-0 border-slate-200 focus:border-slate-400 rounded-xl [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:truncate">
                                 <SelectValue placeholder="Select type" />
                               </SelectTrigger>
                               <SelectContent>
@@ -8050,7 +8082,7 @@ export default function DepartmentKanban() {
                           <div className="space-y-2">
                             <Label className="text-slate-700">Status</Label>
                             <Select value={editTaskStatus} onValueChange={setEditTaskStatus}>
-                              <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                              <SelectTrigger className="w-full min-w-0 border-slate-200 focus:border-slate-400 rounded-xl [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:truncate">
                                 <SelectValue placeholder="Select status" />
                               </SelectTrigger>
                               <SelectContent>
@@ -8062,6 +8094,30 @@ export default function DepartmentKanban() {
                               </SelectContent>
                             </Select>
                           </div>
+
+                          {isWaitingConfirmation(editTaskStatus) ? (
+                            <div className="space-y-2">
+                              <Label className="text-slate-700" title="Manager/Admin/GA">Confirm by</Label>
+                              <Select
+                                value={editTaskConfirmationAssigneeId || "__none__"}
+                                onValueChange={(value) =>
+                                  setEditTaskConfirmationAssigneeId(value === "__none__" ? "" : value)
+                                }
+                              >
+                                <SelectTrigger className="w-full min-w-0 border-slate-200 focus:border-slate-400 rounded-xl [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:truncate">
+                                  <SelectValue placeholder="Select confirmer" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">Select confirmer</SelectItem>
+                                  {confirmerCandidates.map((candidate) => (
+                                    <SelectItem key={candidate.id} value={candidate.id}>
+                                      {candidate.full_name || candidate.username || "-"}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          ) : null}
                         </div>
                         <div className="grid gap-4 md:grid-cols-2">
                           <div className="space-y-2">
@@ -9153,6 +9209,7 @@ export default function DepartmentKanban() {
                       <col className="w-[28px]" />
                       <col className="w-[32px]" />
                       <col className="w-[170px]" />
+                      <col className="w-[100px]" />
                       <col className="w-[60px]" />
                       <col className="w-[36px]" />
                       <col className="w-[46px]" />
@@ -9175,6 +9232,7 @@ export default function DepartmentKanban() {
                           <span className="block">PM</span>
                         </th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
+                        <th className="border border-slate-900 px-2 py-2 text-center text-xs uppercase">SIMBOLI</th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STATUSI</th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">1H SLOT</th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
@@ -9214,7 +9272,6 @@ export default function DepartmentKanban() {
                                     08:00
                                   </span>
                                 ) : null}
-                                <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} className="order-last ml-auto shrink-0" />
                                 <span className="whitespace-pre-wrap break-words">
                                   {(() => {
                                     const hasMarks = typeof row.title === "string" && row.title.includes("[[")
@@ -9231,6 +9288,13 @@ export default function DepartmentKanban() {
                                   })()}
                                 </span>
                               </div>
+                            </td>
+                            <td className="border border-slate-900 w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
+                              {row.typeLabel === "SYS" ? (
+                                <span className="text-xs font-semibold text-slate-600">SYS</span>
+                              ) : (
+                                <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} className="mx-auto shrink-0" />
+                              )}
                             </td>
                             <td
                               className={`border border-slate-900 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(normalizeDailyReportStatusKey(row.status))}`}
@@ -9257,7 +9321,7 @@ export default function DepartmentKanban() {
                         ))
                       ) : (
                         <tr>
-                          <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={12}>
+                          <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={13}>
                             No data available.
                           </td>
                         </tr>
@@ -9282,6 +9346,7 @@ export default function DepartmentKanban() {
                   <col className="w-[30px]" />
                   <col className="w-[36px]" />
                   <col className="w-[200px]" />
+                  <col className="w-[100px]" />
                   <col className="w-[60px]" />
                   <col className="w-[40px]" />
                   <col className="w-[48px]" />
@@ -9299,6 +9364,7 @@ export default function DepartmentKanban() {
                       <span className="block">PM</span>
                     </th>
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
+                    <th className="border border-slate-900 px-2 py-2 text-center text-xs uppercase">SIMBOLI</th>
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STATUSI</th>
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">1H SLOT</th>
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
@@ -9333,7 +9399,6 @@ export default function DepartmentKanban() {
                                     08:00
                                   </span>
                             ) : null}
-                            <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} className="order-last ml-auto shrink-0" />
                             <span className="whitespace-pre-wrap break-words">
                               {(() => {
                                 const hasMarks = typeof row.title === "string" && row.title.includes("[[")
@@ -9350,6 +9415,13 @@ export default function DepartmentKanban() {
                               })()}
                             </span>
                           </div>
+                        </td>
+                        <td className="border border-slate-900 w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
+                          {row.typeLabel === "SYS" ? (
+                            <span className="text-xs font-semibold text-slate-600">SYS</span>
+                          ) : (
+                            <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} className="mx-auto shrink-0" />
+                          )}
                         </td>
                         <td
                           className={`border border-slate-900 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(normalizeDailyReportStatusKey(row.status))}`}
@@ -9375,7 +9447,7 @@ export default function DepartmentKanban() {
                     ))
                   ) : (
                     <tr>
-                      <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
+                      <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={12}>
                         No data available.
                       </td>
                     </tr>

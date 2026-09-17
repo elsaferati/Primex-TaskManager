@@ -11,6 +11,7 @@ import type {
   RealizationManagerReviewDimension,
   RealizationManagerReviewItem,
   RealizationManagerReviewMarker,
+  RealizationManagerReviewRating,
   RealizationManagerReviewResponse,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -36,7 +37,7 @@ function reviewDate(value: string) {
   }).format(new Date(value)).replace(",", " ·")
 }
 
-function StatusPill({ marker }: { marker: RealizationManagerReviewMarker }) {
+function StatusPill({ marker, label }: { marker: RealizationManagerReviewMarker; label?: string }) {
   const positive = marker === "POSITIVE"
   return (
     <span className={cn(
@@ -46,7 +47,7 @@ function StatusPill({ marker }: { marker: RealizationManagerReviewMarker }) {
         : "border-rose-200 bg-rose-50 text-rose-800",
     )}>
       {positive ? <Check className="h-3.5 w-3.5" /> : <TriangleAlert className="h-3.5 w-3.5" />}
-      {positive ? "Mirë" : "Duhet përmirësim"}
+      {label || (positive ? "Mirë" : "Duhet përmirësim")}
     </span>
   )
 }
@@ -66,7 +67,7 @@ function SavedReview({
 }) {
   return (
     <div className="mt-3 space-y-3">
-      <StatusPill marker={item.marker} />
+      <StatusPill marker={item.marker} label={item.label} />
       <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">“{item.comment}”</p>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <p className="text-xs leading-5 text-slate-500">
@@ -88,12 +89,13 @@ function SavedReview({
   )
 }
 
-export function RealizationManagerReview({ periodId, userId }: { periodId: string; userId: string }) {
+export function RealizationManagerReview({ periodId, userId, onSaved }: { periodId: string; userId: string; onSaved?: () => void }) {
   const { apiFetch } = useAuth()
   const [data, setData] = React.useState<RealizationManagerReviewResponse | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [editing, setEditing] = React.useState<RealizationManagerReviewDimension | null>(null)
   const [marker, setMarker] = React.useState<RealizationManagerReviewMarker | null>(null)
+  const [rating, setRating] = React.useState<RealizationManagerReviewRating | "">("")
   const [comment, setComment] = React.useState("")
   const [saving, setSaving] = React.useState(false)
   const [clearing, setClearing] = React.useState<RealizationManagerReviewDimension | null>(null)
@@ -120,11 +122,13 @@ export function RealizationManagerReview({ periodId, userId }: { periodId: strin
   const beginEdit = (dimension: RealizationManagerReviewDimension, item: RealizationManagerReviewItem | null) => {
     setEditing(dimension)
     setMarker(item?.marker ?? null)
+    setRating(item?.rating ?? (item ? item.marker === "POSITIVE" ? "GOOD" : "ACTION_REQUIRED" : ""))
     setComment(item?.comment ?? "")
   }
   const cancelEdit = () => {
     setEditing(null)
     setMarker(null)
+    setRating("")
     setComment("")
   }
   const save = async () => {
@@ -137,7 +141,7 @@ export function RealizationManagerReview({ periodId, userId }: { periodId: strin
       const response = await apiFetch(`${endpoint}/${editing}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ marker, comment: comment.trim() }),
+        body: JSON.stringify({ marker, rating: rating || null, comment: comment.trim() }),
       })
       if (!response.ok) {
         const payload = await response.json().catch(() => ({})) as { detail?: string }
@@ -145,6 +149,7 @@ export function RealizationManagerReview({ periodId, userId }: { periodId: strin
       }
       setData(await response.json() as RealizationManagerReviewResponse)
       cancelEdit()
+      onSaved?.()
       toast.success("Vlerësimi u ruajt")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Vlerësimi nuk u ruajt")
@@ -159,6 +164,7 @@ export function RealizationManagerReview({ periodId, userId }: { periodId: strin
       if (!response.ok) throw new Error("Vlerësimi nuk u hoq")
       setData(await response.json() as RealizationManagerReviewResponse)
       toast.success("Vlerësimi u hoq; historia u ruajt")
+      onSaved?.()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Vlerësimi nuk u hoq")
     } finally {
@@ -189,10 +195,15 @@ export function RealizationManagerReview({ periodId, userId }: { periodId: strin
                 </div>
                 {isEditing ? (
                   <div className="mt-3 space-y-3">
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => setMarker("POSITIVE")} className={cn("rounded-lg border px-3 py-2 text-xs font-semibold", marker === "POSITIVE" ? "border-emerald-400 bg-emerald-50 text-emerald-800" : "border-slate-200 text-slate-600")}>✓ Mirë</button>
-                      <button type="button" onClick={() => setMarker("NEGATIVE")} className={cn("rounded-lg border px-3 py-2 text-xs font-semibold", marker === "NEGATIVE" ? "border-rose-400 bg-rose-50 text-rose-800" : "border-slate-200 text-slate-600")}>⚠ Duhet përmirësim</button>
-                    </div>
+                    <select aria-label={`Vlerësimi për ${title}`} value={rating} onChange={(event) => {
+                      const value = event.target.value as RealizationManagerReviewRating
+                      setRating(value)
+                      setMarker(value ? ["GOOD", "VERY_GOOD"].includes(value) ? "POSITIVE" : "NEGATIVE" : null)
+                    }} className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs">
+                      <option value="">Zgjidh vlerësimin</option>
+                      <option value="GOOD">Mirë</option><option value="VERY_GOOD">Shumë mirë</option>
+                      <option value="ACTION_REQUIRED">Kërkon veprim</option><option value="BAD">Keq</option>
+                    </select>
                     <label className="block text-xs font-semibold text-slate-600">
                       KOMENTI <span className="text-rose-600">*</span>
                       <Textarea className="mt-1.5 min-h-24 font-normal" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Shpjego shkurt vlerësimin…" maxLength={4000} />
@@ -218,7 +229,7 @@ export function RealizationManagerReview({ periodId, userId }: { periodId: strin
           <div className="mt-3 space-y-3 border-l-2 border-slate-200 pl-4">
             {data.history.map((item) => (
               <div key={item.id} className={cn("text-xs", !item.active && "opacity-65")}>
-                <p className="font-semibold text-slate-700">{item.dimension === "PLANNING" ? "Planifikimi" : "Realizimi"} · {item.marker === "POSITIVE" ? "✓ Mirë" : "⚠ Duhet përmirësim"}</p>
+                <p className="font-semibold text-slate-700">{item.dimension === "PLANNING" ? "Planifikimi" : "Realizimi"} · {item.label}</p>
                 <p className="mt-1 whitespace-pre-wrap text-slate-600">“{item.comment}”</p>
                 <p className="mt-1 text-slate-400">{item.created_by_name} · {reviewDate(item.created_at)}{item.active ? "" : " · zëvendësuar/hequr"}</p>
               </div>

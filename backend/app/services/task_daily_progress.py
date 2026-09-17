@@ -93,6 +93,7 @@ async def upsert_explicit_task_daily_status(
     day_date: date,
     status: TaskStatus,
     finish_period: str | None = None,
+    finish_period_is_set: bool = False,
 ) -> None:
     """Keep the planner's per-day status aligned with an explicit task status change.
 
@@ -126,5 +127,25 @@ async def upsert_explicit_task_daily_status(
         return
 
     existing.daily_status = status.value
-    if existing.finish_period is None:
+    if existing.finish_period is None or finish_period_is_set:
         existing.finish_period = finish_period_value
+
+
+async def sync_task_daily_finish_period(
+    db: AsyncSession,
+    *,
+    task_id: uuid.UUID,
+    day_date: date,
+    finish_period: str | None,
+) -> None:
+    """Move an existing daily row to the edited period without changing progress."""
+    existing = (
+        await db.execute(
+            select(TaskDailyProgress).where(
+                TaskDailyProgress.task_id == task_id,
+                TaskDailyProgress.day_date == day_date,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        existing.finish_period = finish_period if finish_period in {"AM", "PM", "ALL"} else "ALL"

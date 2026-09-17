@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { WeeklyRealizationTable, weeklyMetrics } from "./components/WeeklyRealizationTable"
 import { DailyRealizationView } from "./components/DailyRealizationView"
 import { MonthlyRealizationView } from "./components/MonthlyRealizationView"
 import { RealizationManagerReview } from "@/components/realization-manager-review"
@@ -21,9 +22,6 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
-  Sparkles,
-  Target,
-  UserCheck,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -396,31 +394,6 @@ function ProgressBar({ value, className }: { value: number; className?: string }
   )
 }
 
-function MetricCard({
-  icon: Icon,
-  label,
-  value,
-  note,
-}: {
-  icon: React.ComponentType<{ className?: string }>
-  label: string
-  value: string | number
-  note: string
-}) {
-  return (
-    <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
-      <CardContent className="flex items-start justify-between gap-3 py-5">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-          <p className="mt-2 text-3xl font-bold tracking-tight text-slate-900">{value}</p>
-          <p className="mt-1 text-xs text-slate-500">{note}</p>
-        </div>
-        <Icon className="h-8 w-8 shrink-0 text-slate-400" />
-      </CardContent>
-    </Card>
-  )
-}
-
 type ManualDraft = { value: string; comment: string; evidenceIds: string[] }
 
 function QuestionRow({
@@ -499,6 +472,11 @@ function WeeklyRealizationView() {
   const { apiFetch, loading: authLoading, user } = useAuth()
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [departmentId, setDepartmentId] = React.useState("")
+  const [reports, setReports] = React.useState<RealizationWeeklyResponse[]>([])
+  const [failedDepartmentCount, setFailedDepartmentCount] = React.useState(0)
+  const [personFilter, setPersonFilter] = React.useState("ALL")
+  const [detailsOpen, setDetailsOpen] = React.useState(false)
+  const [reviewVersion, setReviewVersion] = React.useState(0)
   const [weekStart, setWeekStart] = React.useState(() => mondayOf(new Date()))
   const [data, setData] = React.useState<RealizationWeeklyResponse | null>(null)
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
@@ -517,7 +495,6 @@ function WeeklyRealizationView() {
   const [dailyApprovalMode, setDailyApprovalMode] = React.useState<"APPROVE" | "REVOKE">("APPROVE")
   const [dailyApprovalComment, setDailyApprovalComment] = React.useState("")
   const [dailyApprovalReason, setDailyApprovalReason] = React.useState("")
-  const [monthlyPulseByUser, setMonthlyPulseByUser] = React.useState<Record<string, RealizationPulse>>({})
   const [reviewLevel, setReviewLevel] = React.useState<RealizationLevel>("B")
   const [managerComment, setManagerComment] = React.useState("")
   const [overrideReason, setOverrideReason] = React.useState("")
@@ -533,6 +510,8 @@ function WeeklyRealizationView() {
   const [meetingId, setMeetingId] = React.useState("")
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
   const reportRequestRef = React.useRef(0)
+  const selectedIdRef = React.useRef(selectedId)
+  selectedIdRef.current = selectedId
 
   const selected = React.useMemo(
     () => data?.people.find((person) => person.id === selectedId) || data?.people[0] || null,
@@ -553,76 +532,73 @@ function WeeklyRealizationView() {
     if (!response.ok) return
     const rows = (await response.json()) as Department[]
     setDepartments(rows)
-    // A manager's own department is only the initial default — every
-    // manager can switch to and manage any department in Realization.
-    const preferred = departmentId || (["MANAGER", "STAFF"].includes(user?.role || "") ? user?.department_id : "")
-    const next = rows.find((row) => row.id === preferred)?.id || rows[0]?.id || ""
-    if (!departmentId) setDepartmentId(next)
-  }, [apiFetch, departmentId, user])
+    // Staff retain their own department; managers and admins start with all.
+    const preferred = user?.department_id
+    const next = user?.role === "STAFF" ? rows.find((row) => row.id === preferred)?.id || rows[0]?.id || "" : "ALL"
+    setDepartmentId((current) => current || next)
+  }, [apiFetch, user])
 
   const loadReport = React.useCallback(async () => {
     if (!departmentId) return
     const requestId = ++reportRequestRef.current
     setLoading(true)
     try {
-      const params = new URLSearchParams({ department_id: departmentId, week_start: weekStart })
-      let response = await apiFetch(`/realization/weekly?${params}`)
-      if (!response.ok) throw new Error(await errorMessage(response))
-      let payload = (await response.json()) as RealizationWeeklyResponse
+      const departmentIds = departmentId === "ALL" ? departments.map((item) => item.id) : [departmentId]
+      const outcomes = await Promise.allSettled(departmentIds.map(async (reportDepartmentId) => {
+        const params = new URLSearchParams({ department_id: reportDepartmentId, week_start: weekStart })
+        let response = await apiFetch(`/realization/weekly?${params}`)
+        if (!response.ok) throw new Error(await errorMessage(response))
+        let payload = (await response.json()) as RealizationWeeklyResponse
 
-      const currentWeek = mondayOf(new Date())
-      const canRefreshLive = (
-        weekStart === currentWeek
-        && payload.has_planned_snapshot
-        && !payload.has_final_snapshot
-        && ["OPEN", "CALCULATED"].includes(payload.period.status)
-        && user?.role !== "STAFF"
-      )
-      if (canRefreshLive) {
-        const todayParams = new URLSearchParams({
-          department_id: departmentId,
-          day: isoLocalDate(new Date()),
-        })
-        const liveResponse = await apiFetch(`/realization/daily/calculate?${todayParams}`, {
-          method: "POST",
-        })
-        if (liveResponse.ok) {
-          response = await apiFetch(`/realization/weekly?${params}`)
-          if (!response.ok) throw new Error(await errorMessage(response))
-          payload = (await response.json()) as RealizationWeeklyResponse
-        } else {
-          toast.warning("Gjendja live nuk u rifreskua", {
-            description: await errorMessage(liveResponse),
-          })
-        }
-      }
-
-      if (requestId !== reportRequestRef.current) return
-      setData(payload)
-      setSelectedId((current) =>
-        payload.people.some((person) => person.id === current) ? current : payload.people[0]?.id || null
-      )
-      const monthParams = new URLSearchParams({
-        department_id: departmentId,
-        month_start: `${isoLocalDate(new Date()).slice(0, 7)}-01`,
-      })
-      const monthlyResponse = await apiFetch(`/realization/monthly?${monthParams}`)
-      if (monthlyResponse.ok) {
-        const monthly = (await monthlyResponse.json()) as {
-          people: Array<{ user_id: string; aggregation: { current_pulse?: RealizationPulse | null } }>
-        }
-        setMonthlyPulseByUser(
-          Object.fromEntries(monthly.people.filter((item) => item.aggregation.current_pulse).map((item) => [item.user_id, item.aggregation.current_pulse as RealizationPulse]))
+        const currentWeek = mondayOf(new Date())
+        const canRefreshLive = (
+          weekStart === currentWeek
+          && payload.has_planned_snapshot
+          && !payload.has_final_snapshot
+          && ["OPEN", "CALCULATED"].includes(payload.period.status)
+          && user?.role !== "STAFF"
         )
-      }
+        if (canRefreshLive) {
+          const todayParams = new URLSearchParams({
+            department_id: reportDepartmentId,
+            day: isoLocalDate(new Date()),
+          })
+          const liveResponse = await apiFetch(`/realization/daily/calculate?${todayParams}`, {
+            method: "POST",
+          })
+          if (liveResponse.ok) {
+            response = await apiFetch(`/realization/weekly?${params}`)
+            if (!response.ok) throw new Error(await errorMessage(response))
+            payload = (await response.json()) as RealizationWeeklyResponse
+          } else {
+            toast.warning("Gjendja live nuk u rifreskua", {
+              description: await errorMessage(liveResponse),
+            })
+          }
+        }
+
+        return payload
+      }))
+      if (requestId !== reportRequestRef.current) return
+      const loaded = outcomes.flatMap((result) => result.status === "fulfilled" ? [result.value] : [])
+      const failures = outcomes.filter((result) => result.status === "rejected")
+      setFailedDepartmentCount(failures.length)
+      if (failures.length) toast.warning(`${failures.length} departamente nuk u ngarkuan`)
+      if (!loaded.length) throw new Error("Raporti nuk u ngarkua")
+      setReports(loaded)
+      const payload = loaded.find((report) => report.people.some((person) => person.id === selectedIdRef.current)) || loaded[0]
+      setData(payload)
+      setSelectedId((current) => payload.people.some((person) => person.id === current) ? current : payload.people[0]?.id || null)
     } catch (error) {
       if (requestId !== reportRequestRef.current) return
       toast.error("Raporti nuk u ngarkua", { description: error instanceof Error ? error.message : undefined })
       setData(null)
+      setReports([])
+      setFailedDepartmentCount(0)
     } finally {
       if (requestId === reportRequestRef.current) setLoading(false)
     }
-  }, [apiFetch, departmentId, weekStart, user])
+  }, [apiFetch, departmentId, departments, weekStart, user])
 
   React.useEffect(() => {
     // Data loading is asynchronous; state updates happen only after the request resolves.
@@ -662,7 +638,7 @@ function WeeklyRealizationView() {
   )
 
   const calculateWeekly = () => {
-    const params = new URLSearchParams({ department_id: departmentId, week_start: weekStart })
+    const params = new URLSearchParams({ department_id: data?.period.department_id || departmentId, week_start: weekStart })
     return run("calculate", `/realization/weekly/calculate?${params}`, { method: "POST" })
   }
 
@@ -676,7 +652,7 @@ function WeeklyRealizationView() {
     setAction(allDepartments ? "export-all" : "export")
     try {
       const params = new URLSearchParams({ week_start: weekStart })
-      if (!allDepartments) params.set("department_id", departmentId)
+      if (!allDepartments && departmentId !== "ALL") params.set("department_id", departmentId)
       const response = await apiFetch(`/realization/export.xlsx?${params}`)
       if (!response.ok) throw new Error(await errorMessage(response))
       const blob = await response.blob()
@@ -736,8 +712,8 @@ function WeeklyRealizationView() {
 
   const openEvidence = async () => {
     setEvidenceOpen(true)
-    if (!departmentId) return
-    const response = await apiFetch(`/meetings?department_id=${encodeURIComponent(departmentId)}`)
+    if (!selected?.department_id) return
+    const response = await apiFetch(`/meetings?department_id=${encodeURIComponent(selected.department_id)}`)
     if (response.ok) setMeetings((await response.json()) as Meeting[])
   }
 
@@ -844,7 +820,7 @@ function WeeklyRealizationView() {
           scope_type: scopeType,
           task_id: scopeType === "TASK" ? taskId : null,
           user_id: selected.user_id,
-          department_id: departmentId,
+          department_id: selected.department_id,
           marker: evidenceMarker,
           category: apiCategory,
           impact_minutes: evidenceCategory === "TIME_SAVED" ? Number(impactMinutes) : null,
@@ -1068,7 +1044,7 @@ function WeeklyRealizationView() {
     )
   }
 
-  const people = data?.people || []
+  const people = reports.flatMap((report) => report.people)
   const colleagueOptions = people.filter((person) => person.id !== selected?.id)
   const extraTaskOptions = Array.from(
     new Map(
@@ -1091,15 +1067,11 @@ function WeeklyRealizationView() {
   const manualCompleteness = selected?.facts_json.manual_question_completeness
   const selectedWeeklyPlanned = selected ? weeklyPlanned(selected) : 0
   const selectedWeeklyCompleted = selected ? weeklyCompleted(selected) : 0
-  const selectedWeeklyAllCompleted = selected ? weeklyAllCompleted(selected) : 0
   const selectedWeeklyAdditional = selected ? weeklyAdditional(selected) : 0
   const isLive = data ? !data.has_final_snapshot : true
   const todayIso = isoLocalDate(new Date())
   const todayTimeline = selected?.facts_json.daily_timeline?.find((item) => item.date === todayIso)
-  const todayPulse = selected?.facts_json.pulse?.pulse
-  const projectedWeeklyPulse = selected?.facts_json.projected_weekly_pulse?.pulse || todayPulse
-  const monthlyPulse = selected ? monthlyPulseByUser[selected.user_id] : undefined
-  const operatingMode = departments.find((item) => item.id === departmentId)?.realization_mode || "AUTO"
+  const operatingMode = departments.find((item) => item.id === selected?.department_id)?.realization_mode || "AUTO"
   const selectedTimeline = WEEK_DAYS.map((label, index) => {
     const date = addDays(weekStart, index)
     const snapshot = selected?.facts_json.daily_timeline?.find((item) => item.date === date)
@@ -1127,8 +1099,8 @@ function WeeklyRealizationView() {
   })
 
   return (
-    <div className="mx-auto w-full max-w-[1720px] space-y-6 pb-12">
-      <div className="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
+    <div className="mx-auto w-full max-w-[1720px] space-y-3 pb-6">
+      <div className="flex flex-col gap-3 border-b border-slate-200 pb-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Realizimi javor</h1>
           <p className="mt-1.5 max-w-2xl text-sm text-slate-500">
@@ -1153,29 +1125,45 @@ function WeeklyRealizationView() {
         </div>
       </div>
 
-      <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
-        <CardContent className="flex flex-col gap-3 py-4 xl:flex-row xl:items-end">
+      <Card className="gap-0 rounded-md border-slate-200 bg-white py-0 shadow-sm">
+        <CardContent className="flex flex-col gap-2 p-3 xl:flex-row xl:items-end">
           <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <div className="space-y-1.5">
               <Label>Departamenti</Label>
-              <Select value={departmentId} onValueChange={setDepartmentId} disabled={user.role === "STAFF"}>
+              <Select value={departmentId} onValueChange={(value) => { setDepartmentId(value); setPersonFilter("ALL"); setDetailsOpen(false) }} disabled={user.role === "STAFF"}>
                 <SelectTrigger className="w-full"><SelectValue placeholder="Zgjidh departamentin" /></SelectTrigger>
                 <SelectContent>
+                  {user.role !== "STAFF" ? <SelectItem value="ALL">Të gjitha departamentet</SelectItem> : null}
                   {departments.map((department) => <SelectItem key={department.id} value={department.id}>{department.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
               <Label>Java (zgjedhja normalizohet në të hënë)</Label>
-              <Input type="date" value={weekStart} onChange={(event) => setWeekStart(mondayOf(new Date(`${event.target.value}T12:00:00`)))} />
+              <Input type="date" value={weekStart} onChange={(event) => {
+                if (event.target.value) {
+                  setWeekStart(mondayOf(new Date(`${event.target.value}T12:00:00`)))
+                  setDetailsOpen(false)
+                }
+              }} />
             </div>
             <div className="space-y-1.5">
               <Label>Personi</Label>
-              <Select value={selected?.id || ""} onValueChange={setSelectedId} disabled={loading || !people.length}>
+              <Select value={personFilter} onValueChange={(value) => {
+                setPersonFilter(value)
+                setDetailsOpen(false)
+                const report = reports.find((item) => item.people.some((person) => person.user_id === value))
+                const person = report?.people.find((item) => item.user_id === value)
+                if (report && person) {
+                  setData(report)
+                  setSelectedId(person.id)
+                }
+              }} disabled={loading || !people.length}>
                 <SelectTrigger className="w-full"><SelectValue placeholder={loading ? "Duke ngarkuar…" : "Zgjidh personin"} /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="ALL">Të gjithë përdoruesit</SelectItem>
                   {people.map((person) => (
-                    <SelectItem key={person.id} value={person.id}>
+                    <SelectItem key={person.id} value={person.user_id}>
                       {person.user_name} · {weeklyAllCompleted(person)} kryer · {weeklyCompleted(person)}/{weeklyPlanned(person)} plan
                     </SelectItem>
                   ))}
@@ -1190,7 +1178,7 @@ function WeeklyRealizationView() {
             <Button variant="outline" onClick={() => void calculateToday()} disabled={!!action}>
               {action === "daily" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarCheck className="h-4 w-4" />} Përditëso tani
             </Button>
-            <Button className={user.role === "STAFF" ? "hidden" : ""} onClick={() => void calculateWeekly()} disabled={!data?.can_calculate || !!action}>
+            <Button className={user.role === "STAFF" || departmentId === "ALL" ? "hidden" : ""} onClick={() => void calculateWeekly()} disabled={loading || !data?.can_calculate || !!action}>
               {action === "calculate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />} {data?.has_final_snapshot ? "Rikalkulo javën" : "Finalizo dhe vlerëso"}
             </Button>
             <Button className={user.role === "STAFF" ? "hidden" : ""} variant="outline" onClick={() => void downloadExcel()} disabled={!people.length || !!action}>
@@ -1211,52 +1199,16 @@ function WeeklyRealizationView() {
         </div>
       ) : null}
 
-      <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
-        <CardContent className="flex flex-wrap items-center gap-x-5 gap-y-2 py-3 text-xs">
-          <span className="font-semibold text-slate-500">Ngjyrat e Weekly Planner-it:</span>
-          {[
-            ["bg-rose-50 border-rose-500", "Pa filluar"],
-            ["bg-amber-50 border-amber-500", "Në progres"],
-            ["bg-orange-50 border-orange-500", "Në konfirmim"],
-            ["bg-emerald-50 border-emerald-500", "Përfunduar"],
-            ["bg-blue-50 border-blue-500", "Shtuar gjatë javës"],
-          ].map(([color, label]) => (
-            <span key={label} className="inline-flex items-center gap-1.5 text-slate-600"><span className={cn("h-3 w-3 rounded-sm border-l-2", color)} />{label}</span>
-          ))}
-        </CardContent>
-      </Card>
-
-      {selected ? (
-        <div className="grid gap-3 md:grid-cols-3">
-          {[
-            ["Sot", todayPulse],
-            ["Java aktuale", projectedWeeklyPulse],
-            ["Muaji aktual", monthlyPulse],
-          ].map(([label, rawPulse]) => {
-            const pulse = rawPulse as RealizationPulse | undefined
-            return (
-              <Card key={label} className={cn("border-[3px] shadow-sm", pulse ? PULSE_STYLE[pulse] : "border-muted")}>
-                <CardContent className="flex items-center justify-between py-4">
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wide">{label}</p>
-                    <p className="mt-1 text-sm font-semibold">{pulse ? PULSE_LABEL[pulse] : "Pa të dhëna"}</p>
-                  </div>
-                  <span className="text-3xl font-black" aria-label={pulse ? PULSE_LABEL[pulse] : "Pa të dhëna"}>
-                    {pulseText(pulse)}
-                  </span>
-                </CardContent>
-              </Card>
-            )
-          })}
-        </div>
+      {!loading && failedDepartmentCount > 0 ? (
+        <p role="alert" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Përmbledhja është e pjesshme: {failedDepartmentCount} departamente nuk u ngarkuan. Rifresko për të provuar përsëri.
+        </p>
       ) : null}
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard icon={Target} label="Realizimi i personit" value={`${selected?.facts_json.weekly_progress_percent || 0}%`} note={selected?.user_name || "Zgjidh personin"} />
-        <MetricCard icon={CalendarCheck} label="Në planin javor" value={selectedWeeklyPlanned} note="Plani bazë i ruajtur në PLANNED" />
-        <MetricCard icon={UserCheck} label="Të përfunduara këtë javë" value={selectedWeeklyAllCompleted} note={`${selectedWeeklyCompleted} nga plani bazë · ${Math.max(0, selectedWeeklyAllCompleted - selectedWeeklyCompleted)} jashtë planit`} />
-        <MetricCard icon={Sparkles} label="Shtuar gjatë javës" value={selectedWeeklyAdditional} note="Raportohen veç nga plani bazë" />
-      </div>
+      <WeeklyRealizationTable reports={loading ? [] : reports} personId={personFilter} loading={loading} onReviewSaved={() => setReviewVersion((value) => value + 1)} onSelect={(report, person) => {
+        setData(report)
+        setSelectedId(person.id)
+        setDetailsOpen(true)
+      }} />
 
       <details className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-slate-900">
@@ -1277,7 +1229,9 @@ function WeeklyRealizationView() {
         </p>
       </details>
 
-      <div className="min-h-[680px]">
+      <details open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)} className="rounded-md border border-slate-200">
+        <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">Detajet: {selected?.user_name || "Zgjidh një përdorues"}</summary>
+        <div className="min-h-[680px]">
         <Card className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-sm">
           {selected ? (
             <>
@@ -1335,11 +1289,11 @@ function WeeklyRealizationView() {
                         <span className="text-slate-400">·</span>
                         <span className="font-semibold text-blue-700">+{selectedWeeklyAdditional} shtesë</span>
                       </div>
-                      <p className="mt-2 text-xs text-slate-500">Detyrat shtesë paraqiten veçmas; nuk e rrisin artificialisht përqindjen e planit bazë.</p>
+                      <p className="mt-2 text-xs text-slate-500">Detyrat ekstra të kryera përfshihen në realizim, deri në maksimum 100%.</p>
                     </div>
                     <div className="min-w-52 rounded-xl border border-slate-200 bg-white px-4 py-3">
-                      <div className="flex items-end justify-between"><span className="text-xs text-slate-500">Realizimi i planit</span><span className="text-2xl font-semibold text-slate-900">{selected.facts_json.weekly_progress_percent || 0}%</span></div>
-                      <ProgressBar value={selected.facts_json.weekly_progress_percent || 0} className="mt-2 h-2.5" />
+                      <div className="flex items-end justify-between"><span className="text-xs text-slate-500">Realizimi i planit</span><span className="text-2xl font-semibold text-slate-900">{weeklyMetrics(selected).percent}%</span></div>
+                      <ProgressBar value={weeklyMetrics(selected).percent} className="mt-2 h-2.5" />
                     </div>
                   </div>
                 </section>
@@ -1535,14 +1489,15 @@ function WeeklyRealizationView() {
 
                 <details className="overflow-hidden rounded-2xl border border-slate-200 bg-white"><summary className="cursor-pointer list-none bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">Evidenca teknike e detyrave ({selected.facts_json.tasks?.length || 0})</summary><div className="max-h-72 overflow-y-auto border-t border-slate-200"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-slate-50"><tr><th className="px-3 py-2 font-medium text-slate-700">Detyra</th><th className="px-3 py-2 font-medium text-slate-700">Burimi</th><th className="px-3 py-2 font-medium text-slate-700">Statusi</th></tr></thead><tbody>{(selected.facts_json.tasks || []).map((task) => <tr key={`${task.match_key}-${task.attribution}`} className="border-t border-slate-200"><td className="px-3 py-2"><p className="font-medium text-slate-900">{cleanTaskTitle(task.title)}</p><p className="text-[11px] text-slate-500">{task.task_id || task.match_key}</p></td><td className="px-3 py-2 text-slate-700">{TASK_SOURCE_LABEL[task.source_type] || task.source_type}</td><td className="px-3 py-2"><Badge variant="outline">{TASK_STATUS_LABEL[task.classification] || task.classification}</Badge></td></tr>)}</tbody></table></div></details>
 
-                {data ? <RealizationManagerReview periodId={data.period.id} userId={selected.user_id} /> : null}
+                {data ? <RealizationManagerReview key={`${selected.id}:${reviewVersion}`} periodId={data.period.id} userId={selected.user_id} onSaved={() => void loadReport()} /> : null}
 
                 {user.role === "ADMIN" && data ? <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-5">{data.period.status === "REVIEWED" ? <Button variant="outline" onClick={() => void run("approve", `/realization/periods/${data.period.id}/approve`, { method: "POST" })} disabled={!!action}><ShieldCheck className="h-4 w-4" /> Aprovo raportin</Button> : null}{data.period.status === "APPROVED" ? <Button variant="destructive" onClick={() => void run("lock", `/realization/periods/${data.period.id}/lock`, { method: "POST" })} disabled={!!action}><LockKeyhole className="h-4 w-4" /> Blloko përfundimisht</Button> : null}</div> : null}
               </CardContent>
             </>
           ) : <div className="flex min-h-[500px] items-center justify-center text-sm text-slate-500">Zgjidh një person nga ekipi.</div>}
         </Card>
-      </div>
+        </div>
+      </details>
 
       <Dialog open={dailyCloseOpen} onOpenChange={setDailyCloseOpen}>
         <DialogContent className="sm:max-w-lg">
