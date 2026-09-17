@@ -20,15 +20,18 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
+from app.models.task_strike_event import TaskStrikeEvent
 from app.models.user import User
 from app.services.daily_realization_classifier import (
     DailyClassificationInput, EXCEPTION_CLASSIFICATIONS, classify_daily_task,
 )
 from app.services.daily_realization_metrics import calculate_daily_metrics
+from app.services.daily_realization_quantities import daily_task_quantity
 from app.services.daily_realization_events import semantic_local_day
 from app.services.daily_realization_explanation import requires_daily_explanation
 from app.services.daily_realization_close_state import resolve_daily_close_state
 from app.services.one_h_slots import effective_slot_date
+from app.services.realization_people import load_active_users_and_common_leave
 
 
 def local_day(value: datetime | None) -> date | None:
@@ -205,10 +208,12 @@ async def build_live_daily_realization(
             baseline_by_user[owner][task_id] = item
             task_ids.add(task_id)
 
-    department_users = (await db.execute(select(User).where(
-        User.department_id == department_id,
-        User.is_active.is_(True),
-    ))).scalars().all()
+    department_users, common_leave = await load_active_users_and_common_leave(
+        db, department_id=department_id, start_date=day, end_date=day,
+    )
+    excluded_on_leave = {
+        person_id for person_id, leave in common_leave.items() if day in leave.days
+    }
     department_user_ids = {row.id for row in department_users}
 
     scoped_task_ids = set(task_ids)
@@ -278,6 +283,12 @@ async def build_live_daily_realization(
         TaskDailyProgress.task_id.in_(task_ids), TaskDailyProgress.day_date == day,
     ))).scalars().all() if task_ids else []
     progress = {row.task_id: row for row in progress_rows}
+    strike_rows = (await db.execute(select(TaskStrikeEvent).where(
+        TaskStrikeEvent.task_id.in_(task_ids),
+    ))).scalars().all() if task_ids else []
+    strikes_by_task = defaultdict(list)
+    for strike in strike_rows:
+        strikes_by_task[strike.task_id].append(strike)
 
     person_ids = set(baseline_by_user) | department_user_ids
     for task_id, owners in current_assignees.items():
@@ -314,6 +325,9 @@ async def build_live_daily_realization(
     people = []
     department_metric_rows: list[dict] = []
     for person_id in sorted(person_ids, key=lambda value: ((users.get(value).full_name if users.get(value) else ""), str(value))):
+        # Full-day PV is outside this person's obligations and department totals.
+        if person_id in excluded_on_leave:
+            continue
         candidate_ids = candidate_task_ids_for_person(
             person_id, baseline_by_user=baseline_by_user,
             current_assignees=current_assignees, tasks=tasks,
@@ -369,6 +383,11 @@ async def build_live_daily_realization(
                 baseline_owner=bool(original),
             )
             completion_credited = credited_completed_day == day
+            quantity = daily_task_quantity(
+                task, day=day, baseline=original, progress=progress.get(task_id),
+                strike_events=strikes_by_task.get(task_id, []),
+                done_for_day=completion_credited,
+            )
             current_due = local_day(task.due_date) if task else None
             had_postponement_event = any(
                 event.action == "task.due_date_changed"
@@ -392,7 +411,7 @@ async def build_live_daily_realization(
                 day=day, in_baseline=bool(original), original_due_date=original_due or current_due,
                 current_due_date=current_due, created_date=local_day(task.created_at) if task else None,
                 completed_date=credited_completed_day, status=task.status if task else "TODO",
-                progress_delta=max(progress_delta, percentage_delta),
+                progress_delta=max(progress_delta, percentage_delta, quantity["completed"] if quantity and quantity["source"] == "title" else 0),
                 postponed=bool(postponed_today and current_due and current_due > day),
                 postponement_approved=approved, reopened=reopened,
                 reassigned_out=was_assigned_out, reassigned_in=was_assigned_in,
@@ -424,11 +443,13 @@ async def build_live_daily_realization(
                 "classification": classification, "in_original_plan": bool(original),
                 "completion_credited": completion_credited,
                 "progress_today": percentage_delta, "completed_delta": progress_delta,
+                "quantity": quantity,
                 "reason_code": state.reason_code if state else None, "comment": state.comment if state else None,
                 "is_bllok": bool(task and task.is_bllok),
                 "one_h_report_slot": task.one_h_report_slot if task else None,
                 "last_change": max(
                     [event.created_at for event in task_events]
+                    + [strike.occurred_at for strike in strikes_by_task.get(task_id, []) if strike.occurred_at <= end_utc]
                     + ([task.updated_at] if task and task.updated_at else [])
                     + ([progress.get(task_id).updated_at] if progress.get(task_id) and progress.get(task_id).updated_at else [])
                     + ([state.updated_at] if state and state.updated_at else [])
@@ -478,6 +499,8 @@ async def build_live_daily_realization(
             metric_rows.append(row)
             if not exceptions_only or classification in EXCEPTION_CLASSIFICATIONS or issues:
                 rows.append(row)
+        if not metric_rows:
+            continue
         metrics = calculate_daily_metrics(metric_rows)
         department_metric_rows.extend(metric_rows)
         user = users.get(person_id)

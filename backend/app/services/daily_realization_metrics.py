@@ -17,8 +17,24 @@ def calculate_daily_metrics(rows: Iterable[Mapping[str, object]]) -> dict[str, i
             "REALIZED_AS_PLANNED", "ADDITIONAL_COMPLETED", "COMPLETED_LATE", "COMPLETED_EARLY"
         )
     )
-    raw = round(planned_done * 100.0 / original, 1) if original else None
-    adjusted = round(planned_done * 100.0 / adjusted_denominator, 1) if adjusted_denominator else None
+    extras = [row for row in items if not row.get("in_original_plan")]
+    extra_completed = sum(
+        row.get("classification") in {"ADDITIONAL_COMPLETED", "COMPLETED_LATE", "COMPLETED_EARLY"}
+        for row in extras
+    )
+    extra_progress = sum(
+        row.get("classification") not in {"ADDITIONAL_COMPLETED", "COMPLETED_LATE", "COMPLETED_EARLY"}
+        and (
+            row.get("classification") == "IN_PROGRESS"
+            or row.get("current_status") == "IN_PROGRESS"
+            or float(row.get("progress_today") or 0) > 0
+            or float(row.get("completed_delta") or 0) > 0
+            or bool(row.get("quantity") and row["quantity"]["source"] == "title" and row["quantity"]["completed"] > 0)
+        )
+        for row in extras
+    )
+    raw = min(100.0, round(total_completed * 100.0 / original, 1)) if original else None
+    adjusted = min(100.0, round(total_completed * 100.0 / adjusted_denominator, 1)) if adjusted_denominator else None
     deadline_rows = [row for row in items if row.get("deadline_was_today")]
     deadline_completed = sum(bool(row.get("deadline_completed")) for row in deadline_rows)
     deadline_postponed = sum(bool(row.get("postponed_today")) for row in deadline_rows)
@@ -28,7 +44,14 @@ def calculate_daily_metrics(rows: Iterable[Mapping[str, object]]) -> dict[str, i
     critical_completed = sum(bool(row.get("deadline_completed")) for row in critical_rows)
     critical_open = max(0, len(critical_rows) - critical_completed - sum(bool(row.get("postponed_today")) for row in critical_rows))
     action_required = any(bool(row.get("action_required")) for row in items) or deadline_open > 0 or overdue_open > 0
+    quantities = [row["quantity"] for row in items if row.get("quantity") and row.get("classification") != "REASSIGNED_OUT"]
+    quantity_planned = sum(int(quantity["planned"]) for quantity in quantities)
+    quantity_completed = sum(int(quantity["completed"]) for quantity in quantities)
     return {
+        "quantity_task_count": len(quantities),
+        "quantity_planned_count": quantity_planned,
+        "quantity_completed_count": quantity_completed,
+        "quantity_delta": quantity_completed - quantity_planned,
         "original_planned_count": original,
         "planned_completed_today_count": planned_done,
         "in_progress_count": outcomes["IN_PROGRESS"],
@@ -37,7 +60,10 @@ def calculate_daily_metrics(rows: Iterable[Mapping[str, object]]) -> dict[str, i
         "approved_postponement_count": outcomes["POSTPONED_APPROVED"],
         "unapproved_postponement_count": outcomes["POSTPONED_UNAPPROVED"],
         "waiting_confirmation_count": outcomes["WAITING_CONFIRMATION"],
-        "additional_completed_count": outcomes["ADDITIONAL_COMPLETED"],
+        "additional_count": len(extras),
+        "additional_completed_count": extra_completed,
+        "additional_in_progress_count": extra_progress,
+        "additional_no_progress_count": len(extras) - extra_completed - extra_progress,
         "completed_late_count": outcomes["COMPLETED_LATE"],
         "completed_early_count": outcomes["COMPLETED_EARLY"],
         "reopened_count": outcomes["REOPENED"],

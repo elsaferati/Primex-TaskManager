@@ -218,6 +218,7 @@ class RealizationObservationVoid(RealizationSchema):
 
 
 class RealizationManagerReviewUpsert(RealizationSchema):
+    rating: Literal["GOOD", "VERY_GOOD", "ACTION_REQUIRED", "BAD"] | None = None
     marker: Literal["POSITIVE", "NEGATIVE"]
     comment: str = Field(min_length=1, max_length=4000)
 
@@ -230,6 +231,7 @@ class RealizationManagerReviewUpsert(RealizationSchema):
 
 
 class RealizationManagerReviewItem(RealizationSchema):
+    rating: Literal["GOOD", "VERY_GOOD", "ACTION_REQUIRED", "BAD"] | None = None
     id: uuid.UUID
     dimension: Literal["PLANNING", "REALIZATION"]
     marker: Literal["POSITIVE", "NEGATIVE"]

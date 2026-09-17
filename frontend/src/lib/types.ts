@@ -858,9 +858,11 @@ export interface RealizationTaskFact {
 }
 
 export type RealizationManagerReviewDimension = "PLANNING" | "REALIZATION"
+export type RealizationManagerReviewRating = "GOOD" | "VERY_GOOD" | "ACTION_REQUIRED" | "BAD"
 export type RealizationManagerReviewMarker = "POSITIVE" | "NEGATIVE"
 
 export interface RealizationManagerReviewItem {
+  rating?: RealizationManagerReviewRating | null
   id: string
   dimension: RealizationManagerReviewDimension
   marker: RealizationManagerReviewMarker
@@ -883,6 +885,10 @@ export interface RealizationManagerReviewResponse {
 }
 
 export interface DailyRealizationMetrics {
+  quantity_task_count: number
+  quantity_planned_count: number
+  quantity_completed_count: number
+  quantity_delta: number
   original_planned_count: number
   planned_completed_today_count: number
   in_progress_count: number
@@ -891,7 +897,10 @@ export interface DailyRealizationMetrics {
   approved_postponement_count: number
   unapproved_postponement_count: number
   waiting_confirmation_count: number
+  additional_count: number
   additional_completed_count: number
+  additional_in_progress_count: number
+  additional_no_progress_count: number
   completed_late_count: number
   completed_early_count: number
   reopened_count: number
@@ -935,6 +944,7 @@ export interface DailyRealizationManagerDecision {
 }
 
 export interface DailyRealizationTask {
+  quantity?: { source: "title" | "products"; planned: number; completed: number; delta: number } | null
   task_id: string
   match_key: string
   title: string
@@ -965,6 +975,8 @@ export interface DailyRealizationTask {
   reason_missing: boolean
   comment_missing: boolean
   deadline_was_today: boolean
+  deadline_completed: boolean
+  deadline_critical: boolean
   deadline_is_overdue: boolean
   postponed_today: boolean
   had_postponement_event: boolean

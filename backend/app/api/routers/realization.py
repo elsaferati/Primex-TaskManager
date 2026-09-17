@@ -111,6 +111,7 @@ from app.services.realization_daily import (
 )
 from app.services.realization_evidence import _snapshot_tasks
 from app.services.realization_excel import build_realization_workbook
+from app.services.realization_weekly_metrics import build_weekly_task_metrics
 from app.services.realization_periods import (
     RealizationWorkflowError,
     ensure_daily_period,
@@ -1110,46 +1111,7 @@ async def _weekly_response(
                 else task_comment_map.get((task_uuid, row.user_id)) if task_uuid else None
             )
         facts["daily_timeline"] = daily_by_user.get(row.user_id, [])
-        expected_keys: set[str] = set()
-        completed_expected_keys: set[str] = set()
-        completed_keys: set[str] = set()
-        additional_keys: set[str] = set()
-        for timeline_item in facts["daily_timeline"]:
-            planned_today = 0
-            completed_today = 0
-            for task in timeline_item.get("tasks") or []:
-                identity = _timeline_task_identity(task)
-                if identity is None:
-                    continue
-                attribution = task.get("attribution")
-                is_expected = attribution in {"planned_today", "system_schedule"}
-                is_completed = task.get("classification") == "completed"
-                if is_expected:
-                    expected_keys.add(identity)
-                    planned_today += 1
-                    if is_completed:
-                        completed_expected_keys.add(identity)
-                        completed_today += 1
-                elif attribution == "added_after_weekly_plan":
-                    additional_keys.add(identity)
-                if is_completed:
-                    completed_keys.add(identity)
-            timeline_item["planned_count"] = planned_today
-            timeline_item["completed_count"] = completed_today
-            timeline_item["daily_progress_percent"] = (
-                round(completed_today * 100.0 / planned_today, 1)
-                if planned_today
-                else 0.0
-            )
-        facts["weekly_planned_count"] = len(expected_keys)
-        facts["weekly_completed_count"] = len(completed_expected_keys)
-        facts["weekly_all_completed_count"] = len(completed_keys)
-        facts["weekly_additional_count"] = len(additional_keys)
-        facts["weekly_progress_percent"] = (
-            round(len(completed_expected_keys) * 100.0 / len(expected_keys), 1)
-            if expected_keys
-            else 0.0
-        )
+        facts.update(build_weekly_task_metrics(facts["tasks"], facts["daily_timeline"]))
         facts["observations"] = live_by_user.get(row.user_id, [])
         pulse_history = [
             {
@@ -2905,6 +2867,7 @@ async def put_manager_review(
         marker=payload.marker,
         comment=payload.comment,
         actor_id=user.id,
+        rating=payload.rating,
     )
     add_audit_log(
         db=db,
@@ -2916,7 +2879,8 @@ async def put_manager_review(
             "period_id": str(period.id),
             "user_id": str(subject_user_id),
             "dimension": dimension,
-            "marker": payload.marker,
+            "marker": review.marker,
+            "rating": payload.rating,
         },
     )
     # A qualitative M3 review is evidence only: it intentionally does not

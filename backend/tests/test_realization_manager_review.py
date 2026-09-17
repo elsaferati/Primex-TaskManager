@@ -202,3 +202,35 @@ def test_response_exposes_manager_name_timestamp_and_active_dimensions():
     assert response["planning"]["marker"] == "POSITIVE"
     assert response["realization"] is None
     assert response["can_edit"] is True
+
+
+@pytest.mark.parametrize("rating,expected_marker", [
+    ("GOOD", "POSITIVE"), ("VERY_GOOD", "POSITIVE"),
+    ("ACTION_REQUIRED", "NEGATIVE"), ("BAD", "NEGATIVE"),
+])
+def test_four_ratings_round_trip_with_correct_marker(rating, expected_marker):
+    period_id, user_id, actor_id, department_id = (uuid.uuid4() for _ in range(4))
+    db = SimpleNamespace(add=lambda value: setattr(db, "added", value), flush=AsyncMock())
+    with patch("app.services.realization_manager_review.manager_review_rows", new=AsyncMock(return_value=[])):
+        review = asyncio.run(upsert_manager_review(
+            db, period_id=period_id, user_id=user_id, department_id=department_id,
+            dimension="REALIZATION", marker="POSITIVE", rating=rating,
+            comment="Weekly review", actor_id=actor_id))
+    assert review.marker == expected_marker
+    assert review.evidence_json["review_rating"] == rating
+    review.id = uuid.uuid4()
+    review.created_at = datetime.now(timezone.utc)
+    db.execute = AsyncMock(return_value=ListResult([SimpleNamespace(id=actor_id, full_name="Manager")]))
+    with patch("app.services.realization_manager_review.manager_review_rows", new=AsyncMock(return_value=[review])):
+        response = asyncio.run(build_manager_review_response(db, period_id=period_id, user_id=user_id, can_edit=True))
+    assert response["realization"]["rating"] == rating
+    assert response["realization"]["marker"] == expected_marker
+
+
+def test_legacy_review_gets_compatible_rating():
+    period_id, user_id = uuid.uuid4(), uuid.uuid4()
+    review = observation(period_id=period_id, user_id=user_id, dimension="REALIZATION", marker="NEGATIVE")
+    db = SimpleNamespace(execute=AsyncMock(return_value=ListResult([])))
+    with patch("app.services.realization_manager_review.manager_review_rows", new=AsyncMock(return_value=[review])):
+        response = asyncio.run(build_manager_review_response(db, period_id=period_id, user_id=user_id, can_edit=False))
+    assert response["realization"]["rating"] == "ACTION_REQUIRED"

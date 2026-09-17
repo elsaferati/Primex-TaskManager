@@ -7,8 +7,11 @@ person's **Planning** and **Realization** dimensions. Each dimension is stored a
 auditable `RealizationObservation` evidence for that weekly `period_id`; it is
 separate from every Daily review and the two dimensions never overwrite each other.
 
-Only `POSITIVE` (shown as **Mirë**) and `NEGATIVE` (shown as **Duhet përmirësim**)
-are accepted, and both require a non-empty comment. No row means **Pa vërejtje**;
+The responsible manager can choose **Mirë**, **Shumë mirë**, **Kërkon veprim**,
+or **Keq**, and each requires a non-empty comment. The rating is stored as
+`review_rating` in observation evidence; the first two map to `POSITIVE`, and the
+last two map to `NEGATIVE`. Existing marker-only reviews remain readable.
+No row means **Pa vërejtje**;
 the system does not create a neutral/default observation. Edits supersede/void the
 previous active observation so manager, timestamp, comment, and history remain
 explainable.
@@ -17,6 +20,86 @@ This management judgment is excluded from automatic evidence calculations. It do
 not change weekly progress, Plan Realization, Deadline Compliance, task
 classification, outcome, grade, or symbol. Department managers are restricted to
 their own department, STAFF cannot write reviews, and ADMIN retains broad access.
+
+The weekly page displays a compact table with filtered totals followed by a row
+per employee. Managers and administrators can filter all departments or one
+department, and all employees or one employee. The realization percentage counts
+all completed work, including extras, against the baseline planned count, capped at
+100%. With no planned work, extras form the denominator. Extras that remain
+open do not add completion credit. Snapshot task facts and daily timeline entries
+are deduplicated by task identity. Totals sum employee obligations, so shared
+assignments contribute once per employee; they are not unique department tasks.
+Automatic A+–E grading and verification requirements remain separate.
+
+## Extra task counts and estimated progress
+
+Daily and weekly tables distinguish **Ekstra gjithsej** (all report obligations
+outside the initial plan, at any outcome) from **Ekstra të kryera** (the completed
+subset). Daily extras can include newly added, reassigned, or carried-over tasks
+absent from the day's baseline. Extra completions include early and late work
+outside that baseline. Weekly extras are deduplicated across the week.
+**Kryer gjithsej** already includes completed extras; do not add them again.
+**Plan** displays the baseline count plus all extras, for example `5+2` when two
+extra obligations exist, even if only one is completed. The realization denominator
+remains the initial planned count.
+
+The **Ekstra** column group has four subcolumns in order: **Të kryera**,
+**Në progres**, **Pa progres**, **Gjithsej**. These three states partition the total.
+Completed daily extras take precedence over progress; progress includes status,
+classification, or positive progress recorded that day. The remaining unfinished
+extras go under **Pa progres**, including waiting or postponed work without
+recorded progress. Weekly extras use deduplicated task facts and their latest
+state, preserving completed work across repeated daily entries.
+
+Click any daily extra count to open that employee's tasks filtered to that state
+or all extras. Extra tasks also show a badge identifying them as outside the
+initial plan.
+
+The daily staff table places the person and department filters in a header row
+above **Emri mbiemri** and **DEP**. Person filtering keeps the staff table visible
+and updates the summary; clicking a name or extra count separately opens task
+details. Changing department resets the person filter and closes task details.
+Staff rows are grouped in **DEV → GD → PCM** order, then other departments.
+The chosen daily sort applies within each department, with name as the tie-breaker.
+
+The daily staff table shows **Afat sot**, **Kryer**, and **Pa kryer** for every
+task whose due date was the report date. A thick red border around **Afat sot**
+indicates that the person has at least one task marked as deadline important on
+that date. Immutable daily deadline evidence keeps a task in the report-date
+population when its due date is moved later. **Pa kryer** is
+`gjithsej - kryer` and includes postponed deadlines. Clicking a number opens
+the person's task list with the matching deadline filter. Each task badge
+explicitly says `Deadline` or `Deadline Important`, followed by `kryer`,
+`pa kryer`, or `shtyrë`.
+
+The daily staff table also shows **Sasi · produkte / pika**, with **Planifikuar**,
+**Kryer**, and **+ / −**. These are unit quantities, separate from task counts
+and the status-based realization percentages. Clicking a person's name shows
+the quantities and their source for each task.
+
+- A title such as `EF: FRG: 2/17 SHTO 2 KZH TE REJA` plans **2** units. The
+  smaller number is always the daily target: `40/4` plans **4**, `17/4` plans
+  **4**, and both `117/20` and `20/117` plan **20**. The current title supplies
+  the target, so title corrections immediately update the quantity. Formatting markers
+  are removed before reading the fraction. A deleted task falls back to its
+  captured title.
+  Completed units are distinct struck checklist points for the selected local
+  day. Mirrored title/description points count once. Strike timestamps/history
+  exclude previous-day work; reopened points do not count. Undated legacy
+  strikes fall back only to the task's due/completion day. Striking the whole
+  single-line quantity heading marks all its planned units complete. An explicit
+  `DONE` recorded on the report day always marks all planned units complete,
+  even when checklist strikes are partial or absent; older completions do not.
+- Project tasks in the `PRODUCT` phase use the M3 product-count parser:
+  `daily_products` is planned and `completed_products=N` is completed. A daily
+  product progress record overrides current live values for its report day.
+  Current notes do not credit completed products to a different day. Copied
+  totals on `CONTROL` or nonproject tasks do not count as product production.
+- Difference is completed minus planned: plan 2/done 1 displays **−1**;
+  plan 2/done 2 displays **0 ✓**; plan 2/done 3 displays **+1**. Rows without
+  quantitative targets display **—**. Transferred-out obligations are excluded
+  from the previous owner's quantity totals.
+Weekly rows follow the same department order and sort by name within each group.
 
 ## Boundary
 
