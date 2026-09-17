@@ -551,7 +551,7 @@ export default function TaskDetailsPage() {
                   Back
                 </Button>
                 <div className="flex items-start gap-2 text-2xl font-semibold text-slate-900">
-                  <TaskOneHMarker marker={task.one_h_marker} className="mt-1" />
+                  <TaskOneHMarker marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} comment={task.one_h_marker_comment} className="mt-1" />
                   <span>{renderMarkedNoteContent(title || task.title, title || task.title)}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">

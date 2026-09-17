@@ -57,6 +57,8 @@ class TaskOut(BaseModel):
     is_1h_report: bool
     one_h_report_slot: str | None = None
     one_h_marker: str | None = None
+    one_h_marker_by_ga: bool = False
+    one_h_marker_comment: str | None = None
     is_r1: bool
     is_personal: bool
     fast_task_order: int | None = None
@@ -122,7 +124,8 @@ class TaskCreate(BaseModel):
     is_bllok: bool | None = None
     is_1h_report: bool | None = None
     one_h_report_slot: str | None = Field(default=None, pattern=r"^(10:00|11:00|11:50|14:20|16:00)$")
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|M2|M3)$")
+    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|M2|M3|MONITOR|CLOSE|CLIENT_URGENT)$")
+    one_h_marker_comment: str | None = Field(default=None, max_length=1000)
     is_r1: bool | None = None
     is_personal: bool | None = None
     fast_task_order: int | None = Field(default=None, ge=1)
@@ -160,7 +163,8 @@ class TaskUpdate(BaseModel):
     is_bllok: bool | None = None
     is_1h_report: bool | None = None
     one_h_report_slot: str | None = Field(default=None, pattern=r"^(10:00|11:00|11:50|14:20|16:00)$")
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|M2|M3)$")
+    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|M2|M3|MONITOR|CLOSE|CLIENT_URGENT)$")
+    one_h_marker_comment: str | None = Field(default=None, max_length=1000)
     is_r1: bool | None = None
     is_personal: bool | None = None
     fast_task_order: int | None = Field(default=None, ge=1)

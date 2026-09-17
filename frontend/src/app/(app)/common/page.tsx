@@ -6,6 +6,7 @@ import { toast } from "sonner"
 
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { DiamondAward, TaskReviewDialog } from "@/components/task-review-dialog"
+import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
 import { useAuth } from "@/lib/auth"
 import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
 import { formatDateDMY, formatDateTimeDMY } from "@/lib/dates"
@@ -48,12 +49,15 @@ function canCreatePimImageTestTaskForMeeting(meeting: Meeting): boolean {
 
 type PersonalTaskGroup = "GA" | "KA" | "GENT" | "PX"
 type PersonalRowId = "personalGA" | "personalKA" | "personalGENT" | "personalPX"
-type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3"
+type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
 type OneHMarkerFilter = "all" | "with" | "none" | OneHMarker
 
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "QUESTION", label: "?" },
   { value: "EXCLAMATION", label: "!" },
+  { value: "CLIENT_URGENT", label: "!!!" },
+  { value: "MONITOR", label: "◉" },
+  { value: "CLOSE", label: "X" },
   { value: "M2", label: "M2" },
   { value: "M3", label: "M3" },
   { value: "GENT", label: "GENT" },
@@ -280,7 +284,7 @@ const oneHPrintChecklistsHtml = (reportDay: Date) =>
   ).join("")}</section>`
 
 const oneHMarkerLegendHtml = () =>
-  `<div class="one-h-marker-legend"><strong>LEGJENDA:</strong><span><b>?</b> - PAQARTESI</span><i aria-hidden="true">/</i><span><b>!</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span><i aria-hidden="true">/</i><span><b class="compact-marker">M2</b> - DOREZIM DERI NE PAUZE</span><i aria-hidden="true">/</i><span><b class="compact-marker">M3</b> - DOREZIM DERI NE FUND TE DITES</span><i aria-hidden="true">/</i><span><b class="compact-marker">GENT</b> - PYETJE/SQARIM ME GENTIN</span><i aria-hidden="true">/</i><span><b class="compact-marker">KA</b> - PYETJE/SQARIM ME KA</span><i aria-hidden="true">/</i><span><b>⚑</b> - PYETJE/SQARIM ME GA</span></div>`
+  `<div class="one-h-marker-legend"><strong>LEGJENDA:</strong><span><b>?</b> - PYETJE/PAQARTESI</span><i aria-hidden="true">/</i><span><b>!</b> - DYSHIM/ NUK KUPTOHET DET</span><i aria-hidden="true">/</i><span><b>!!!</b> - KLIENT/URGJENT</span><i aria-hidden="true">/</i><span><b>◉</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span><i aria-hidden="true">/</i><span><b>X</b> - MBYLL DETYREN</span><i aria-hidden="true">/</i><span><b class="compact-marker">M2</b> - DOREZIM DERI NE PAUZE</span><i aria-hidden="true">/</i><span><b class="compact-marker">M3</b> - DOREZIM DERI NE FUND TE DITES</span><i aria-hidden="true">/</i><span><b class="compact-marker">GENT</b> - PYETJE/SQARIM ME GENTIN</span><i aria-hidden="true">/</i><span><b class="compact-marker">KA</b> - PYETJE/SQARIM ME KA</span><i aria-hidden="true">/</i><span><b>⚑</b> - PYETJE/SQARIM ME GA</span></div>`
 
 function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
   return (
@@ -320,9 +324,15 @@ function OneHMarkerLegend() {
   return (
     <div className="one-h-marker-legend">
       <strong>LEGJENDA:</strong>
-      <span><b>?</b> - PAQARTESI</span>
+      <span><b>?</b> - PYETJE/PAQARTESI</span>
       <i aria-hidden="true">/</i>
-      <span><b>!</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span>
+      <span><b>!</b> - DYSHIM/ NUK KUPTOHET DET</span>
+      <i aria-hidden="true">/</i>
+      <span><b>!!!</b> - KLIENT/URGJENT</span>
+      <i aria-hidden="true">/</i>
+      <span><b>◉</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span>
+      <i aria-hidden="true">/</i>
+      <span><b>X</b> - MBYLL DETYREN</span>
       <i aria-hidden="true">/</i>
       <span><b className="compact-marker">M2</b> - DOREZIM DERI NE PAUZE</span>
       <i aria-hidden="true">/</i>
@@ -365,6 +375,8 @@ type FastTaskItemMeta = {
   finishPeriod?: "AM" | "PM" | null
   oneHReportSlot?: OneHReportSlot | null
   oneHMarker?: OneHMarker | null
+  oneHMarkerByGa?: boolean
+  oneHMarkerComment?: string | null
   isDeadlineImportant?: boolean
   dueDate?: string | null
   startDate?: string | null
@@ -783,6 +795,8 @@ type SwimlaneCell = {
   finishPeriod?: "AM" | "PM" | null
   oneHReportSlot?: OneHReportSlot | null
   oneHMarker?: OneHMarker | null
+  oneHMarkerByGa?: boolean
+  oneHMarkerComment?: string | null
   isDeadlineImportant?: boolean
   dueDate?: string | null
   startDate?: string | null
@@ -2974,6 +2988,8 @@ export default function CommonViewPage() {
           finishPeriod: item.finishPeriod || item.finish_period || null,
           oneHReportSlot: normalizeOneHReportSlot(item.oneHReportSlot || item.one_h_report_slot),
           oneHMarker: item.oneHMarker || item.one_h_marker || null,
+          oneHMarkerByGa: Boolean(item.oneHMarkerByGa ?? item.one_h_marker_by_ga),
+          oneHMarkerComment: item.oneHMarkerComment ?? item.one_h_marker_comment ?? null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
@@ -2999,6 +3015,8 @@ export default function CommonViewPage() {
           finishPeriod: item.finishPeriod || item.finish_period || null,
           oneHReportSlot: normalizeOneHReportSlot(item.oneHReportSlot || item.one_h_report_slot),
           oneHMarker: item.oneHMarker || item.one_h_marker || null,
+          oneHMarkerByGa: Boolean(item.oneHMarkerByGa ?? item.one_h_marker_by_ga),
+          oneHMarkerComment: item.oneHMarkerComment ?? item.one_h_marker_comment ?? null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
@@ -3023,6 +3041,8 @@ export default function CommonViewPage() {
               : undefined,
           finishPeriod: item.finishPeriod || item.finish_period || null,
           oneHMarker: item.oneHMarker || item.one_h_marker || null,
+          oneHMarkerByGa: Boolean(item.oneHMarkerByGa ?? item.one_h_marker_by_ga),
+          oneHMarkerComment: item.oneHMarkerComment ?? item.one_h_marker_comment ?? null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
@@ -3049,6 +3069,8 @@ export default function CommonViewPage() {
           finishPeriod: item.finishPeriod || item.finish_period || null,
           oneHReportSlot: normalizeOneHReportSlot(item.oneHReportSlot || item.one_h_report_slot),
           oneHMarker: item.oneHMarker || item.one_h_marker || null,
+          oneHMarkerByGa: Boolean(item.oneHMarkerByGa ?? item.one_h_marker_by_ga),
+          oneHMarkerComment: item.oneHMarkerComment ?? item.one_h_marker_comment ?? null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
@@ -4342,9 +4364,12 @@ export default function CommonViewPage() {
     async (entry: OneHItem | SwimlaneCell, oneHMarker: OneHMarker | null) => {
       if (!entry.taskId || savingOneHMarkerTaskId) return
       const previousMarker = entry.oneHMarker || null
-      const applyMarker = (marker: OneHMarker | null) => {
+      const previousMarkerByGa = Boolean(entry.oneHMarkerByGa)
+      const applyMarker = (marker: OneHMarker | null, markerByGa: boolean) => {
         const updateItems = <T extends FastTaskItemMeta>(items: T[]) =>
-          items.map((item) => item.taskId === entry.taskId ? { ...item, oneHMarker: marker } : item)
+          items.map((item) => item.taskId === entry.taskId
+            ? { ...item, oneHMarker: marker, oneHMarkerByGa: markerByGa }
+            : item)
         setCommonData((current) => ({
           ...current,
           blocked: updateItems(current.blocked),
@@ -4355,7 +4380,7 @@ export default function CommonViewPage() {
       }
 
       setSavingOneHMarkerTaskId(entry.taskId)
-      applyMarker(oneHMarker)
+      applyMarker(oneHMarker, Boolean(oneHMarker && user?.email?.trim().toLowerCase() === "ga@primexeu.com"))
       try {
         const response = await apiFetch(`/tasks/${entry.taskId}/one-h-marker`, {
           method: "PATCH",
@@ -4366,36 +4391,31 @@ export default function CommonViewPage() {
           const detail = await response?.json().catch(() => null)
           throw new Error(typeof detail?.detail === "string" ? detail.detail : "Failed to update the 1H marker.")
         }
+        const updated = await response.json() as { one_h_marker_by_ga?: boolean }
+        applyMarker(oneHMarker, Boolean(updated.one_h_marker_by_ga))
         COMMON_VIEW_CACHE.clear()
         const weekStartIso = `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, "0")}-${String(weekStart.getDate()).padStart(2, "0")}`
         await fetchCommonViewStage(weekStartIso, ["tasks"])
       } catch (error) {
-        applyMarker(previousMarker)
+        applyMarker(previousMarker, previousMarkerByGa)
         toast.error(error instanceof Error ? error.message : "Failed to update the 1H marker.")
       } finally {
         setSavingOneHMarkerTaskId(null)
       }
     },
-    [apiFetch, fetchCommonViewStage, savingOneHMarkerTaskId, weekStart]
+    [apiFetch, fetchCommonViewStage, savingOneHMarkerTaskId, user?.email, weekStart]
   )
   const renderOneHMarkerControl = React.useCallback(
     (entry: OneHItem | SwimlaneCell) => (
-      <select
+      <TaskOneHMarkerEditor
+        taskId={entry.taskId}
+        marker={entry.oneHMarker}
+        markerByGa={entry.oneHMarkerByGa}
+        markerComment={entry.oneHMarkerComment}
         className="oneh-marker-select"
-        value={entry.oneHMarker || ""}
-        disabled={!entry.taskId || savingOneHMarkerTaskId === entry.taskId}
-        aria-label={`Marker for ${entry.title}`}
-        title="1H task marker"
-        onClick={(event) => event.stopPropagation()}
-        onChange={(event) => void updateOneHMarker(entry, (event.target.value || null) as OneHMarker | null)}
-      >
-        <option value="">—</option>
-        {ONE_H_MARKER_OPTIONS.map((option) => (
-          <option key={option.value} value={option.value}>{option.label}</option>
-        ))}
-      </select>
+      />
     ),
-    [savingOneHMarkerTaskId, updateOneHMarker]
+    []
   )
 
   // Filtered data
@@ -5082,6 +5102,8 @@ export default function CommonViewPage() {
                     : typeof item.one_h_marker === "string"
                       ? item.one_h_marker as OneHMarker
                       : null,
+                oneHMarkerByGa: Boolean(item.oneHMarkerByGa ?? item.one_h_marker_by_ga),
+                oneHMarkerComment: item.oneHMarkerComment ?? item.one_h_marker_comment ?? null,
                 isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
                 startDate:
                   typeof item.startDate === "string" ? item.startDate : typeof item.start_date === "string" ? item.start_date : undefined,
@@ -5191,10 +5213,17 @@ export default function CommonViewPage() {
                         : ""
                     }${
                       (item as PrintTask).oneHMarker
-                        ? `<span class="print-task-badge marker">${escapePrintHtml(getOneHMarkerLabel((item as PrintTask).oneHMarker))}</span>`
+                        ? `<span class="print-task-badge marker">${escapePrintHtml(
+                            (item as PrintTask).oneHMarkerByGa
+                              ? `(${getOneHMarkerLabel((item as PrintTask).oneHMarker)})`
+                              : getOneHMarkerLabel((item as PrintTask).oneHMarker)
+                          )}</span>`
                         : ""
                     }`
-                const content = `${taskBadges}${chunkIndex * 6 + cellIndex + 1}. ${isMeetingTable ? escapePrintHtml(title) : commonPrintTitleHtml(title)}`
+                const markerComment = !isMeetingTable && (item as PrintTask).oneHMarkerComment
+                  ? `<div class="print-marker-comment"><strong>KOMENT SIMBOLI:</strong> ${escapePrintHtml((item as PrintTask).oneHMarkerComment || "")}</div>`
+                  : ""
+                const content = `${taskBadges}${chunkIndex * 6 + cellIndex + 1}. ${isMeetingTable ? escapePrintHtml(title) : commonPrintTitleHtml(title)}${markerComment}`
                 return `<td${isMeetingTable ? "" : ' class="print-task-cell"'}><div>${content}</div>${isMeetingTable ? "" : printTaskDatesHtml(item as PrintTask)}</td>`
               }).join("")
               const rowHeaders =
@@ -5225,7 +5254,7 @@ export default function CommonViewPage() {
   .one-h-print-checklist-separator { font-size:13px; font-weight:900; line-height:8px; }
   .one-h-print-checklist-description { color:#475569; }
   .one-h-marker-legend { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 10px; padding:6px 9px; border:1px solid #93c5fd; border-radius:5px; background:#eff6ff; color:#0f2a5f; font-size:9px; font-weight:700; }
-  .one-h-marker-legend b { color:#0f2a5f; font-size:14px; font-weight:900; }
+  .one-h-marker-legend b { color:#dc2626; font-size:14px; font-weight:900; }
   .one-h-marker-legend b.compact-marker { font-size:9px; }
   .one-h-marker-legend i { color:#0f2a5f; font-size:20px; font-style:normal; font-weight:900; line-height:1; }
   table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9px; line-height: 1.2; }
@@ -5598,9 +5627,11 @@ export default function CommonViewPage() {
               isOneHSlotRowId(rowId) ? `[${getOneHReportSlotLabel((e as OneHItem).oneHReportSlot)}] ` : ""
             }[${getCommonTaskPeriodLabel(e.finishPeriod)}] ${isWaitingConfirmationTask(e) ? "[WFC] " : ""}${
               isOneHSlotRowId(rowId) && (e as OneHItem).oneHMarker
-                ? `[${getOneHMarkerLabel((e as OneHItem).oneHMarker)}] `
+                ? `${(e as OneHItem).oneHMarkerByGa
+                    ? `(${getOneHMarkerLabel((e as OneHItem).oneHMarker)})`
+                    : `[${getOneHMarkerLabel((e as OneHItem).oneHMarker)}]`} `
                 : ""
-            }${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
+            }${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}${(e as OneHItem).oneHMarkerComment ? ` [KOMENT SIMBOLI: ${(e as OneHItem).oneHMarkerComment}]` : ""}`
         )
       }
       if (isPersonalRowId(rowId)) {
@@ -8876,7 +8907,7 @@ export default function CommonViewPage() {
             print-color-adjust: exact !important;
           }
           .one-h-marker-legend b {
-            color: #0f2a5f !important;
+            color: #dc2626 !important;
             font-size: 13px;
             font-weight: 900;
           }
@@ -10959,7 +10990,10 @@ export default function CommonViewPage() {
         .week-table-entry-main > span:first-child {
           flex: 1;
           min-width: 0;
+          max-width: 100%;
           white-space: pre-wrap;
+          overflow-wrap: anywhere;
+          word-break: break-word;
           line-height: 1.35;
         }
         .week-table-line-number {
@@ -11173,8 +11207,8 @@ export default function CommonViewPage() {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          min-width: 58px;
-          max-width: 64px;
+          min-width: 50px;
+          max-width: 54px;
           height: 22px;
           padding: 0 2px;
           border-radius: 999px;

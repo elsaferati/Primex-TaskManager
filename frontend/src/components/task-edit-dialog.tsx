@@ -338,7 +338,7 @@ export function TaskEditDialog({
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2 md:col-span-2">
               <Label>Symbol</Label>
-              <TaskOneHMarkerEditor taskId={task?.id} marker={task?.one_h_marker} className="w-full max-w-none" />
+              <TaskOneHMarkerEditor taskId={task?.id} marker={task?.one_h_marker} markerByGa={task?.one_h_marker_by_ga} markerComment={task?.one_h_marker_comment} className="w-full max-w-none" />
             </div>
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="task-edit-title">Title</Label>

@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth"
 import { TaskOneHMarker } from "@/components/task-one-h-marker"
 import type { Task } from "@/lib/types"
 
-type SearchTask = { id: string; title: string; one_h_marker?: Task["one_h_marker"] }
+type SearchTask = { id: string; title: string; one_h_marker?: Task["one_h_marker"]; one_h_marker_by_ga?: boolean; one_h_marker_comment?: string | null }
 type SearchProject = { id: string; name: string }
 
 export function CommandPalette({ openSignal = 0 }: { openSignal?: number }) {
@@ -68,7 +68,7 @@ export function CommandPalette({ openSignal = 0 }: { openSignal?: number }) {
                   router.push(`/tasks/${t.id}`)
                 }}
               >
-                <TaskOneHMarker marker={t.one_h_marker} />
+                <TaskOneHMarker marker={t.one_h_marker} markerByGa={t.one_h_marker_by_ga} comment={t.one_h_marker_comment} />
                 <span>{t.title}</span>
               </CommandItem>
             ))}

@@ -36,15 +36,19 @@ def test_task_marker_legend_explains_the_report_symbols() -> None:
     assert "⚑" in legend_html
     assert "GA" in legend_html
     assert "color:#0F2A5F" in legend_html
+    assert "color:#DC2626" in legend_html
     assert "background:#EFF6FF" in legend_html
-    assert "?</strong> - PAQARTESI" in legend_html
-    assert "!</strong> - KËRKON" in legend_html
+    assert "?</strong> - PYETJE/PAQARTESI" in legend_html
+    assert "!</strong> - DYSHIM/ NUK KUPTOHET DET" in legend_html
+    assert "!!!</strong> - KLIENT/URGJENT" in legend_html
+    assert "◉</strong> - KËRKON" in legend_html
+    assert "X</strong> - MBYLL DETYREN" in legend_html
     assert "⚑</strong> - PYETJE/SQARIM ME GA" in legend_html
     assert "KA</strong> - PYETJE/SQARIM ME KA" in legend_html
     assert "GENT</strong> - PYETJE/SQARIM ME GENTIN" in legend_html
     assert "M2</strong> - DOREZIM DERI NE PAUZE" in legend_html
     assert "M3</strong> - DOREZIM DERI NE FUND TE DITES" in legend_html
-    assert legend_html.count('aria-hidden="true"') == 6
+    assert legend_html.count('aria-hidden="true"') == 9
 
 
 def test_missing_one_h_users_exclude_leave_admin_and_management_initials() -> None:
@@ -394,24 +398,24 @@ def test_thursday_checklists_add_week_closing_questions_in_html_and_excel() -> N
     assert sheet["A4"].fill.fgColor.rgb == "00FFF7F7"
 
 
-def test_tomorrow_report_uses_delivery_day_for_thursday_questions() -> None:
+def test_tomorrow_report_uses_target_day_for_thursday_questions() -> None:
     import asyncio
 
-    sent_thursday = asyncio.run(
+    sent_wednesday = asyncio.run(
         build_tomorrow_print_report(
-            date(2026, 9, 3), include_attachment=True, payload={"items": {}}
+            date(2026, 9, 2), include_attachment=True, payload={"items": {}}
         )
     )
-    sent_wednesday = asyncio.run(
-        build_tomorrow_print_report(date(2026, 9, 2), payload={"items": {}})
+    sent_tuesday = asyncio.run(
+        build_tomorrow_print_report(date(2026, 9, 1), payload={"items": {}})
     )
 
-    assert sent_thursday["target_date"] == "2026-09-04"
-    assert "Planifikimi javor short" in sent_thursday["html"]
-    assert "Emails per missing info, per me vazhdu javen tjeter" in sent_thursday["plain_text"]
-    assert sent_thursday["plain_text"].count("E ENJTE- PYETJET E TE ENJTES") == 1
-    assert "Planifikimi javor short" not in sent_wednesday["html"]
-    thursday_excel = load_workbook(BytesIO(sent_thursday["attachments"][0][1])).active
+    assert sent_wednesday["target_date"] == "2026-09-03"
+    assert "Planifikimi javor short" in sent_wednesday["html"]
+    assert "Emails per missing info, per me vazhdu javen tjeter" in sent_wednesday["plain_text"]
+    assert sent_wednesday["plain_text"].count("E ENJTE- PYETJET E TE ENJTES") == 1
+    assert "Planifikimi javor short" not in sent_tuesday["html"]
+    thursday_excel = load_workbook(BytesIO(sent_wednesday["attachments"][0][1])).active
     thursday_excel_values = [
         str(cell.value or "") for row in thursday_excel.iter_rows() for cell in row
     ]
@@ -445,18 +449,18 @@ def test_friday_checklists_add_staff_questions_and_keep_board_unchanged() -> Non
     assert sheet["A6"].value.startswith("1. Hap doc dhe det")
 
 
-def test_tomorrow_report_uses_delivery_day_for_friday_questions() -> None:
+def test_tomorrow_report_uses_target_day_for_friday_questions() -> None:
     import asyncio
 
     report = asyncio.run(
         build_tomorrow_print_report(
-            date(2026, 9, 4), include_attachment=True, payload={"items": {}}
+            date(2026, 9, 3), include_attachment=True, payload={"items": {}}
         )
     )
 
     assert report["plain_text"].count("E PREMTE - PYETJET E TE PREMTES") == 1
 
-    assert report["target_date"] == "2026-09-07"
+    assert report["target_date"] == "2026-09-04"
     assert "Barazimi i planifikimit javor - next week" in report["html"]
     assert "Barazimi i realizimit javor - this week" in report["plain_text"]
     friday_excel = load_workbook(BytesIO(report["attachments"][0][1])).active
@@ -466,6 +470,16 @@ def test_tomorrow_report_uses_delivery_day_for_friday_questions() -> None:
     assert "E PREMTE - PYETJET E TE PREMTES" in friday_excel_values
     assert any("Barazimi i planifikimit javor - next week" in value for value in friday_excel_values)
     assert any("Barazimi i realizimit javor - this week" in value for value in friday_excel_values)
+
+
+def test_tomorrow_report_sent_friday_does_not_use_friday_questions_for_monday() -> None:
+    report = asyncio.run(
+        build_tomorrow_print_report(date(2026, 9, 4), payload={"items": {}})
+    )
+
+    assert report["target_date"] == "2026-09-07"
+    assert "E PREMTE - PYETJET E TE PREMTES" not in report["html"]
+    assert "Barazimi i planifikimit javor - next week" not in report["html"]
 
 
 def test_today_report_puts_thursday_questions_under_the_weekday_title() -> None:
@@ -568,24 +582,31 @@ def test_task_cards_show_their_am_pm_period_in_email_and_excel() -> None:
 
 def test_one_h_marker_is_a_separate_badge_next_to_am_pm() -> None:
     tasks = [
-        {"title": "Flagged task", "finishPeriod": "AM", "one_h_marker": "FLAG"},
-        {"title": "Question task", "finishPeriod": "PM", "oneHMarker": "QUESTION"},
+        {"taskId": "flagged", "title": "Flagged task", "finishPeriod": "AM", "one_h_marker": "FLAG"},
+        {"taskId": "monitor", "title": "Question task", "finishPeriod": "PM", "oneHMarker": "MONITOR", "oneHMarkerComment": "Check again with KA"},
+        {"taskId": "ga-question", "title": "GA question task", "finishPeriod": "AM", "one_h_marker": "QUESTION", "one_h_marker_by_ga": True},
     ]
 
     report_html = _html_table([("1H 10:00", tasks, False)])
 
-    assert report_html.count('data-task-badge="finish-period"') == 2
-    assert report_html.count('data-task-badge="one-h-marker"') == 2
+    assert report_html.count('data-task-badge="finish-period"') == 3
+    assert report_html.count('data-task-badge="one-h-marker"') == 3
     assert '>⚑</span>' in report_html
+    assert '>(?)</span>' in report_html
     assert 'data-task-badge="finish-period"' in report_html
     assert 'data-task-badge="one-h-marker"' in report_html
+    assert ">◉</span>" in report_html
+    assert "KOMENT SIMBOLI:</strong> Check again with KA" in report_html
+    assert 'data-task-marker-comment="Check again with KA"' in report_html
 
     _, content, _ = _excel_table_attachment(
         [("1H 10:00", tasks, False)], [], date(2026, 8, 14)
     )
     sheet = load_workbook(BytesIO(content)).active
     assert "[AM] [⚑]\n" in sheet["C6"].value
-    assert "[PM] [?]\n" in sheet["D6"].value
+    assert "[PM] [◉]\n" in sheet["D6"].value
+    assert "KOMENT SIMBOLI: Check again with KA" in sheet["D6"].value
+    assert "[AM] (?)\n" in sheet["E6"].value
 
 
 def test_0800_and_am_pm_badges_keep_their_distinct_designs_together() -> None:
@@ -988,19 +1009,35 @@ def test_excel_status_colours_and_done_overrides_ga_personal() -> None:
     assert sheet["C7"].fill.fgColor.rgb.endswith("C4FDC4")
 
 
-def test_done_tasks_are_last_within_each_printed_row() -> None:
+def test_done_tasks_are_excluded_but_other_statuses_remain() -> None:
     rows = _task_rows(
         {
             "oneH": [
-                {"title": "Done first alphabetically", "date": "2026-08-14", "status": "DONE", "oneHReportSlot": "10:00"},
-                {"title": "Todo later alphabetically", "date": "2026-08-14", "status": "TODO", "oneHReportSlot": "10:00"},
-            ]
+                {"title": "Done task", "date": "2026-08-14", "status": "DONE", "oneHReportSlot": "10:00"},
+                {"title": "Completed task", "date": "2026-08-14", "status": "COMPLETED", "oneHReportSlot": "10:00"},
+                {"title": "Complete task", "date": "2026-08-14", "status": "COMPLETE", "oneHReportSlot": "10:00"},
+                {"title": "Todo task", "date": "2026-08-14", "status": "TODO", "oneHReportSlot": "10:00"},
+                {"title": "Progress task", "date": "2026-08-14", "status": "IN_PROGRESS", "oneHReportSlot": "10:00"},
+                {"title": "Waiting confirmation task", "date": "2026-08-14", "status": "WAITING_CONFIRMATION", "oneHReportSlot": "10:00"},
+                {"title": "Waiting client task", "date": "2026-08-14", "status": "WAITING_CLIENT", "oneHReportSlot": "10:00"},
+            ],
         },
         date(2026, 8, 14),
     )
 
     first_slot_items = rows[0][1]
-    assert [item["title"] for item in first_slot_items] == ["Todo later alphabetically", "Done first alphabetically"]
+    assert {item["title"] for item in first_slot_items} == {
+        "Todo task",
+        "Progress task",
+        "Waiting confirmation task",
+    }
+    waiting_client_row = next(row for row in rows if row[0].startswith("WFE"))
+    assert [item["title"] for item in waiting_client_row[1]] == ["Waiting client task"]
+    assert not any(
+        item["title"] in {"Done task", "Completed task", "Complete task"}
+        for _, items, _ in rows
+        for item in items
+    )
 
 
 def test_same_task_details_for_separate_assignees_are_not_deduplicated() -> None:
@@ -1272,7 +1309,10 @@ def test_word_export_preserves_task_markers_and_unavailable_meeting_users() -> N
 
     target_date = date(2026, 9, 16)
     _, content, _ = _docx_table_attachment(
-        [("1H", [{"title": "Task with marker", "oneHMarker": "QUESTION"}], False)],
+        [("1H", [
+            {"title": "Task with marker", "oneHMarker": "QUESTION"},
+            {"title": "GA task with marker", "oneHMarker": "QUESTION", "oneHMarkerByGa": True},
+        ], False)],
         target_date,
         meeting_sections=[(target_date, "SOT", [("TAK INT", [{
             "title": "Internal meeting",
@@ -1287,6 +1327,9 @@ def test_word_export_preserves_task_markers_and_unavailable_meeting_users() -> N
     marker_run = next(run for paragraph in task_cell.paragraphs for run in paragraph.runs if "[?]" in run.text)
     assert marker_run.bold
     assert str(marker_run.font.color.rgb) == "0F2A5F"
+    ga_task_cell = next(cell for cell in cells if "GA task with marker" in cell.text)
+    assert "(?)" in ga_task_cell.text
+    assert "[(?)]" not in ga_task_cell.text
     user_cell = next(cell for cell in cells if cell.text == "LH/DV")
     user_runs = {run.text: run for paragraph in user_cell.paragraphs for run in paragraph.runs}
     assert str(user_runs["LH"].font.color.rgb) == "DC2626"
@@ -1318,6 +1361,7 @@ def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -
                 "items": {
                     "oneH": [
                         {"title": "GA: Today task", "date": target_date.isoformat(), "oneHReportSlot": "10:00"},
+                        {"title": "GA: Done task for selected day", "date": target_date.isoformat(), "status": "DONE", "oneHReportSlot": "10:00"},
                         {"title": "GA: Tomorrow task", "date": "2026-08-25", "oneHReportSlot": "10:00"},
                     ],
                     "external": [
@@ -1340,6 +1384,8 @@ def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -
     assert "1H SHTYPI SOT (Shiko simbolet) — 24.08.2026" in report["html"]
     assert "Today task" in report["html"]
     assert "Tomorrow task" not in report["html"]
+    assert "Done task for selected day" not in report["html"]
+    assert "Done task for selected day" not in report["plain_text"]
     assert "Today meeting" in report["html"]
     assert "Tomorrow meeting" in report["html"]
     assert "Following meeting" not in report["html"]
@@ -1359,6 +1405,7 @@ def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -
     assert "TAKIMET NESER - 25.08.2026" in values
     assert any("Today meeting" in value for value in values)
     assert any("Tomorrow meeting" in value for value in values)
+    assert not any("Done task for selected day" in value for value in values)
 
     tomorrow = asyncio.run(build_tomorrow_print_report(date(2026, 8, 24), include_attachment=True))
     assert tomorrow["target_date"] == "2026-08-25"
@@ -1367,6 +1414,11 @@ def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -
     assert "Today meeting" not in tomorrow["html"]
     assert "Tomorrow meeting" in tomorrow["html"]
     assert "Following meeting" in tomorrow["html"]
+    assert "Done task for selected day" not in tomorrow["html"]
+    assert "Done task for selected day" not in tomorrow["plain_text"]
     assert "NESER - 25.08.2026" in tomorrow["html"]
     assert "PAS NESER - 26.08.2026" in tomorrow["html"]
     assert "DITA PAS NESER" not in tomorrow["html"]
+    tomorrow_workbook = load_workbook(BytesIO(tomorrow["attachments"][0][1]))
+    tomorrow_values = [str(cell.value or "") for row in tomorrow_workbook.active.iter_rows() for cell in row]
+    assert not any("Done task for selected day" in value for value in tomorrow_values)

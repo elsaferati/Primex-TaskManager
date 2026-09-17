@@ -3926,7 +3926,7 @@ export default function ProjectPage() {
                     >
                       <div className="grid grid-cols-[minmax(320px,1fr)_100px_140px_130px_110px_230px] items-start gap-3">
                         <div className="font-medium flex items-center gap-2 flex-wrap">
-                          <TaskOneHMarker marker={task.one_h_marker} />
+                          <TaskOneHMarker marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} comment={task.one_h_marker_comment} />
                           <span>{task.title}</span>
                           {task.skill_category ? (
                             <Badge variant="outline" className="text-xs">

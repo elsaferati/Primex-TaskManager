@@ -3370,6 +3370,7 @@ export default function DepartmentKanban() {
       oneHReportSlot?: OneHReportSlot | null
       isOneHReportTask?: boolean
       oneHMarker?: Task["one_h_marker"]
+      oneHMarkerByGa?: boolean
     }> = []
     const systemAmRows: typeof rows = []
     const systemPmRows: typeof rows = []
@@ -3499,6 +3500,7 @@ export default function DepartmentKanban() {
         userInitials: printInitials,
         taskId: task.id,
         oneHMarker: task.one_h_marker,
+        oneHMarkerByGa: task.one_h_marker_by_ga,
         sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
         startDate: task.start_date || null,
         dueDate: task.due_date || null,
@@ -3539,6 +3541,7 @@ export default function DepartmentKanban() {
         userInitials: printInitials,
         taskId: task.id,
         oneHMarker: task.one_h_marker,
+        oneHMarkerByGa: task.one_h_marker_by_ga,
         sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
         startDate: task.start_date || null,
         dueDate: task.due_date || null,
@@ -3572,6 +3575,7 @@ export default function DepartmentKanban() {
           userInitials: printInitials,
           taskId: task.id,
           oneHMarker: task.one_h_marker,
+          oneHMarkerByGa: task.one_h_marker_by_ga,
           sortDate: task.due_date || task.start_date || task.planned_for || task.created_at,
           startDate: task.start_date || null,
           dueDate: task.due_date || null,
@@ -3616,6 +3620,7 @@ export default function DepartmentKanban() {
         userInitials: printInitials,
         taskId: task.id,
         oneHMarker: task.one_h_marker,
+        oneHMarkerByGa: task.one_h_marker_by_ga,
         sortDate: task.due_date || task.start_date || task.created_at,
         startDate: task.start_date || null,
         dueDate: task.due_date || null,
@@ -3861,6 +3866,7 @@ export default function DepartmentKanban() {
       oneHReportSlot?: OneHReportSlot | null
       isOneHReportTask?: boolean
       oneHMarker?: Task["one_h_marker"]
+      oneHMarkerByGa?: boolean
     }> => {
       const rows: ReturnType<typeof convertDailyReportToRows> = []
       const systemAmRows: typeof rows = []
@@ -3970,6 +3976,7 @@ export default function DepartmentKanban() {
           userInitials: rowUserInitials,
           taskId: task.id,
           oneHMarker: task.one_h_marker,
+          oneHMarkerByGa: task.one_h_marker_by_ga,
           sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
           startDate: task.start_date || null,
           dueDate: task.due_date || null,
@@ -4013,6 +4020,7 @@ export default function DepartmentKanban() {
             userInitials: rowUserInitials,
             taskId: task.id,
             oneHMarker: task.one_h_marker,
+            oneHMarkerByGa: task.one_h_marker_by_ga,
             sortDate: task.due_date || task.start_date || task.created_at,
             startDate: task.start_date || null,
             dueDate: task.due_date || null,
@@ -4046,6 +4054,7 @@ export default function DepartmentKanban() {
               userInitials: rowUserInitials,
               taskId: task.id,
               oneHMarker: task.one_h_marker,
+              oneHMarkerByGa: task.one_h_marker_by_ga,
               sortDate: task.due_date || task.start_date || task.created_at,
               startDate: task.start_date || null,
               dueDate: task.due_date || null,
@@ -7899,9 +7908,12 @@ export default function DepartmentKanban() {
                               </td>
                               <td className="border border-slate-200 w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
                                 {row.typeLabel === "SYS" ? (
-                                  <span className="text-xs font-semibold text-slate-600">SYS</span>
+                                  <div className="flex flex-col items-center gap-1">
+                                    <span className="text-xs font-semibold text-slate-600">SYS</span>
+                                    <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} markerByGa={row.oneHMarkerByGa} className="mx-auto shrink-0" />
+                                  </div>
                                 ) : (
-                                  <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} className="mx-auto shrink-0" />
+                                  <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} markerByGa={row.oneHMarkerByGa} className="mx-auto shrink-0" />
                                 )}
                               </td>
                               <td
@@ -8161,7 +8173,7 @@ export default function DepartmentKanban() {
                             </TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{confirmerLabel}</TableCell>
                             <TableCell className="w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
-                              <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} className="mx-auto shrink-0" />
+                              <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} markerComment={task.one_h_marker_comment} className="mx-auto shrink-0" />
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
                               {waitingConfirmationStatusLabel(task)}
@@ -8319,7 +8331,7 @@ export default function DepartmentKanban() {
                               </div>
                             </TableCell>
                             <TableCell className="w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
-                              <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} className="mx-auto shrink-0" />
+                              <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} markerComment={task.one_h_marker_comment} className="mx-auto shrink-0" />
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
                               {reportStatusLabel(taskStatusValue(task))}
@@ -8441,7 +8453,7 @@ export default function DepartmentKanban() {
                               </div>
                             </TableCell>
                             <TableCell className="w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
-                              <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} className="mx-auto shrink-0" />
+                              <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} markerComment={task.one_h_marker_comment} className="mx-auto shrink-0" />
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
                               {reportStatusLabel(taskStatusValue(task))}
@@ -8546,7 +8558,10 @@ export default function DepartmentKanban() {
                               </div>
                             </TableCell>
                             <TableCell className="w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
-                              <span className="text-xs font-semibold text-slate-600">SYS</span>
+                              <div className="flex flex-col items-center gap-1">
+                                <span className="text-xs font-semibold text-slate-600">SYS</span>
+                                <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} markerComment={task.one_h_marker_comment} className="mx-auto shrink-0" />
+                              </div>
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
                               {reportStatusLabel(taskStatusValue(task))}
@@ -8612,7 +8627,7 @@ export default function DepartmentKanban() {
                     ) : null}
                     <div className="space-y-2">
                       <Label className="text-slate-700">Symbol</Label>
-                      <TaskOneHMarkerEditor taskId={allTodayEditingTask?.id} marker={allTodayEditingTask?.one_h_marker} className="w-full max-w-none rounded-xl" />
+                      <TaskOneHMarkerEditor taskId={allTodayEditingTask?.id} marker={allTodayEditingTask?.one_h_marker} markerByGa={allTodayEditingTask?.one_h_marker_by_ga} markerComment={allTodayEditingTask?.one_h_marker_comment} className="w-full max-w-none rounded-xl" />
                     </div>
                     <div className="space-y-2">
                       <Label className="text-slate-700">Title</Label>
@@ -9303,7 +9318,7 @@ export default function DepartmentKanban() {
                         ) : null}
                         <div className="space-y-2">
                           <Label className="text-slate-700">Symbol</Label>
-                          <TaskOneHMarkerEditor taskId={editingNoProjectTask?.id} marker={editingNoProjectTask?.one_h_marker} className="w-full max-w-none rounded-xl" />
+                          <TaskOneHMarkerEditor taskId={editingNoProjectTask?.id} marker={editingNoProjectTask?.one_h_marker} markerByGa={editingNoProjectTask?.one_h_marker_by_ga} markerComment={editingNoProjectTask?.one_h_marker_comment} className="w-full max-w-none rounded-xl" />
                         </div>
                         <div className="space-y-2">
                         <Label className="text-slate-700">Title</Label>
@@ -9642,7 +9657,7 @@ export default function DepartmentKanban() {
                                   )}
                                 </div>
                                 <div className="sm:px-3 flex items-center justify-center">
-                                  <TaskOneHMarkerEditor taskId={t.id} marker={t.one_h_marker} className="mx-auto shrink-0" />
+                                  <TaskOneHMarkerEditor taskId={t.id} marker={t.one_h_marker} markerByGa={t.one_h_marker_by_ga} markerComment={t.one_h_marker_comment} className="mx-auto shrink-0" />
                                 </div>
                                 <div className="sm:px-3 flex items-start">
                                   <Badge className={`border text-[10px] ${statusBadgeClasses(statusValue)}`}>
@@ -11146,6 +11161,7 @@ export default function DepartmentKanban() {
                   startDate?: string | null
                   dueDate?: string | null
                   oneHMarker?: Task["one_h_marker"]
+                  oneHMarkerByGa?: boolean
                   userName: string
                   userInitials: string
                 }> = []
@@ -11334,9 +11350,12 @@ export default function DepartmentKanban() {
                             </td>
                             <td className="border border-slate-900 w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
                               {row.typeLabel === "SYS" ? (
-                                <span className="text-xs font-semibold text-slate-600">SYS</span>
+                                <div className="flex flex-col items-center gap-1">
+                                  <span className="text-xs font-semibold text-slate-600">SYS</span>
+                                  <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} markerByGa={row.oneHMarkerByGa} className="mx-auto shrink-0" />
+                                </div>
                               ) : (
-                                <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} className="mx-auto shrink-0" />
+                                <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} markerByGa={row.oneHMarkerByGa} className="mx-auto shrink-0" />
                               )}
                             </td>
                             <td
@@ -11464,9 +11483,12 @@ export default function DepartmentKanban() {
                         </td>
                         <td className="border border-slate-900 w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
                           {row.typeLabel === "SYS" ? (
-                            <span className="text-xs font-semibold text-slate-600">SYS</span>
+                            <div className="flex flex-col items-center gap-1">
+                              <span className="text-xs font-semibold text-slate-600">SYS</span>
+                              <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} markerByGa={row.oneHMarkerByGa} className="mx-auto shrink-0" />
+                            </div>
                           ) : (
-                            <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} className="mx-auto shrink-0" />
+                            <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} markerByGa={row.oneHMarkerByGa} className="mx-auto shrink-0" />
                           )}
                         </td>
                         <td

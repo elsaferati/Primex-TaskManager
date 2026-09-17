@@ -48,6 +48,20 @@ def test_clearing_symbol_is_a_shared_update():
     assert marker is None
 
 
+def test_changing_only_symbol_comment_updates_the_shared_marker_bundle():
+    assignee_id = uuid4()
+    payload = GaNoteTaskBundleUpdate(
+        one_h_marker="MONITOR",
+        one_h_marker_comment="Needs a second check",
+    )
+    changed, marker = note_bundle_marker_update(
+        SimpleNamespace(one_h_marker="MONITOR", one_h_marker_comment="Old comment"),
+        payload,
+        [_task(assignee_id, "MONITOR")],
+    )
+    assert (changed, marker) == (True, "MONITOR")
+
+
 def test_conflicting_assignee_symbols_are_rejected():
     first, second = uuid4(), uuid4()
     payload = GaNoteTaskBundleUpdate(

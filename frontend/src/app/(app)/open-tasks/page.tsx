@@ -850,7 +850,7 @@ export default function OpenTasksPage() {
                           </TableCell>
                           <TableCell className="min-w-0 whitespace-normal px-1.5 py-2 align-middle">
                             <div className="flex items-start gap-1.5 break-words text-sm font-medium leading-snug text-slate-900">
-                              <TaskOneHMarker marker={task.one_h_marker} />
+                              <TaskOneHMarker marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} comment={task.one_h_marker_comment} />
                               <span>{renderHighlightedAddedText(task.title)}</span>
                             </div>
                           </TableCell>

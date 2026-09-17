@@ -34,6 +34,8 @@ class PlanNote(Base):
     is_discussed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     one_h_marker: Mapped[str | None] = mapped_column(String(16), nullable=True)
     one_h_marker_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    one_h_marker_by_ga: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    one_h_marker_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     next_week: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"))
     department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("departments.id"))

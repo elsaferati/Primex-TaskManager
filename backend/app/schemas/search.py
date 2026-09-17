@@ -11,6 +11,8 @@ class SearchTaskResult(BaseModel):
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     one_h_marker: str | None = None
+    one_h_marker_by_ga: bool = False
+    one_h_marker_comment: str | None = None
 
 
 class SearchProjectResult(BaseModel):

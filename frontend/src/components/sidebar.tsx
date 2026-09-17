@@ -176,13 +176,18 @@ const navGroups: NavGroup[] = [
     label: "Reports & Control",
     icon: BarChart3,
     items: [
+      { href: "/today-print-report", label: "1H SHTYPI Today", icon: MailCheck },
+      { href: "/tomorrow-print-report", label: "1H SHTYPI Tomorrow", icon: MailCheck },
+      {
+        href: "/admin/1h-reports",
+        label: "1H Reports",
+        icon: MailCheck,
+      },
       { href: "/system-task-instances", label: "System Tasks Report", icon: Layers },
       { href: "/external-tickets", label: "STD Tickets EXT", icon: TicketCheck },
       { href: "/reviews", label: "Reviews", icon: Gem },
       { href: "/reports", label: "Reports & Exports", icon: BarChart3, exact: true },
       { href: "/reports/rlz-daily-control", label: "Kontrolli ditor RLZ", icon: Activity },
-      { href: "/today-print-report", label: "1H SHTYPI Today", icon: MailCheck },
-      { href: "/tomorrow-print-report", label: "1H SHTYPI Tomorrow", icon: MailCheck },
       {
         href: "/reports/weekly-planning-audit",
         label: "Weekly Planning Check",
@@ -196,11 +201,6 @@ const navGroups: NavGroup[] = [
       {
         href: "/end-week-bz-report",
         label: "PIKAT E BZ FIN JAV",
-        icon: MailCheck,
-      },
-      {
-        href: "/admin/1h-reports",
-        label: "1H Reports",
         icon: MailCheck,
       },
     ],

@@ -62,6 +62,40 @@ def test_m2_and_m3_symbols_are_available_in_shared_editors_and_legends():
         assert "M3" in source, relative_path
 
 
+def test_monitor_close_and_symbol_comments_are_available_everywhere():
+    paths = (
+        "frontend/src/components/task-one-h-marker-editor.tsx",
+        "frontend/src/app/(app)/common/page.tsx",
+        "frontend/src/app/(app)/ga-ka-notes/page.tsx",
+        "frontend/src/app/(app)/tomorrow-print-report/page.tsx",
+        "backend/app/services/tomorrow_print_report.py",
+    )
+    for relative_path in paths:
+        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert "MONITOR" in source or "◉" in source, relative_path
+        assert "CLOSE" in source or "MBYLL DETYREN" in source, relative_path
+        assert "comment" in source.lower(), relative_path
+    legend = (ROOT / "frontend/src/components/task-one-h-marker-legend.tsx").read_text(encoding="utf-8")
+    assert "◉" in legend
+    assert "MBYLL DETYREN" in legend
+
+
+def test_client_urgent_symbol_is_available_in_editors_legends_and_reports():
+    paths = (
+        "frontend/src/components/task-one-h-marker-editor.tsx",
+        "frontend/src/components/task-one-h-marker-legend.tsx",
+        "frontend/src/app/(app)/common/page.tsx",
+        "frontend/src/app/(app)/ga-ka-notes/page.tsx",
+        "frontend/src/app/(app)/tomorrow-print-report/page.tsx",
+        "backend/app/services/primeflow_report.py",
+        "backend/app/services/tomorrow_print_report.py",
+    )
+    for relative_path in paths:
+        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert "CLIENT_URGENT" in source or "KLIENT/URGJENT" in source, relative_path
+        assert "!!!" in source, relative_path
+
+
 def test_marker_dropdowns_and_legends_use_the_requested_order():
     ordered_tokens = ("QUESTION", "EXCLAMATION", "M2", "M3", "GENT", "KA", "FLAG")
     dropdown_paths = (
