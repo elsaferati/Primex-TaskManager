@@ -34,9 +34,20 @@ class TestRealizationExcel(unittest.TestCase):
             for key in question_keys
         ]
         self.assertEqual([question["key"] for question in questions], expected_keys)
-        self.assertEqual(len(questions), 15)
+        self.assertEqual(len(questions), 17)
         by_key = {question["key"]: question for question in questions}
-        self.assertEqual(by_key["task_status"]["source_status"], "AUTO")
+        for key in (
+            "plan_completed",
+            "no_progress_tasks",
+            "in_progress_tasks",
+            "new_tasks_added",
+            "approved_postponement",
+            "respected_meetings",
+            "closed_tasks",
+            "frequent_delays",
+            "unexpected_absences",
+        ):
+            self.assertTrue(by_key[key]["source_status"].startswith("AUTO"), key)
         # Managerial judgment remains manual even when supporting evidence is absent.
         for key in (
             "helped_colleague",
@@ -49,7 +60,36 @@ class TestRealizationExcel(unittest.TestCase):
             self.assertEqual(by_key[key]["source_status"], "MANUAL_UNANSWERED", key)
         self.assertFalse(by_key["helped_colleague"]["auto_value"])
         self.assertTrue(by_key["respected_meetings"]["auto_value"])
-        self.assertEqual(by_key["respected_meetings"]["source_status"], "MANUAL_UNANSWERED")
+        self.assertEqual(by_key["respected_meetings"]["source_status"], "AUTO")
+
+    def test_daily_questions_use_the_selected_days_counts(self) -> None:
+        questions = build_live_questions(
+            {
+                "date": "2026-09-17",
+                "daily_planned_count": 4,
+                "daily_completed_count": 3,
+                "weekly_planned_count": 20,
+                "weekly_completed_count": 12,
+                "counters": {
+                    "additional_count": 2,
+                    "fast_task_count": 1,
+                    "in_progress_count": 1,
+                    "no_progress_count": 0,
+                    "tardiness_count": 1,
+                },
+                "tasks": [],
+                "observations": [],
+                "attendance": [{"id": "attendance-1", "type": "VONESE"}],
+            }
+        )
+        by_key = {question["key"]: question for question in questions}
+        self.assertEqual(by_key["plan_completed"]["auto_value"]["planned"], 4)
+        self.assertEqual(by_key["plan_completed"]["auto_value"]["completed"], 3)
+        self.assertEqual(by_key["new_tasks_added"]["auto_value"]["count"], 2)
+        self.assertEqual(by_key["frequent_delays"]["auto_value"]["attendance_tardiness"], 1)
+        self.assertTrue(by_key["frequent_delays"]["auto_value"]["answer"])
+        self.assertEqual(by_key["frequent_delays"]["auto_value"]["threshold"], 1)
+        self.assertEqual(by_key["unexpected_absences"]["source_status"], "AUTO")
 
     def test_export_has_department_evidence_guide_and_weekly_bonus(self) -> None:
         payload = build_realization_workbook(
@@ -74,9 +114,9 @@ class TestRealizationExcel(unittest.TestCase):
                                 "weekly_progress_percent": 80,
                                 "questions": [
                                     {
-                                        "key": "task_status",
-                                        "label": "Statusi i detyrave",
-                                        "auto_value": {"planned": 5, "completed": 4},
+                                        "key": "plan_completed",
+                                        "label": "A janë përfunduar detyrat sipas planit?",
+                                        "auto_value": {"answer": False, "planned": 5, "completed": 4},
                                         "final_value": None,
                                         "source_status": "AUTO",
                                         "evidence_ids": ["task-1"],
@@ -102,19 +142,18 @@ class TestRealizationExcel(unittest.TestCase):
         workbook = load_workbook(io.BytesIO(payload), data_only=False)
         self.assertEqual(
             workbook.sheetnames,
-            ["Përmbledhje", "Development", "Evidenca", "Udhëzuesi"],
+            ["Përmbledhje", "Development", "Evidenca", "Udhëzuesi", "Udhëzuesi i Vlerësimit"],
         )
         values = " ".join(
             str(cell.value or "")
             for sheet in workbook.worksheets
+            if sheet.title != "Udhëzuesi i Vlerësimit"
             for row in sheet.iter_rows()
             for cell in row
         ).lower()
-        # The weekly € bonus (matching the manual grading guide's per-level
-        # table) is a deliberate inclusion; the monthly "PAGA" section is not.
+        # The operational export keeps the weekly bonus and the 17-question guide.
         self.assertIn("bonusi javor", values)
-        self.assertNotIn("pagë bazë", values)
-        self.assertNotIn("bonus mujor", values)
+        self.assertIn("17 pyetjet e raportit", values)
 
         development = workbook["Development"]
         development_values = " ".join(
@@ -149,9 +188,9 @@ class TestRealizationExcel(unittest.TestCase):
                                 "weekly_progress_percent": 16.7,
                                 "questions": [
                                     {
-                                        "key": "task_status",
-                                        "label": "Statusi i detyrave",
-                                        "auto_value": {"planned": 5, "completed": 0},
+                                        "key": "plan_completed",
+                                        "label": "A janë përfunduar detyrat sipas planit?",
+                                        "auto_value": {"answer": False, "planned": 5, "completed": 0},
                                         "source_status": "AUTO",
                                         "evidence_ids": [],
                                     }

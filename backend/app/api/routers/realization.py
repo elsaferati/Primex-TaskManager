@@ -1146,7 +1146,12 @@ async def _weekly_response(
         enriched_questions = []
         for question in facts.get("questions") or []:
             item = dict(question)
-            answer = latest_answers.get(str(item.get("key")))
+            question_key = str(item.get("key"))
+            answer = (
+                latest_answers.get(question_key)
+                if question_key in MANDATORY_MANUAL_QUESTION_KEYS
+                else None
+            )
             if answer is not None:
                 item["final_value"] = (answer.value_json or {}).get("value")
                 item["manager_comment"] = answer.comment
@@ -1656,10 +1661,56 @@ async def _daily_response(
             await db.execute(select(User).where(User.id.in_([item.user_id for item in rows])))
         ).scalars().all()
     } if rows else {}
+    answers_by_result = await _latest_question_answers(db, [row.id for row in rows])
+    answerer_ids = {
+        answer.answered_by
+        for result_answers in answers_by_result.values()
+        for answer in result_answers.values()
+    }
+    answerer_names = {
+        actor.id: actor.full_name
+        for actor in (
+            await db.execute(select(User).where(User.id.in_(answerer_ids)))
+        ).scalars().all()
+    } if answerer_ids else {}
     people = []
     for row in rows:
         payload = RealizationPersonResultOut.model_validate(row).model_dump()
-        payload["facts_json"] = _visible_facts(user, row)
+        facts = _visible_facts(user, row)
+        # Rebuild from the stored facts so historical daily periods also expose
+        # the current 17-question checklist without rewriting their snapshot.
+        facts["questions"] = build_live_questions(facts)
+        latest_answers = answers_by_result.get(row.id, {})
+        facts["manual_answers"] = {
+            key: _answer_payload(answer, answerer_names.get(answer.answered_by))
+            for key, answer in latest_answers.items()
+        }
+        enriched_questions = []
+        for question in facts.get("questions") or []:
+            item = dict(question)
+            question_key = str(item.get("key"))
+            answer = (
+                latest_answers.get(question_key)
+                if question_key in MANDATORY_MANUAL_QUESTION_KEYS
+                else None
+            )
+            if answer is not None:
+                item["final_value"] = (answer.value_json or {}).get("value")
+                item["manager_comment"] = answer.comment
+                item["linked_evidence_ids"] = [
+                    str(value) for value in (answer.evidence_ids_json or [])
+                ]
+                item["source_status"] = "MANUAL_ANSWERED"
+            enriched_questions.append(item)
+        facts["questions"] = enriched_questions
+        answered_mandatory = set(latest_answers) & MANDATORY_MANUAL_QUESTION_KEYS
+        facts["manual_question_completeness"] = {
+            "answered": len(answered_mandatory),
+            "required": len(MANDATORY_MANUAL_QUESTION_KEYS),
+            "missing_keys": sorted(MANDATORY_MANUAL_QUESTION_KEYS - answered_mandatory),
+            "complete": answered_mandatory == MANDATORY_MANUAL_QUESTION_KEYS,
+        }
+        payload["facts_json"] = facts
         if user.role == UserRole.STAFF:
             payload["manager_comment"] = None
             payload["override_reason"] = None
@@ -2405,7 +2456,7 @@ async def save_question_answer(
         require_unlocked(period)
     except RealizationWorkflowError as exc:
         raise _error(exc)
-    if period.period_type != "WEEKLY" or not can_review_realization(
+    if period.period_type not in {"DAILY", "WEEKLY"} or not can_review_realization(
         user, department_id=period.department_id
     ):
         raise HTTPException(status_code=403, detail="Forbidden")

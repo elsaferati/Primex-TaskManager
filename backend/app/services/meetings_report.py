@@ -2737,6 +2737,7 @@ def _normalized_table_header(value: str) -> str:
         "TOTALI": "COUNT",
         "LLOJI": "TYPE",
         "KRIJUAR": "ADDED",
+        "START": "ADDED",
         "ARSYEJA": "REASON",
         "KOMENT": "COMMENT",
         "PRODUKTE": "PRODUCTS",

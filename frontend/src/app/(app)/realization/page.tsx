@@ -62,9 +62,30 @@ import type {
 
 const MANUAL_BOOLEAN_KEYS = new Set([
   "requested_extra_tasks", "helped_colleague", "extra_engagement", "gave_proposal",
-  "respected_meetings", "closed_tasks", "frequent_delays", "unexpected_absences",
   "affected_other_plan", "repeated_after_clarification",
 ])
+
+const AUTO_VALUE_LABELS: Record<string, string> = {
+  answer: "Përgjigjja",
+  planned: "Planifikuar",
+  completed: "Kryer",
+  remaining: "Mbetur",
+  count: "Numri",
+  yes: "Po",
+  fast_tasks: "Fast Tasks",
+  approved: "Aprovuar",
+  unapproved: "Pa aprovim",
+  needs_review: "Për konfirmim",
+  all_closed: "Të gjitha të mbyllura",
+  closed: "Mbyllur",
+  attendance_tardiness: "Vonesa në prezencë",
+  frequent: "Të shpeshta",
+  threshold: "Pragu",
+  tasks_completed_late: "Detyra të kryera me vonesë",
+  tasks_late_open: "Detyra të vonuara të hapura",
+  additional_tasks_candidate: "Detyra shtesë kandidate",
+  verified_categories: "Kategori të verifikuara",
+}
 const EVIDENCE_OPTIONS = [
   ["DIAMOND", "♦ Kontribut i jashtëzakonshëm / DIAMOND"],
   ["QUALITY", "Cilësi e jashtëzakonshme"],
@@ -268,7 +289,7 @@ function groupDayTasks(tasks: RealizationTaskFact[]) {
 const QUESTION_SECTIONS = [
   {
     title: "1. Detyrat",
-    keys: ["task_status", "new_tasks_added", "approved_postponement"],
+    keys: ["plan_completed", "no_progress_tasks", "in_progress_tasks", "new_tasks_added", "approved_postponement"],
   },
   {
     title: "2. Angazhimi",
@@ -313,7 +334,7 @@ function displayValue(value: unknown): string {
   if (Array.isArray(value)) return value.length ? value.map(displayValue).join("; ") : "—"
   if (typeof value === "object") {
     return Object.entries(value as Record<string, unknown>)
-      .map(([key, item]) => `${key.replaceAll("_", " ")}: ${displayValue(item)}`)
+      .map(([key, item]) => `${AUTO_VALUE_LABELS[key] || key.replaceAll("_", " ")}: ${displayValue(item)}`)
       .join(" · ")
   }
   return String(value)
@@ -721,7 +742,7 @@ function WeeklyRealizationView() {
     if (!selected || !data) return
     const completeness = selected.facts_json.manual_question_completeness
     if (!completeness?.complete) {
-      toast.error(`${completeness?.answered || 0} / ${completeness?.required || 12} pyetje manuale të plotësuara`)
+      toast.error(`${completeness?.answered || 0} / ${completeness?.required || 8} pyetje manuale të plotësuara`)
       return
     }
     const changed = reviewLevel !== selected.suggested_level
@@ -1055,6 +1076,9 @@ function WeeklyRealizationView() {
   )
   const grade = selected?.final_level || selected?.suggested_level || null
   const selectedQuestions = selected?.facts_json.questions || []
+  const selectedChecklistQuestions = selectedQuestions.filter((question) =>
+    QUESTION_SECTIONS.some((section) => (section.keys as readonly string[]).includes(question.key))
+  )
   const aiAnalysis = normalizeAIAnalysis(selected?.facts_json.ai_analysis)
   const aiHistory = (selected?.facts_json.ai_analysis_history || [])
     .map((entry) => normalizeAIAnalysis(entry))
@@ -1446,19 +1470,19 @@ function WeeklyRealizationView() {
                   </details>
                 ) : null}
 
-                <details className="group overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                <details open className="group overflow-hidden rounded-2xl border border-slate-200 bg-white">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-3 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
-                    <span>Detajet e vlerësimit dhe argumentimit</span>
-                    <Badge variant="outline">{selectedQuestions.length} pika</Badge>
+                    <span>Checklist-a: përgjigjet automatike dhe inputet</span>
+                    <Badge variant="outline">{selectedChecklistQuestions.length} pyetje</Badge>
                   </summary>
                   <div className="p-4">
                   <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
                     <div>
                       <h2 className="font-semibold text-slate-900">Pyetjet dhe argumentimi</h2>
-                      <p className="mt-1 text-xs text-slate-500">Faktet automatike ndihmojnë vendimin; pyetjet e angazhimit, disiplinës dhe ndikimit plotësohen nga menaxheri.</p>
+                      <p className="mt-1 text-xs text-slate-500">Pyetjet për detyrat dhe disiplinën përgjigjen nga sistemi. Menaxheri plotëson vetëm pyetjet që kërkojnë gjykim njerëzor.</p>
                     </div>
                     <Badge variant="outline">
-                      {selectedQuestions.filter((question) => question.source_status === "AUTO").length} automatike · {manualCompleteness?.answered || 0} manuale të plotësuara · {(manualCompleteness?.required || 0) - (manualCompleteness?.answered || 0)} pa plotësuar · {verifiedEvidence.length} evidenca të verifikuara
+                      {selectedChecklistQuestions.filter((question) => question.source_status.startsWith("AUTO")).length} automatike · {manualCompleteness?.answered || 0} inpute të plotësuara · {(manualCompleteness?.required || 0) - (manualCompleteness?.answered || 0)} pa plotësuar · {verifiedEvidence.length} evidenca të verifikuara
                     </Badge>
                   </div>
                   <div className="grid gap-4 xl:grid-cols-2">
@@ -1619,7 +1643,7 @@ function WeeklyRealizationView() {
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader><DialogTitle>Rishikimi menaxherial — {selected?.user_name}</DialogTitle><DialogDescription>Konfirmo përgjigjet që nuk mund të provohen automatikisht. Çdo ndryshim nga sugjerimi kërkon arsye.</DialogDescription></DialogHeader>
           <div className="space-y-5">
-            <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-lg border bg-muted/30 p-3 text-sm"><p className="text-xs text-muted-foreground">Policy</p><p className="mt-1 text-xl font-semibold">{selected?.suggested_level || "—"}</p></div><div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm"><p className="text-xs text-indigo-700">AI</p><p className="mt-1 text-xl font-semibold text-indigo-950">{selected?.ai_suggested_level || "—"}</p>{selected?.ai_analysis_stale ? <p className="text-xs text-amber-700">Kërkon rigjenerim</p> : null}</div><div className="rounded-lg border p-3 text-sm"><p className="text-xs text-muted-foreground">Pyetjet manuale</p><p className="mt-1 font-semibold">{manualCompleteness?.answered || 0} / {manualCompleteness?.required || 12}</p></div></div>
+            <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-lg border bg-muted/30 p-3 text-sm"><p className="text-xs text-muted-foreground">Policy</p><p className="mt-1 text-xl font-semibold">{selected?.suggested_level || "—"}</p></div><div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm"><p className="text-xs text-indigo-700">AI</p><p className="mt-1 text-xl font-semibold text-indigo-950">{selected?.ai_suggested_level || "—"}</p>{selected?.ai_analysis_stale ? <p className="text-xs text-amber-700">Kërkon rigjenerim</p> : null}</div><div className="rounded-lg border p-3 text-sm"><p className="text-xs text-muted-foreground">Inputet e përgjegjësit</p><p className="mt-1 font-semibold">{manualCompleteness?.answered || 0} / {manualCompleteness?.required || 8}</p></div></div>
             <div className="space-y-1.5"><Label>Vlerësimi final</Label><Select value={reviewLevel} onValueChange={(value) => setReviewLevel(value as RealizationLevel)}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{(["A+", "A", "B", "C", "M", "D", "E"] as RealizationLevel[]).map((level) => <SelectItem key={level} value={level}>{level} · {LEVEL_SYMBOL[level]}</SelectItem>)}</SelectContent></Select>{selected?.facts_json.decision?.hard_cap_level && selected.ai_suggested_level && LEVEL_RANK[selected.ai_suggested_level] < LEVEL_RANK[selected.facts_json.decision.hard_cap_level] ? <p className="text-xs font-medium text-red-700">AI propozon {selected.ai_suggested_level}, por policy vendos kufi {selected.facts_json.decision.hard_cap_level}. Një tejkalim kërkon arsye eksplicite.</p> : null}</div>
             <div className="space-y-1.5"><Label>Komenti i menaxherit</Label><Textarea value={managerComment} onChange={(event) => setManagerComment(event.target.value)} rows={3} placeholder="Përmbledhje e shkurtër dhe faktike..." /></div>
             <div className="space-y-1.5"><Label>Arsyeja e ndryshimit {reviewLevel !== selected?.suggested_level ? "(e detyrueshme)" : "(opsionale)"}</Label><Textarea value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} rows={2} placeholder="Cila evidencë justifikon ndryshimin?" /></div>

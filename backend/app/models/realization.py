@@ -501,7 +501,7 @@ class RealizationDepartmentResult(Base):
 
 
 class RealizationQuestionAnswer(Base):
-    """Append-only manager answer history for formal weekly questions."""
+    """Append-only manager answer history for formal daily and weekly questions."""
 
     __tablename__ = "realization_question_answers"
     __table_args__ = (

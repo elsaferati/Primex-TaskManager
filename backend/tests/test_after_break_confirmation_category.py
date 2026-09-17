@@ -299,6 +299,7 @@ class WaitingClientTaskRowsTests(unittest.TestCase):
             "is_r1": False,
             "is_1h_report": False,
             "is_personal": False,
+            "start_date": datetime(2026, 8, 24, 7, 0),
         }
         values.update(overrides)
         return SimpleNamespace(**values)
@@ -308,16 +309,105 @@ class WaitingClientTaskRowsTests(unittest.TestCase):
             [
                 self._task("Waiting task", "WAITING_CLIENT"),
                 self._task("In progress task", "IN_PROGRESS"),
-                self._task("Waiting task two", " waiting_client ", finish_period="PM"),
+                self._task(
+                    "Waiting task two",
+                    " waiting_client ",
+                    finish_period="PM",
+                    created_at=datetime(2026, 8, 17, 7, 0),
+                    start_date=datetime(2026, 8, 17, 7, 0),
+                ),
             ],
             {"user-1": "Example User"},
             {},
+            date(2026, 8, 24),
             {"development": "DEV"},
         )
 
-        self.assertEqual([row[5] for row in rows], ["Waiting task", "Waiting task two"])
-        self.assertEqual(rows[0], ["1", "EU", "DEV", "AM", "FT", "Waiting task"])
-        self.assertEqual(rows[1][3], "PM")
+        self.assertEqual([row[6] for row in rows], ["Waiting task", "Waiting task two"])
+        self.assertEqual(rows[0], ["1", "EU", "DEV", "This W", "AM", "FT", "Waiting task"])
+        self.assertEqual(rows[1][3], "Last W")
+        self.assertEqual(rows[1][4], "PM")
+
+    def test_dt_wfe_created_week_cells_use_blue_and_yellow_tones(self) -> None:
+        lines = [
+            "DT WFE:",
+            "+----+---------+----------+",
+            "| NR | START    | TITULLI  |",
+            "+----+---------+----------+",
+            "| 1  | This W  | Current  |",
+            "+----+---------+----------+",
+            "| 2  | Last W  | Previous |",
+            "+----+---------+----------+",
+        ]
+
+        rendered = _render_ascii_table_html(lines, "waiting-client")
+
+        self.assertIn('class="created-this-week"', rendered)
+        self.assertIn('bgcolor="#bae6fd"', rendered)
+        self.assertIn('class="created-last-week"', rendered)
+        self.assertIn('bgcolor="#fde68a"', rendered)
+
+    def test_dt_wfe_week_bucket_uses_start_date_only(self) -> None:
+        rows = _waiting_client_task_rows(
+            [
+                self._task(
+                    "Created earlier but starts this week",
+                    "WAITING_CLIENT",
+                    created_at=datetime(2026, 7, 1, 7, 0),
+                    start_date=datetime(2026, 8, 25, 7, 0),
+                ),
+                self._task(
+                    "Created this week but started last week",
+                    "WAITING_CLIENT",
+                    created_at=datetime(2026, 8, 24, 7, 0),
+                    start_date=datetime(2026, 8, 20, 7, 0),
+                ),
+                self._task(
+                    "Older start",
+                    "WAITING_CLIENT",
+                    start_date=datetime(2026, 8, 10, 7, 0),
+                ),
+                self._task("No start", "WAITING_CLIENT", start_date=None),
+                self._task(
+                    "Future start",
+                    "WAITING_CLIENT",
+                    start_date=datetime(2026, 8, 31, 7, 0),
+                ),
+            ],
+            {"user-1": "Example User"},
+            {},
+            date(2026, 8, 24),
+            {"development": "DEV"},
+        )
+
+        buckets_by_title = {row[6]: row[3] for row in rows}
+        self.assertEqual(buckets_by_title["Created earlier but starts this week"], "This W")
+        self.assertEqual(buckets_by_title["Created this week but started last week"], "Last W")
+        self.assertEqual(buckets_by_title["Older start"], "Older")
+        self.assertEqual(buckets_by_title["No start"], "No start")
+        self.assertEqual(buckets_by_title["Future start"], "Future")
+
+    def test_dt_wfe_sorts_departments_then_users_by_weekly_planner_order(self) -> None:
+        tasks = [
+            self._task("PCM second", "WAITING_CLIENT", _weekly_planner_report_sort=(2, "pcm", 0, 2, "dv")),
+            self._task("DEV second", "WAITING_CLIENT", _weekly_planner_report_sort=(0, "dev", 0, 2, "ra")),
+            self._task("GD first", "WAITING_CLIENT", _weekly_planner_report_sort=(1, "gd", 0, 1, "fg")),
+            self._task("PCM first", "WAITING_CLIENT", _weekly_planner_report_sort=(2, "pcm", 0, 1, "oh")),
+            self._task("DEV first", "WAITING_CLIENT", _weekly_planner_report_sort=(0, "dev", 0, 1, "eh")),
+        ]
+
+        rows = _waiting_client_task_rows(
+            tasks,
+            {"user-1": "Example User"},
+            {},
+            date(2026, 8, 24),
+            {"development": "DEV"},
+        )
+
+        self.assertEqual(
+            [row[6] for row in rows],
+            ["DEV first", "DEV second", "GD first", "PCM first", "PCM second"],
+        )
 
     def test_dt_wfe_uses_waiting_client_gold_tone(self) -> None:
         self.assertEqual(_table_tone_from_label("DT WFE:"), "waiting-client")

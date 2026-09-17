@@ -21,6 +21,36 @@ not change weekly progress, Plan Realization, Deadline Compliance, task
 classification, outcome, grade, or symbol. Department managers are restricted to
 their own department, STAFF cannot write reviews, and ADMIN retains broad access.
 
+## Daily and weekly evaluation checklist
+
+The reference evaluation checklist is represented as 17 explicit questions in
+both Daily and Weekly Realization. Nine answers come from system evidence:
+
+- completion of the plan;
+- tasks with no progress;
+- tasks still in progress;
+- newly added tasks;
+- approved or unresolved postponements;
+- respected or missed meetings;
+- closed tasks;
+- attendance tardiness;
+- unexpected absences.
+
+The remaining eight are manager inputs because they require human judgment:
+requested extra tasks, helped a colleague, extra engagement, gave a proposal,
+the week's/day's positive contribution, problems caused, impact on another
+person's plan, and repetition after clarification. Boolean inputs accept Yes,
+No, or Not applicable; the two narrative inputs require text. Every saved answer
+is append-only and belongs to that person's `result_id` and its DAILY or WEEKLY
+`period_id`, so a daily answer never overwrites a weekly answer or another date.
+
+Daily Realization shows the checklist after selecting a person. Automatic facts
+include the selected day's task counts and attendance evidence. Managers can fill
+the eight inputs there; staff can read the resulting checklist. Weekly
+Realization shows the same structure, using the week's aggregate evidence.
+Ambiguous postponements or absences are marked as automatic facts that still need
+manager confirmation rather than being silently treated as resolved.
+
 The weekly page displays a compact table with filtered totals followed by a row
 per employee. Managers and administrators can filter all departments or one
 department, and all employees or one employee. The realization percentage counts
