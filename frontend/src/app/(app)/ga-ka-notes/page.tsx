@@ -32,20 +32,25 @@ import type { Department, GaNote, GaNoteAttachment, PlanNote, Project, SkillCate
 
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
-type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3"
+type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
 type OneHMarkerFilter = "all" | "with" | "none" | OneHMarker
 const ONE_H_MARKER_NONE = "__none__"
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "QUESTION", label: "?" },
   { value: "EXCLAMATION", label: "!" },
+  { value: "CLIENT_URGENT", label: "!!!" },
+  { value: "MONITOR", label: "◉" },
+  { value: "CLOSE", label: "X" },
   { value: "M2", label: "M2" },
   { value: "M3", label: "M3" },
   { value: "GENT", label: "GENT" },
   { value: "KA", label: "KA" },
   { value: "FLAG", label: "⚑" },
 ]
-const oneHMarkerLabel = (value?: OneHMarker | null) =>
-  ONE_H_MARKER_OPTIONS.find((option) => option.value === value)?.label || ""
+const oneHMarkerLabel = (value?: OneHMarker | null, byGa = false) => {
+  const label = ONE_H_MARKER_OPTIONS.find((option) => option.value === value)?.label || ""
+  return label && byGa ? `(${label})` : label
+}
 
 const TYPE_BADGE: Record<NoteType, string> = {
   GA: "bg-amber-100 text-amber-800 border-amber-200",
@@ -1176,9 +1181,12 @@ export default function GaKaNotesPage() {
   const [projectId, setProjectId] = React.useState(urlProjectId || "NONE")
   const [content, setContent] = React.useState("")
   const [noteOneHMarker, setNoteOneHMarker] = React.useState<OneHMarker | typeof ONE_H_MARKER_NONE>(ONE_H_MARKER_NONE)
+  const [noteOneHMarkerComment, setNoteOneHMarkerComment] = React.useState("")
   const [noteType] = React.useState<NoteType>("GA")
   const [priority] = React.useState<NotePriority>("NONE")
   const [loading, setLoading] = React.useState(false)
+  const notesRequestIdRef = React.useRef(0)
+  const notesRequestInFlightRef = React.useRef(false)
   const [posting, setPosting] = React.useState(false)
   const [selectedFiles, setSelectedFiles] = React.useState<File[]>([])
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
@@ -1208,6 +1216,7 @@ export default function GaKaNotesPage() {
     ONE_H_REPORT_SLOT_NONE_VALUE
   )
   const [taskOneHMarker, setTaskOneHMarker] = React.useState<OneHMarker | typeof ONE_H_MARKER_NONE>(ONE_H_MARKER_NONE)
+  const [taskOneHMarkerComment, setTaskOneHMarkerComment] = React.useState("")
   const [taskDueDate, setTaskDueDate] = React.useState("")
   const [taskStartDate, setTaskStartDate] = React.useState("")
   const [taskDeadlineImportant, setTaskDeadlineImportant] = React.useState(false)
@@ -1224,6 +1233,7 @@ export default function GaKaNotesPage() {
   const [editNoteId, setEditNoteId] = React.useState<string | null>(null)
   const [editContent, setEditContent] = React.useState("")
   const [editNoteOneHMarker, setEditNoteOneHMarker] = React.useState<OneHMarker | typeof ONE_H_MARKER_NONE>(ONE_H_MARKER_NONE)
+  const [editNoteOneHMarkerComment, setEditNoteOneHMarkerComment] = React.useState("")
   const [editDoneRanges, setEditDoneRanges] = React.useState<DoneMarkRange[]>([])
   const [editAddedRanges, setEditAddedRanges] = React.useState<TextMarkRange[]>([])
   const [editDescription, setEditDescription] = React.useState("")
@@ -1452,9 +1462,15 @@ export default function GaKaNotesPage() {
 
 
 
-  const fetchNotes = React.useCallback(async () => {
-    if (!user) return
-    setLoading(true)
+  const fetchNotes = React.useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (!user?.id) return false
+    // Polling/focus refreshes are best-effort. If another notes request is
+    // already running, keep the current table and let that request finish.
+    if (silent && notesRequestInFlightRef.current) return false
+
+    const requestId = ++notesRequestIdRef.current
+    notesRequestInFlightRef.current = true
+    if (!silent) setLoading(true)
     try {
       let gaUrl = "/ga-notes"
       let planUrl = "/plan-notes"
@@ -1481,14 +1497,19 @@ export default function GaKaNotesPage() {
               attachments: [],
             })),
         ]
-        setNotes(combined)
+        if (requestId === notesRequestIdRef.current) setNotes(combined)
+        return true
       } else {
-        toast.error("Could not load GA/KA and PX JAV notes")
+        if (!silent) toast.error("Could not load GA/KA and PX JAV notes")
+        return false
       }
     } finally {
-      setLoading(false)
+      if (requestId === notesRequestIdRef.current) {
+        notesRequestInFlightRef.current = false
+        if (!silent) setLoading(false)
+      }
     }
-  }, [apiFetch, departmentId, projectId, user])
+  }, [apiFetch, departmentId, projectId, user?.id])
 
   // Sync state with URL parameters when they change
   React.useEffect(() => {
@@ -1663,7 +1684,7 @@ export default function GaKaNotesPage() {
   }, [apiFetch])
 
   useVisibleRefresh(async () => {
-    await fetchNotes()
+    await fetchNotes({ silent: true })
     await loadNoteTasks()
   }, !editNoteId && !savingEdit)
 
@@ -1989,6 +2010,7 @@ export default function GaKaNotesPage() {
           department_id: finalDepartmentId,
           project_id: finalProjectId,
           one_h_marker: noteOneHMarker === ONE_H_MARKER_NONE ? null : noteOneHMarker,
+          one_h_marker_comment: noteOneHMarker === ONE_H_MARKER_NONE ? null : noteOneHMarkerComment.trim() || null,
         }),
       })
       if (!res?.ok) {
@@ -2008,6 +2030,7 @@ export default function GaKaNotesPage() {
       setNotes((prev) => [created, ...prev])
       setContent("")
       setNoteOneHMarker(ONE_H_MARKER_NONE)
+      setNoteOneHMarkerComment("")
       if (selectedFiles.length > 0) {
         try {
           const attachments = await uploadNoteAttachments(created.id, selectedFiles)
@@ -2024,6 +2047,13 @@ export default function GaKaNotesPage() {
   }
 
   const updateEditNoteMarker = (value: OneHMarker | typeof ONE_H_MARKER_NONE) => {
+    if (value !== ONE_H_MARKER_NONE) {
+      const nextComment = window.prompt("Optional symbol comment:", value === editNoteOneHMarker ? editNoteOneHMarkerComment : "")
+      if (nextComment === null) return
+      setEditNoteOneHMarkerComment(nextComment)
+    } else {
+      setEditNoteOneHMarkerComment("")
+    }
     setEditNoteOneHMarker(value)
     const marker = value === ONE_H_MARKER_NONE ? null : value
     setEditTaskAssigneeStates((current) => Object.fromEntries(
@@ -2054,6 +2084,7 @@ export default function GaKaNotesPage() {
     }
     setEditContent(parsedContent.text)
     setEditNoteOneHMarker(note.one_h_marker ?? ONE_H_MARKER_NONE)
+    setEditNoteOneHMarkerComment(note.one_h_marker_comment || "")
     setEditDoneRanges(parsedContent.doneRanges)
     setEditAddedRanges(parsedContent.addedRanges)
     const taskInfo = noteTaskInfo.get(note.id)
@@ -2319,6 +2350,7 @@ export default function GaKaNotesPage() {
         : `/${noteBasePath}/${editNoteId}`
       const body: Record<string, unknown> = { content: serializedContent }
       body.one_h_marker = editNoteOneHMarker === ONE_H_MARKER_NONE ? null : editNoteOneHMarker
+      body.one_h_marker_comment = editNoteOneHMarker === ONE_H_MARKER_NONE ? null : editNoteOneHMarkerComment.trim() || null
       if (taskInfo?.taskId) {
         const originalAssigneeIds = Array.from(
           new Set(taskInfo.assignees.map((assignee) => assignee.id).filter(Boolean))
@@ -2445,6 +2477,7 @@ export default function GaKaNotesPage() {
     setTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
     setTaskOneHReportSlot(ONE_H_REPORT_SLOT_NONE_VALUE)
     setTaskOneHMarker(note.one_h_marker ?? ONE_H_MARKER_NONE)
+    setTaskOneHMarkerComment(note.one_h_marker_comment || "")
     setTaskDueDate("")
     setTaskStartDate("")
     setTaskDeadlineImportant(false)
@@ -2596,6 +2629,7 @@ export default function GaKaNotesPage() {
               ? taskOneHReportSlot
               : null,
           one_h_marker: taskOneHMarker === ONE_H_MARKER_NONE ? null : taskOneHMarker,
+          one_h_marker_comment: taskOneHMarker === ONE_H_MARKER_NONE ? null : taskOneHMarkerComment.trim() || null,
           is_r1: isR1,
           is_personal: isPersonal,
           skill_category: taskSkillCategory,
@@ -3199,12 +3233,17 @@ export default function GaKaNotesPage() {
           </div>
           <div className="max-w-[220px] space-y-2">
             <Label>Symbol (optional)</Label>
-            <Select value={noteOneHMarker} onValueChange={(value) => setNoteOneHMarker(value as OneHMarker | typeof ONE_H_MARKER_NONE)}>
-              <SelectTrigger className="border-blue-300 bg-blue-50 font-black text-[#0F2A5F]"><SelectValue /></SelectTrigger>
+            <Select value={noteOneHMarker} onValueChange={(rawValue) => {
+              const value = rawValue as OneHMarker | typeof ONE_H_MARKER_NONE
+              if (value === ONE_H_MARKER_NONE) { setNoteOneHMarker(value); setNoteOneHMarkerComment(""); return }
+              const nextComment = window.prompt("Optional symbol comment:", value === noteOneHMarker ? noteOneHMarkerComment : "")
+              if (nextComment !== null) { setNoteOneHMarker(value); setNoteOneHMarkerComment(nextComment) }
+            }}>
+              <SelectTrigger className={`border-blue-300 bg-blue-50 font-black ${noteOneHMarker === ONE_H_MARKER_NONE ? "text-[#0F2A5F]" : "text-red-600"}`}><SelectValue /></SelectTrigger>
               <SelectContent className="font-black text-[#0F2A5F]">
                 <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
                 {ONE_H_MARKER_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{option.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -3263,19 +3302,25 @@ export default function GaKaNotesPage() {
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-xs text-[#0F2A5F]">
             <span className="font-bold uppercase">Legjenda:</span>
-            <span><b className="text-base font-black">?</b> - PAQARTESI</span>
+             <span><b className="text-base font-black text-red-600">?</b> - PYETJE/PAQARTESI</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
-            <span><b className="text-base font-black">!</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span>
+             <span><b className="text-base font-black text-red-600">!</b> - DYSHIM/ NUK KUPTOHET DET</span>
+             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
+             <span><b className="text-base font-black text-red-600">!!!</b> - KLIENT/URGJENT</span>
+             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
+             <span><b className="text-base font-black text-red-600">◉</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span>
+             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
+             <span><b className="text-base font-black text-red-600">X</b> - MBYLL DETYREN</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
-            <span><b className="text-xs font-black">M2</b> - DOREZIM DERI NE PAUZE</span>
+            <span><b className="text-xs font-black text-red-600">M2</b> - DOREZIM DERI NE PAUZE</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
-            <span><b className="text-xs font-black">M3</b> - DOREZIM DERI NE FUND TE DITES</span>
+            <span><b className="text-xs font-black text-red-600">M3</b> - DOREZIM DERI NE FUND TE DITES</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
-            <span><b className="text-xs font-black">GENT</b> - PYETJE/SQARIM ME GENTIN</span>
+            <span><b className="text-xs font-black text-red-600">GENT</b> - PYETJE/SQARIM ME GENTIN</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
-            <span><b className="text-xs font-black">KA</b> - PYETJE/SQARIM ME KA</span>
+            <span><b className="text-xs font-black text-red-600">KA</b> - PYETJE/SQARIM ME KA</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
-            <span><b className="text-base font-black">⚑</b> - PYETJE/SQARIM ME GA</span>
+            <span><b className="text-base font-black text-red-600">⚑</b> - PYETJE/SQARIM ME GA</span>
           </div>
           {showLegend ? (
             <div className="rounded-md border bg-white">
@@ -3293,8 +3338,11 @@ export default function GaKaNotesPage() {
                   </TableHeader>
                   <TableBody>
                     {[
-                      ["?", "PAQARTESI"],
-                      ["!", "KËRKON MONITORIM NGA DIKUSH TJETËR"],
+                      ["?", "PYETJE/PAQARTESI"],
+                      ["!", "DYSHIM/ NUK KUPTOHET DET"],
+                      ["!!!", "KLIENT/URGJENT"],
+                      ["◉", "KËRKON MONITORIM NGA DIKUSH TJETËR"],
+                      ["X", "MBYLL DETYREN"],
                       ["M2", "DOREZIM DERI NE PAUZE"],
                       ["M3", "DOREZIM DERI NE FUND TE DITES"],
                       ["GENT", "PYETJE/SQARIM ME GENTIN"],
@@ -3302,7 +3350,7 @@ export default function GaKaNotesPage() {
                       ["⚑", "PYETJE/SQARIM ME GA"],
                     ].map(([symbol, meaning]) => (
                       <TableRow key={symbol} className="h-8">
-                        <TableCell className="p-1 text-center text-lg font-black text-[#0F2A5F]">{symbol}</TableCell>
+                        <TableCell className="p-1 text-center text-lg font-black text-red-600">{symbol}</TableCell>
                         <TableCell className="text-sm font-semibold">Symbol</TableCell>
                         <TableCell className="text-sm text-slate-600">{meaning}</TableCell>
                       </TableRow>
@@ -3485,7 +3533,7 @@ export default function GaKaNotesPage() {
                 value={oneHMarkerFilter}
                 onValueChange={(value) => setOneHMarkerFilter(value as OneHMarkerFilter)}
               >
-                <SelectTrigger className="h-9 w-[170px] border-blue-300 bg-blue-50 font-black text-[#0F2A5F]">
+                <SelectTrigger className={`h-9 w-[170px] border-blue-300 bg-blue-50 font-black ${ONE_H_MARKER_OPTIONS.some((option) => option.value === oneHMarkerFilter) ? "text-red-600" : "text-[#0F2A5F]"}`}>
                   <SelectValue placeholder="Symbols" />
                 </SelectTrigger>
                 <SelectContent className="font-black text-[#0F2A5F]">
@@ -3493,7 +3541,7 @@ export default function GaKaNotesPage() {
                   <SelectItem value="with">All with symbols</SelectItem>
                   <SelectItem value="none">No symbol</SelectItem>
                   {ONE_H_MARKER_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{option.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -3922,17 +3970,19 @@ export default function GaKaNotesPage() {
                                     ) : null}
                                   </span>
                                 ) : null}
+                                {note.one_h_marker ? (
+                                  <button
+                                    type="button"
+                                    className="inline-flex min-h-6 shrink-0 items-center rounded-md border border-blue-300 bg-blue-50 px-2 text-lg font-black text-[#0F2A5F] [text-shadow:0_0_0_currentColor]"
+                                    title={note.one_h_marker_comment || "Note symbol"}
+                                    onClick={() => { if (note.one_h_marker_comment) window.prompt("Symbol comment (copy with Ctrl+C):", note.one_h_marker_comment) }}
+                                  >
+                                    {oneHMarkerLabel(note.one_h_marker, note.one_h_marker_by_ga)}
+                                  </button>
+                                ) : null}
                                 <span id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
                                   {renderMarkedNoteContent(note.content, canViewStrikeTimestamps)}
                                 </span>
-                                {note.one_h_marker ? (
-                                  <span
-                                    className="inline-flex min-h-6 items-center rounded-md border border-blue-300 bg-blue-50 px-2 text-lg font-black text-[#0F2A5F] [text-shadow:0_0_0_currentColor]"
-                                    title="Note symbol"
-                                  >
-                                    {oneHMarkerLabel(note.one_h_marker)}
-                                  </span>
-                                ) : null}
                               </div>
                               <div className="flex items-center justify-end gap-2 flex-wrap">
                                 {!editDisabled ? (
@@ -4679,12 +4729,17 @@ export default function GaKaNotesPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Symbol (optional)</Label>
-                  <Select value={taskOneHMarker} onValueChange={(value) => setTaskOneHMarker(value as OneHMarker | typeof ONE_H_MARKER_NONE)}>
-                    <SelectTrigger className="w-full border-blue-300 bg-blue-50 font-black text-[#0F2A5F]"><SelectValue /></SelectTrigger>
+                  <Select value={taskOneHMarker} onValueChange={(rawValue) => {
+                    const value = rawValue as OneHMarker | typeof ONE_H_MARKER_NONE
+                    if (value === ONE_H_MARKER_NONE) { setTaskOneHMarker(value); setTaskOneHMarkerComment(""); return }
+                    const nextComment = window.prompt("Optional symbol comment:", value === taskOneHMarker ? taskOneHMarkerComment : "")
+                    if (nextComment !== null) { setTaskOneHMarker(value); setTaskOneHMarkerComment(nextComment) }
+                  }}>
+                    <SelectTrigger className={`w-full border-blue-300 bg-blue-50 font-black ${taskOneHMarker === ONE_H_MARKER_NONE ? "text-[#0F2A5F]" : "text-red-600"}`}><SelectValue /></SelectTrigger>
                     <SelectContent className="font-black text-[#0F2A5F]">
                       <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
                       {ONE_H_MARKER_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                        <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{option.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -5017,11 +5072,11 @@ export default function GaKaNotesPage() {
                   onValueChange={(value) => updateEditNoteMarker(value as OneHMarker | typeof ONE_H_MARKER_NONE)}
                   disabled={savingEdit}
                 >
-                  <SelectTrigger className="border-blue-300 bg-blue-50 font-black text-[#0F2A5F]"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className={`border-blue-300 bg-blue-50 font-black ${editNoteOneHMarker === ONE_H_MARKER_NONE ? "text-[#0F2A5F]" : "text-red-600"}`}><SelectValue /></SelectTrigger>
                   <SelectContent className="font-black text-[#0F2A5F]">
                     <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
                     {ONE_H_MARKER_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{option.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -5290,11 +5345,11 @@ export default function GaKaNotesPage() {
                                 onValueChange={(value) => updateEditNoteMarker(value as OneHMarker | typeof ONE_H_MARKER_NONE)}
                                 disabled={savingEdit}
                               >
-                                <SelectTrigger className="border-blue-300 bg-blue-50 font-black text-[#0F2A5F]"><SelectValue /></SelectTrigger>
+                                <SelectTrigger className={`border-blue-300 bg-blue-50 font-black ${state.oneHMarker ? "text-red-600" : "text-[#0F2A5F]"}`}><SelectValue /></SelectTrigger>
                                 <SelectContent className="font-black text-[#0F2A5F]">
                                   <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
                                   {ONE_H_MARKER_OPTIONS.map((option) => (
-                                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                    <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{option.label}</SelectItem>
                                   ))}
                                 </SelectContent>
                               </Select>

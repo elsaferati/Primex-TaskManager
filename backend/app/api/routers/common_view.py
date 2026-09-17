@@ -40,7 +40,7 @@ from app.services.one_h_slots import effective_slot_date
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.system_task_schedule import matches_template_date
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
-from app.services.task_marker import active_one_h_marker
+from app.services.task_marker import active_one_h_marker, active_one_h_marker_by_ga
 from app.services.task_date_window import task_date_window_filter
 
 
@@ -899,6 +899,8 @@ async def get_common_view(
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
                             "one_h_marker": active_one_h_marker(t, one_h_slot_date),
+                            "one_h_marker_by_ga": active_one_h_marker_by_ga(t, one_h_slot_date),
+                            "one_h_marker_comment": t.one_h_marker_comment if active_one_h_marker(t, one_h_slot_date) else None,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                             "start_date": t.start_date.isoformat() if t.start_date else None,
@@ -928,6 +930,8 @@ async def get_common_view(
                             "one_h_report_slot": one_h_slots_by_task_date.get((t.id, one_h_slot_date))
                             or t.one_h_report_slot,
                             "one_h_marker": active_one_h_marker(t, one_h_slot_date),
+                            "one_h_marker_by_ga": active_one_h_marker_by_ga(t, one_h_slot_date),
+                            "one_h_marker_comment": t.one_h_marker_comment if active_one_h_marker(t, one_h_slot_date) else None,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                             "start_date": t.start_date.isoformat() if t.start_date else None,
@@ -955,6 +959,8 @@ async def get_common_view(
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
                             "one_h_marker": active_one_h_marker(t, one_h_slot_date),
+                            "one_h_marker_by_ga": active_one_h_marker_by_ga(t, one_h_slot_date),
+                            "one_h_marker_comment": t.one_h_marker_comment if active_one_h_marker(t, one_h_slot_date) else None,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                             "start_date": t.start_date.isoformat() if t.start_date else None,
@@ -985,6 +991,8 @@ async def get_common_view(
                             "one_h_report_slot": one_h_slots_by_task_date.get((t.id, one_h_slot_date))
                             or t.one_h_report_slot,
                             "one_h_marker": active_one_h_marker(t, one_h_slot_date),
+                            "one_h_marker_by_ga": active_one_h_marker_by_ga(t, one_h_slot_date),
+                            "one_h_marker_comment": t.one_h_marker_comment if active_one_h_marker(t, one_h_slot_date) else None,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                             "start_date": t.start_date.isoformat() if t.start_date else None,
@@ -1018,6 +1026,8 @@ async def get_common_view(
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
                             "one_h_marker": active_one_h_marker(t, one_h_slot_date),
+                            "one_h_marker_by_ga": active_one_h_marker_by_ga(t, one_h_slot_date),
+                            "one_h_marker_comment": t.one_h_marker_comment if active_one_h_marker(t, one_h_slot_date) else None,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                             "start_date": t.start_date.isoformat() if t.start_date else None,

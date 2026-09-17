@@ -234,21 +234,44 @@ def _task_period_label(item: dict[str, Any]) -> str:
 
 def _task_marker_label(item: dict[str, Any]) -> str:
     raw = str(item.get("oneHMarker") or item.get("one_h_marker") or "").strip().upper()
-    return {
+    label = {
         "EXCLAMATION": "!",
+        "CLIENT_URGENT": "!!!",
         "QUESTION": "?",
         "KA": "KA",
         "GENT": "GENT",
         "M2": "M2",
         "M3": "M3",
+        "MONITOR": "◉",
+        "CLOSE": "X",
         "FLAG": "⚑",
     }.get(raw, "")
+    marker_by_ga = _task_marker_was_set_by_ga(item)
+    return f"({label})" if label and marker_by_ga else label
+
+
+def _task_marker_was_set_by_ga(item: dict[str, Any]) -> bool:
+    return bool(item.get("oneHMarkerByGa") or item.get("one_h_marker_by_ga"))
+
+
+def _task_marker_text_token(item: dict[str, Any]) -> str:
+    label = _task_marker_label(item)
+    if not label:
+        return ""
+    return label if _task_marker_was_set_by_ga(item) else f"[{label}]"
+
+
+def _task_marker_comment(item: dict[str, Any]) -> str:
+    return str(item.get("oneHMarkerComment") or item.get("one_h_marker_comment") or "").strip()
 
 
 def _task_marker_legend_text() -> str:
     return (
-        "LEGJENDA: ? - PAQARTESI / "
-        "! - KËRKON MONITORIM NGA DIKUSH TJETËR / "
+        "LEGJENDA: ? - PYETJE/PAQARTESI / "
+        "! - DYSHIM/ NUK KUPTOHET DET / "
+        "!!! - KLIENT/URGJENT / "
+        "◉ - KËRKON MONITORIM NGA DIKUSH TJETËR / "
+        "X - MBYLL DETYREN / "
         "M2 - DOREZIM DERI NE PAUZE / "
         "M3 - DOREZIM DERI NE FUND TE DITES / "
         "GENT - PYETJE/SQARIM ME GENTIN / "
@@ -798,13 +821,14 @@ def _task_rows(items: dict[str, Any], target_date: date) -> list[tuple[str, list
                 if _is_appended_wfc(item) and _confirmation_owner(item) == requested_value
             ]
             values = [*regular_personal, *waiting_confirmation]
+        # Today and Tomorrow 1H SHTYPI only show work that is still active.
+        # Keep every non-completed status (including WFE/WFC and in progress),
+        # but exclude whole tasks whose normalized status is DONE.
+        values = [item for item in values if _task_status(item) != "DONE"]
         values = _dedupe(values)
-        # Completed work belongs at the end of its slot so unfinished work is
-        # immediately visible in the printed report.
         values.sort(
             key=lambda item: (
                 _is_appended_wfc(item) if bucket == "personal" else False,
-                _task_status(item) == "DONE",
                 common_view_item_sort_key(item),
             )
         )
@@ -1115,8 +1139,11 @@ def _one_h_checklists_html(report_day: date | None = None) -> str:
 def _task_marker_legend_html() -> str:
     """Explain the task markers wherever the generated 1H report is rendered."""
     items = (
-        ("?", "PAQARTESI"),
-        ("!", "KËRKON MONITORIM NGA DIKUSH TJETËR"),
+        ("?", "PYETJE/PAQARTESI"),
+        ("!", "DYSHIM/ NUK KUPTOHET DET"),
+        ("!!!", "KLIENT/URGJENT"),
+        ("◉", "KËRKON MONITORIM NGA DIKUSH TJETËR"),
+        ("X", "MBYLL DETYREN"),
         ("M2", "DOREZIM DERI NE PAUZE"),
         ("M3", "DOREZIM DERI NE FUND TE DITES"),
         ("GENT", "PYETJE/SQARIM ME GENTIN"),
@@ -1129,7 +1156,7 @@ def _task_marker_legend_html() -> str:
     )
     content = separator.join(
         '<span style="display:inline-block;margin:2px 16px 2px 0;white-space:nowrap;">'
-        f'<strong style="color:#0F2A5F;font-size:{"12px" if symbol in {"KA", "GENT", "M2", "M3"} else "17px"};font-weight:900;">{symbol}</strong> - '
+        f'<strong style="color:#DC2626;font-size:{"12px" if symbol in {"KA", "GENT", "M2", "M3"} else "17px"};font-weight:900;">{symbol}</strong> - '
         f'{html.escape(description)}</span>'
         for symbol, description in items
     )
@@ -1204,12 +1231,24 @@ def _html_table(
                         marker_value = html.escape(
                             str(item.get("one_h_marker") or item.get("oneHMarker") or ""), quote=True
                         )
+                        marker_by_ga = "true" if (
+                            item.get("one_h_marker_by_ga") or item.get("oneHMarkerByGa")
+                        ) else "false"
+                        marker_comment = _task_marker_comment(item)
                         task_attr = (
                             f' data-task-id="{task_id}" data-task-marker="{marker_value}"'
+                            f' data-task-marker-by-ga="{marker_by_ga}"'
+                            f' data-task-marker-comment="{html.escape(marker_comment, quote=True)}"'
                             if task_id else ""
                         )
+                        comment_html = (
+                            '<div data-task-marker-comment="true" '
+                            'style="clear:both;margin-top:4px;color:#0F2A5F;font-size:10px;line-height:1.25;">'
+                            f'<strong>KOMENT SIMBOLI:</strong> {html.escape(marker_comment)}</div>'
+                            if marker_comment else ""
+                        )
                         title_cells.append(
-                            f'<td{task_attr}{background} style="{title_style}">{badges}{task_number}. {title_html}</td>'
+                            f'<td{task_attr}{background} style="{title_style}">{badges}{task_number}. {title_html}{comment_html}</td>'
                         )
                     if chunk_index == len(chunks) - 1:
                         date_style = f"{date_style};{SLOT_END_DIVIDER_STYLE}"
@@ -1858,11 +1897,14 @@ def _excel_table_attachment(
                             labels.append("[WFC]")
                         marker_label = _task_marker_label(item)
                         if marker_label:
-                            labels.append(f"[{marker_label}]")
+                            labels.append(_task_marker_text_token(item))
                         if _is_eight_am_task(item):
                             labels.append("[08:00]")
                         if labels:
                             value = f"{' '.join(labels)}\n{value}"
+                        marker_comment = _task_marker_comment(item)
+                        if marker_comment:
+                            value = f"{value}\nKOMENT SIMBOLI: {marker_comment}"
                         date_labels: list[str] = []
                         start_day = _task_start_day(item)
                         due_day = _task_due_day(item)
@@ -2155,7 +2197,7 @@ def _docx_table_attachment(
         parts = [
             (f"{number}. [{_task_period_label(item)}]", color),
             (" [WFC]" if _task_status(item) == "WAITING_CONFIRMATION" else "", color),
-            (f" [{marker}]" if marker else "", "0F2A5F"),
+            (f" {_task_marker_text_token(item)}" if marker else "", "0F2A5F"),
             (f" {_task_title(item, personal=personal)}", color),
         ]
         for value, run_color in parts:
@@ -2167,6 +2209,13 @@ def _docx_table_attachment(
             run.font.size = Pt(7.5)
             run.bold = bold or run_color == "0F2A5F"
             run.font.color.rgb = RGBColor.from_string(run_color.removeprefix("#"))
+        marker_comment = _task_marker_comment(item)
+        if marker_comment:
+            run = paragraph.add_run(f"\nKOMENT SIMBOLI: {marker_comment}")
+            run.font.name = "Arial"
+            run.font.size = Pt(7)
+            run.bold = False
+            run.font.color.rgb = RGBColor.from_string("0F2A5F")
 
     def set_stacked_date_cell(cell: Any, value: str, *, color: str = "000000") -> None:
         first_line, second_line = str(value).split("\n", 1)
@@ -2641,6 +2690,9 @@ def _core_png_table_attachment(
                     draw.text((badge_left + 6, text_y + 3), marker_label, fill="#0F2A5F", font=small_bold)
                 text_y += 28
                 value = f"{item_index + 1 + chunk_index * 6}. {_task_title(item, personal=personal)}"
+                marker_comment = _task_marker_comment(item)
+                if marker_comment:
+                    value = f"{value}\nKOMENT SIMBOLI: {marker_comment}"
                 task_font = bold if fill == DEADLINE_COLOR else regular
                 for line_index, line in enumerate(wrap(value, task_font, column_widths[2 + item_index] - 12)):
                     draw_task_title_line(
@@ -3067,8 +3119,10 @@ async def _build_print_report(
     plain_rows.extend(_closing_sections_plain_text(closing_sections))
     plain_rows.extend([
         "",
-        "LEGJENDA: ? - PAQARTESI / "
-        "! - KËRKON MONITORIM NGA DIKUSH TJETËR / "
+        "LEGJENDA: ? - PYETJE/PAQARTESI / "
+        "! - DYSHIM/ NUK KUPTOHET DET / "
+        "!!! - KLIENT/URGJENT / "
+        "◉ - KËRKON MONITORIM NGA DIKUSH TJETËR / X - MBYLL DETYREN / "
         "M2 - DOREZIM DERI NE PAUZE / M3 - DOREZIM DERI NE FUND TE DITES / "
         "GENT - PYETJE/SQARIM ME GENTIN / KA - PYETJE/SQARIM ME KA / ⚑ - PYETJE/SQARIM ME GA",
         "",
@@ -3083,8 +3137,9 @@ async def _build_print_report(
             + "; ".join(
                 f"[{_task_period_label(item)}]"
                 f"{' [WFC]' if _task_status(item) == 'WAITING_CONFIRMATION' else ''}"
-                f"{f' [{_task_marker_label(item)}]' if _task_marker_label(item) else ''} "
+                f"{f' {_task_marker_text_token(item)}' if _task_marker_label(item) else ''} "
                 f"{_task_title(item, personal=personal)}"
+                f"{f' [KOMENT SIMBOLI: {_task_marker_comment(item)}]' if _task_marker_comment(item) else ''}"
                 for item in values
             )
         )
@@ -3155,14 +3210,15 @@ async def build_tomorrow_print_report(
     delivery_date: date, *, include_attachment: bool = False, db: AsyncSession | None = None,
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    target_date = next_working_day(delivery_date)
     return await _build_print_report(
-        next_working_day(delivery_date), include_attachment=include_attachment, include_meetings=True,
+        target_date, include_attachment=include_attachment, include_meetings=True,
         include_png=include_attachment,
         include_docx=include_attachment,
         report_day_label="NESER",
         db=db,
         closing_report_day=delivery_date,
-        checklist_date=delivery_date,
+        checklist_date=target_date,
         payload=payload,
     )
 

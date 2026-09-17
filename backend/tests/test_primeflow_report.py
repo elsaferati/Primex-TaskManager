@@ -937,13 +937,16 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn('data-report-symbol-legend="true"', html)
         self.assertIn('data-task-symbol="true"', html)
         self.assertIn("PAQARTESI", html)
+        self.assertIn("color:#dc2626", html)
         self.assertIn("LEGJENDA:", word_xml)
         self.assertIn("PAQARTESI", word_xml)
+        self.assertIn('w:val="DC2626"', word_xml)
 
         from PIL import ImageDraw
 
         original_draw = ImageDraw.Draw
         drawn_text: list[str] = []
+        drawn_text_colors: list[tuple[str, str | None]] = []
 
         class RecordingDraw:
             def __init__(self, image):
@@ -951,6 +954,7 @@ class PrimeFlowReportTests(unittest.TestCase):
 
             def text(self, xy, text, *args, **kwargs):
                 drawn_text.append(str(text))
+                drawn_text_colors.append((str(text), kwargs.get("fill")))
                 return self._draw.text(xy, text, *args, **kwargs)
 
             def __getattr__(self, name):
@@ -960,11 +964,10 @@ class PrimeFlowReportTests(unittest.TestCase):
             png = render_png(document)
 
         self.assertTrue(png.startswith(b"\x89PNG"))
-        self.assertIn(
-            "LEGJENDA: ? - PAQARTESI / ! - KËRKON MONITORIM NGA DIKUSH TJETËR / M2 - DOREZIM DERI NE PAUZE / M3 - DOREZIM DERI NE FUND TE DITES / GENT - PYETJE/SQARIM ME GENTIN / KA - PYETJE/SQARIM ME KA / ⚑ - PYETJE/SQARIM ME GA",
-            drawn_text,
-        )
-        self.assertIn("?", drawn_text)
+        self.assertIn("LEGJENDA: ", drawn_text)
+        self.assertIn(" - PYETJE/PAQARTESI", drawn_text)
+        self.assertIn(("?", "#dc2626"), drawn_text_colors)
+        self.assertIn(("M2", "#dc2626"), drawn_text_colors)
 
     def test_checklist_points_keep_their_strike_colour_until_reopened(self) -> None:
         struck_at = datetime(2026, 8, 10, 10, 20, tzinfo=timezone.utc)

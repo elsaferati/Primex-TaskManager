@@ -240,7 +240,7 @@ export default function MonthlyPlannerPage() {
                             className="block px-3 py-2.5 text-sm text-slate-700 transition-colors hover:bg-blue-50 hover:text-blue-700"
                           >
                             <span className="flex items-start gap-1.5">
-                              <TaskOneHMarker marker={t.one_h_marker} />
+                              <TaskOneHMarker marker={t.one_h_marker} markerByGa={t.one_h_marker_by_ga} comment={t.one_h_marker_comment} />
                               <span>{t.title}</span>
                             </span>
                           </Link>

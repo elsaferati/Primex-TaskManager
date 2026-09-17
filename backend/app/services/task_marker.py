@@ -9,6 +9,19 @@ from app.models.plan_note import PlanNote
 from app.models.task import Task
 from app.services.one_h_slots import current_effective_slot_date, effective_slot_date
 
+GA_MARKER_EMAIL = "ga@primexeu.com"
+
+
+def marker_is_by_ga(actor_email: str | None) -> bool:
+    return (actor_email or "").strip().casefold() == GA_MARKER_EMAIL
+
+
+def normalize_marker_comment(marker: str | None, comment: str | None) -> str | None:
+    if not marker:
+        return None
+    normalized = (comment or "").strip()
+    return normalized or None
+
 
 def active_one_h_marker(item, report_date=None, now=None) -> str | None:
     marker = getattr(item, "one_h_marker", None)
@@ -25,22 +38,41 @@ def active_one_h_marker(item, report_date=None, now=None) -> str | None:
     return marker if marker_date == target_date else None
 
 
-async def sync_note_task_marker(db: AsyncSession, note: GaNote | PlanNote, marker: str | None) -> None:
+def active_one_h_marker_by_ga(item, report_date=None, now=None) -> bool:
+    return bool(active_one_h_marker(item, report_date, now) and getattr(item, "one_h_marker_by_ga", False))
+
+
+async def sync_note_task_marker(
+    db: AsyncSession, note: GaNote | PlanNote, marker: str | None, *, actor_email: str | None = None,
+    marker_comment: str | None = None,
+) -> None:
     marker_date = current_effective_slot_date() if marker else None
+    marker_by_ga = bool(marker and marker_is_by_ga(actor_email))
+    marker_comment = normalize_marker_comment(marker, marker_comment)
     note.one_h_marker = marker
     note.one_h_marker_date = marker_date
+    note.one_h_marker_by_ga = marker_by_ga
+    note.one_h_marker_comment = marker_comment
     origin = Task.plan_note_origin_id if isinstance(note, PlanNote) else Task.ga_note_origin_id
     await db.execute(
         update(Task).where(origin == note.id, Task.is_active.is_(True)).values(
-            one_h_marker=marker, one_h_marker_date=marker_date
+            one_h_marker=marker, one_h_marker_date=marker_date, one_h_marker_by_ga=marker_by_ga,
+            one_h_marker_comment=marker_comment,
         )
     )
 
 
-async def sync_task_marker(db: AsyncSession, task: Task, marker: str | None) -> None:
+async def sync_task_marker(
+    db: AsyncSession, task: Task, marker: str | None, *, actor_email: str | None = None,
+    marker_comment: str | None = None,
+) -> None:
     marker_date = current_effective_slot_date() if marker else None
+    marker_by_ga = bool(marker and marker_is_by_ga(actor_email))
+    marker_comment = normalize_marker_comment(marker, marker_comment)
     task.one_h_marker = marker
     task.one_h_marker_date = marker_date
+    task.one_h_marker_by_ga = marker_by_ga
+    task.one_h_marker_comment = marker_comment
     related = []
     if task.fast_task_group_id is not None:
         related.append(Task.fast_task_group_id == task.fast_task_group_id)
@@ -49,14 +81,16 @@ async def sync_task_marker(db: AsyncSession, task: Task, marker: str | None) -> 
         if note_id is not None:
             await db.execute(
                 update(model).where(model.id == note_id).values(
-                    one_h_marker=marker, one_h_marker_date=marker_date
+                    one_h_marker=marker, one_h_marker_date=marker_date, one_h_marker_by_ga=marker_by_ga,
+                    one_h_marker_comment=marker_comment,
                 )
             )
             related.append(getattr(Task, origin) == note_id)
     if related:
         await db.execute(
             update(Task).where(or_(*related), Task.is_active.is_(True)).values(
-                one_h_marker=marker, one_h_marker_date=marker_date
+                one_h_marker=marker, one_h_marker_date=marker_date, one_h_marker_by_ga=marker_by_ga,
+                one_h_marker_comment=marker_comment,
             )
         )
 
@@ -65,6 +99,10 @@ def note_bundle_marker_update(note, payload, tasks) -> tuple[bool, str | None]:
     """Ignore unchanged editor fields; accept a symbol edit from either control."""
     if "one_h_marker" in payload.model_fields_set and payload.one_h_marker != active_one_h_marker(note):
         return True, payload.one_h_marker
+    if "one_h_marker_comment" in payload.model_fields_set:
+        shared_marker = payload.one_h_marker if "one_h_marker" in payload.model_fields_set else active_one_h_marker(note)
+        if normalize_marker_comment(shared_marker, payload.one_h_marker_comment) != getattr(note, "one_h_marker_comment", None):
+            return True, shared_marker
     by_assignee = {task.assigned_to: active_one_h_marker(task) for task in tasks if task.is_active}
     changed = {
         state.one_h_marker

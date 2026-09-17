@@ -3655,7 +3655,7 @@ export default function WeeklyPlannerPage() {
               </span>
             </div>
             <div className="mt-1 flex items-start gap-1.5 text-sm font-semibold leading-snug text-slate-900" title={task.title}>
-              <TaskOneHMarker marker={task.one_h_marker} />
+              <TaskOneHMarker marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} comment={task.one_h_marker_comment} />
               <span className="line-clamp-2">{task.title}</span>
             </div>
           </div>

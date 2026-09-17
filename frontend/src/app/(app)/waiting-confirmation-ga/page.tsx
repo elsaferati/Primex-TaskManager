@@ -269,7 +269,7 @@ export default function WaitingConfirmationGaPage() {
                         ) : null}
                       </div>
                       <span className="flex items-start gap-1.5">
-                        <TaskOneHMarker marker={task.one_h_marker} />
+                        <TaskOneHMarker marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} comment={task.one_h_marker_comment} />
                         <span>{task.title || "-"}</span>
                       </span>
                       {canManageWaitingConfirmation ? (

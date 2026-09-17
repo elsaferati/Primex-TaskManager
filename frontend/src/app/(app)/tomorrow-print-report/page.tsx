@@ -30,12 +30,15 @@ type Delivery = {
   last_error?: string | null
 }
 type Preview = { subject: string; target_date: string; html: string }
-type TaskMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3"
+type TaskMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
 type TaskMarkerFilter = "all" | "with" | "none" | TaskMarker
 
 const taskMarkerOptions: Array<{ value: TaskMarker; label: string }> = [
   { value: "QUESTION", label: "?" },
   { value: "EXCLAMATION", label: "!" },
+  { value: "CLIENT_URGENT", label: "!!!" },
+  { value: "MONITOR", label: "◉" },
+  { value: "CLOSE", label: "X" },
   { value: "M2", label: "M2" },
   { value: "M3", label: "M3" },
   { value: "GENT", label: "GENT" },
@@ -173,7 +176,7 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
     const document = previewFrameRef.current?.contentDocument
     if (!document) return
     document.querySelectorAll<HTMLTableRowElement>('tr[data-task-card-row="content"]').forEach((contentRow) => {
-      const dateRow = contentRow.nextElementSibling
+      const dateRow = contentRow.nextElementSibling as HTMLTableRowElement | null
       const dateCells = dateRow?.matches('tr[data-task-card-row="dates"]')
         ? Array.from(dateRow.cells).filter((cell): cell is HTMLTableCellElement => cell.tagName === "TD")
         : []
@@ -206,6 +209,48 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
     const document = previewFrameRef.current?.contentDocument
     if (!document) return
 
+    const openMarkerCommentModal = (initialValue: string) => new Promise<string | null>((resolve) => {
+      const overlay = document.createElement("div")
+      overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:20px;background:transparent;font-family:Arial,sans-serif"
+      const panel = document.createElement("div")
+      panel.style.cssText = "width:min(460px,calc(100vw - 40px));border:1px solid #94A3B8;border-radius:14px;background:#FFF;padding:20px;box-shadow:0 10px 28px rgba(15,23,42,.16);color:#0F172A"
+      const title = document.createElement("div")
+      title.textContent = "Symbol comment"
+      title.style.cssText = "margin-bottom:5px;font-size:18px;font-weight:800"
+      const description = document.createElement("div")
+      description.textContent = "Add an optional comment for this symbol."
+      description.style.cssText = "margin-bottom:14px;color:#64748B;font-size:13px"
+      const textarea = document.createElement("textarea")
+      textarea.value = initialValue
+      textarea.maxLength = 1000
+      textarea.placeholder = "Write an optional comment..."
+      textarea.style.cssText = "box-sizing:border-box;width:100%;min-height:110px;resize:vertical;border:1px solid #CBD5E1;border-radius:8px;padding:10px 12px;font:14px/1.45 Arial,sans-serif;color:#0F172A;outline:none"
+      const actions = document.createElement("div")
+      actions.style.cssText = "display:flex;justify-content:flex-end;gap:8px;margin-top:16px"
+      const makeButton = (label: string, primary = false) => {
+        const button = document.createElement("button")
+        button.type = "button"
+        button.textContent = label
+        button.style.cssText = `height:36px;border-radius:8px;padding:0 16px;border:1px solid ${primary ? "#2563EB" : "#CBD5E1"};background:${primary ? "#2563EB" : "#FFF"};color:${primary ? "#FFF" : "#334155"};font-size:13px;font-weight:700;cursor:pointer`
+        return button
+      }
+      const copyButton = makeButton("Copy")
+      copyButton.style.display = initialValue ? "inline-block" : "none"
+      const cancelButton = makeButton("Cancel")
+      const saveButton = makeButton("Save", true)
+      const finish = (value: string | null) => { overlay.remove(); resolve(value) }
+      copyButton.addEventListener("click", () => void document.defaultView?.navigator.clipboard.writeText(textarea.value))
+      cancelButton.addEventListener("click", () => finish(null))
+      saveButton.addEventListener("click", () => finish(textarea.value))
+      overlay.addEventListener("click", (event) => { if (event.target === overlay) finish(null) })
+      textarea.addEventListener("keydown", (event) => { if (event.key === "Escape") finish(null) })
+      actions.append(copyButton, cancelButton, saveButton)
+      panel.append(title, description, textarea, actions)
+      overlay.appendChild(panel)
+      document.body.appendChild(overlay)
+      textarea.focus()
+    })
+
     document.querySelectorAll<HTMLElement>("td[data-task-id]").forEach((cell) => {
       if (cell.querySelector("select[data-task-marker-control]")) return
       const taskId = cell.dataset.taskId
@@ -221,22 +266,29 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
       existingBadge?.remove()
 
       const select = document.createElement("select")
+      const resizeMarkerSelect = (marker: string, byGa: boolean) => {
+        const label = taskMarkerOptions.find((option) => option.value === marker)?.label || "—"
+        const visibleLength = label.length + (byGa && marker ? 2 : 0)
+        select.style.width = visibleLength <= 1 ? "46px" : visibleLength <= 2 ? "52px" : "64px"
+        select.style.color = marker ? "#DC2626" : "#0F2A5F"
+      }
       select.dataset.taskMarkerControl = "true"
       select.setAttribute("aria-label", "Task marker")
-      select.title = "Task marker"
+      select.title = cell.dataset.taskMarkerComment || "Task marker"
       select.style.cssText = [
         "display:inline-block",
         "float:right",
         "height:22px",
-        "min-width:58px",
+        "min-width:46px",
         "max-width:64px",
         "margin:0 0 3px 4px",
-        "padding:0 2px",
+        "padding:0 1px 0 3px",
         "border:1px solid #93C5FD",
         "border-radius:999px",
         "background:#EFF6FF",
         "color:#0F2A5F",
         "font:900 16px/1 Arial,sans-serif",
+        "text-align:center",
         "cursor:pointer",
       ].join(";")
 
@@ -248,31 +300,57 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
       taskMarkerOptions.forEach((option) => {
         const element = document.createElement("option")
         element.value = option.value
-        element.textContent = option.label
-        element.style.cssText = "color:#0F2A5F;font-size:16px;font-weight:900"
+        element.textContent = cell.dataset.taskMarkerByGa === "true" && option.value === cell.dataset.taskMarker
+          ? `(${option.label})`
+          : option.label
+        element.style.cssText = "color:#DC2626;font-size:16px;font-weight:900"
         select.appendChild(element)
       })
       select.value = cell.dataset.taskMarker || ""
+      resizeMarkerSelect(select.value, cell.dataset.taskMarkerByGa === "true")
 
       select.addEventListener("change", async () => {
         const previousValue = cell.dataset.taskMarker || ""
         const nextValue = select.value
+        const previousComment = cell.dataset.taskMarkerComment || ""
+        const nextComment = nextValue
+          ? await openMarkerCommentModal(nextValue === previousValue ? previousComment : "")
+          : ""
+        if (nextValue && nextComment === null) {
+          select.value = previousValue
+          resizeMarkerSelect(previousValue, cell.dataset.taskMarkerByGa === "true")
+          return
+        }
         select.disabled = true
         try {
           const response = await apiFetch(`/tasks/${taskId}/one-h-marker`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ one_h_marker: nextValue || null }),
+            body: JSON.stringify({ one_h_marker: nextValue || null, one_h_marker_comment: nextValue ? nextComment?.trim() || null : null }),
           })
           if (!response?.ok) {
             const detail = await response?.json().catch(() => null)
             throw new Error(typeof detail?.detail === "string" ? detail.detail : "Could not update task marker")
           }
+          const updated = await response.json() as { one_h_marker_by_ga?: boolean; one_h_marker_comment?: string | null }
           cell.dataset.taskMarker = nextValue
+          cell.dataset.taskMarkerByGa = updated.one_h_marker_by_ga ? "true" : "false"
+          cell.dataset.taskMarkerComment = updated.one_h_marker_comment || ""
+          select.title = updated.one_h_marker_comment || "Task marker"
+          resizeMarkerSelect(nextValue, Boolean(updated.one_h_marker_by_ga))
+          taskMarkerOptions.forEach((option, index) => {
+            const element = select.options[index + 1]
+            if (element) {
+              element.textContent = updated.one_h_marker_by_ga && option.value === nextValue
+                ? `(${option.label})`
+                : option.label
+            }
+          })
           applyPreviewMarkerFilter()
           toast.success("Task marker updated")
         } catch (error) {
           select.value = previousValue
+          resizeMarkerSelect(previousValue, cell.dataset.taskMarkerByGa === "true")
           toast.error("Task marker update failed", { description: String(error) })
         } finally {
           select.disabled = false
@@ -282,6 +360,34 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
       const periodBadge = cell.querySelector('[data-task-badge="finish-period"]')
       if (periodBadge) periodBadge.insertAdjacentElement("afterend", select)
       else content.prepend(select)
+
+      const commentBlock = cell.querySelector<HTMLElement>('[data-task-marker-comment="true"]')
+      if (commentBlock) {
+        commentBlock.title = cell.dataset.taskMarkerComment || commentBlock.textContent || ""
+        commentBlock.style.cursor = "pointer"
+        commentBlock.addEventListener("click", async () => {
+          const value = cell.dataset.taskMarkerComment || ""
+          if (!value) return
+          const nextComment = await openMarkerCommentModal(value)
+          if (nextComment === null || nextComment.trim() === value) return
+          try {
+            const response = await apiFetch(`/tasks/${taskId}/one-h-marker`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ one_h_marker: cell.dataset.taskMarker || null, one_h_marker_comment: nextComment.trim() || null }),
+            })
+            if (!response?.ok) throw new Error("Could not update symbol comment")
+            const updated = await response.json() as { one_h_marker_comment?: string | null }
+            const savedComment = updated.one_h_marker_comment || ""
+            cell.dataset.taskMarkerComment = savedComment
+            select.title = savedComment || "Task marker"
+            commentBlock.textContent = savedComment ? `KOMENT SIMBOLI: ${savedComment}` : ""
+            toast.success("Symbol comment updated")
+          } catch (error) {
+            toast.error("Symbol comment update failed", { description: String(error) })
+          }
+        })
+      }
     })
     applyPreviewMarkerFilter()
   }, [apiFetch, applyPreviewMarkerFilter])

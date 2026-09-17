@@ -64,16 +64,22 @@ REPORT_STRIKE_LEGEND = (
 )
 ONE_H_MARKER_SYMBOLS = {
     "EXCLAMATION": "!",
+    "CLIENT_URGENT": "!!!",
     "QUESTION": "?",
     "KA": "KA",
     "GENT": "GENT",
     "M2": "M2",
     "M3": "M3",
+    "MONITOR": "◉",
+    "CLOSE": "X",
     "FLAG": "⚑",
 }
 ONE_H_MARKER_LEGEND = (
-    ("?", "PAQARTESI"),
-    ("!", "KËRKON MONITORIM NGA DIKUSH TJETËR"),
+    ("?", "PYETJE/PAQARTESI"),
+    ("!", "DYSHIM/ NUK KUPTOHET DET"),
+    ("!!!", "KLIENT/URGJENT"),
+    ("◉", "KËRKON MONITORIM NGA DIKUSH TJETËR"),
+    ("X", "MBYLL DETYREN"),
     ("M2", "DOREZIM DERI NE PAUZE"),
     ("M3", "DOREZIM DERI NE FUND TE DITES"),
     ("GENT", "PYETJE/SQARIM ME GENTIN"),
@@ -872,7 +878,7 @@ def render_html(
 
     def symbol_legend_html() -> str:
         items = '<b style="font-size:16px;margin:0 5px;color:#0f2a5f;">/</b>'.join(
-            f'<span style="white-space:nowrap;"><b style="font-size:{"10px" if symbol in {"KA", "GENT"} else "15px"};font-weight:900;color:#0f2a5f;">'
+            f'<span style="white-space:nowrap;"><b style="font-size:{"10px" if symbol in {"KA", "GENT"} else "15px"};font-weight:900;color:#dc2626;">'
             f'{html.escape(symbol)}</b> - {html.escape(description)}</span>'
             for symbol, description in ONE_H_MARKER_LEGEND
         )
@@ -1089,7 +1095,7 @@ def render_docx(document: ReportDocument) -> bytes:
         symbol_run = symbol_legend_paragraph.add_run(symbol)
         symbol_run.bold = True
         symbol_run.font.size = Pt(8 if symbol in {"KA", "GENT"} else 9)
-        symbol_run.font.color.rgb = RGBColor.from_string("0F2A5F")
+        symbol_run.font.color.rgb = RGBColor.from_string("DC2626")
         description_run = symbol_legend_paragraph.add_run(f" - {description}")
         description_run.font.size = Pt(6.5)
         description_run.font.color.rgb = RGBColor.from_string("0F2A5F")
@@ -1298,12 +1304,21 @@ def render_png(document: ReportDocument) -> bytes:
         outline="#93c5fd",
         width=1,
     )
-    draw.text(
-        (margin + 12, y + 14),
-        one_h_marker_legend_text(),
-        fill="#0f2a5f",
-        font=legend_font,
-    )
+    legend_x = margin + 12
+    legend_y = y + 14
+    legend_label = "LEGJENDA: "
+    draw.text((legend_x, legend_y), legend_label, fill="#0f2a5f", font=legend_font)
+    legend_x += draw.textlength(legend_label, font=legend_font)
+    for index, (symbol, description) in enumerate(ONE_H_MARKER_LEGEND):
+        if index:
+            separator = " / "
+            draw.text((legend_x, legend_y), separator, fill="#0f2a5f", font=legend_font)
+            legend_x += draw.textlength(separator, font=legend_font)
+        draw.text((legend_x, legend_y), symbol, fill="#dc2626", font=legend_font)
+        legend_x += draw.textlength(symbol, font=legend_font)
+        detail = f" - {description}"
+        draw.text((legend_x, legend_y), detail, fill="#0f2a5f", font=legend_font)
+        legend_x += draw.textlength(detail, font=legend_font)
     y += symbol_legend_height + 18
     reminder_groups = (
         (REMINDER_SECTION_TITLE, document.reminders),
