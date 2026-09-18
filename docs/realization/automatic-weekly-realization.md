@@ -24,30 +24,45 @@ their own department, STAFF cannot write reviews, and ADMIN retains broad access
 ## Daily and weekly evaluation checklist
 
 The reference evaluation checklist is represented as 17 explicit questions in
-both Daily and Weekly Realization. Nine answers come from system evidence:
+both Daily and Weekly Realization. Eight answers come from system evidence:
 
 - completion of the plan;
 - tasks with no progress;
 - tasks still in progress;
 - newly added tasks;
 - approved or unresolved postponements;
-- respected or missed meetings;
 - closed tasks;
 - attendance tardiness;
 - unexpected absences.
 
-The remaining eight are manager inputs because they require human judgment:
+The remaining nine are manager inputs because they require human judgment:
+respecting meeting times,
 requested extra tasks, helped a colleague, extra engagement, gave a proposal,
 the week's/day's positive contribution, problems caused, impact on another
 person's plan, and repetition after clarification. Boolean inputs accept Yes,
-No, or Not applicable; the two narrative inputs require text. Every saved answer
+No, or Not applicable. Daily dropdown choices use question-specific wording,
+including respected/not respected meeting times. The two contribution/problem
+questions have dropdown categories and a free-text explanation; the manager can
+edit the final weekly narratives. Every saved answer
 is append-only and belongs to that person's `result_id` and its DAILY or WEEKLY
 `period_id`, so a daily answer never overwrites a weekly answer or another date.
 
 Daily Realization shows the checklist after selecting a person. Automatic facts
 include the selected day's task counts and attendance evidence. Managers can fill
-the eight inputs there; staff can read the resulting checklist. Weekly
-Realization shows the same structure, using the week's aggregate evidence.
+the nine inputs there; staff can read the resulting checklist. Weekly
+Realization aggregates the latest daily answer per question, person, and date.
+A single negative meeting answer makes the weekly meeting answer negative;
+the other boolean questions use any positive occurrence. N/A is excluded from
+boolean voting and remains explicit in the dated history. Narrative choices
+and comments are retained by date. Missing working-day answers are shown as
+partial, never assumed to be "No" or "OK"; full-day Common View leave is excluded.
+Future days are not expected until their date. A complete daily rollup satisfies
+weekly completeness without re-entering answers. An explicit weekly manager
+answer overrides the rollup while preserving the daily history. Weekly approval
+stores the rollup, and locked weekly reports retain that stored evidence. Daily
+edits mark the related unlocked weekly AI analysis as stale. The rollup is also
+included in the AI input with its manual provenance and missing dates; it does
+not itself change task percentages, payroll, or deterministic policy grades.
 Ambiguous postponements or absences are marked as automatic facts that still need
 manager confirmation rather than being silently treated as resolved.
 
@@ -219,6 +234,12 @@ and still use the connected PrimeFlow account's normal permissions.
 
 ## Review, approval, and locking
 
+- The **Vlerësimi** table cell opens one combined person modal. It contains the
+  qualitative rating (including **Shumë mirë**), the manager summary, automatic
+  facts as read-only context, and the manual checklist answers.
+- Categorical checklist answers support multi-select. Boolean questions keep a
+  single `Po / Jo / Nuk aplikohet` choice. Daily rollups and dated history are
+  visible in the modal before a weekly override is saved.
 - MANAGER: review results and verify observations in their department.
 - ADMIN: same access across departments, plus approve and lock.
 - Override requires a reason.

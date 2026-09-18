@@ -630,7 +630,7 @@ export default function AfterBreakReportPage() {
                     ) : (
                       <ReportSectionPreview
                         body={reportSectionPreviewText(section.body)}
-                        filterCreatedWeek={[section.section_key, section.title].some(
+                        filterWfeAge={[section.section_key, section.title].some(
                           (value) => value?.trim().toUpperCase() === "DT WFE",
                         )}
                       />

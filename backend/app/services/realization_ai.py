@@ -156,6 +156,7 @@ def _safe_input(result_id: str, facts: dict[str, Any]) -> dict[str, Any]:
             "answered_by": answer.get("answered_by_name") or answer.get("answered_by"),
             "answered_at": answer.get("answered_at"),
             "source": "MANAGER_ANSWER",
+            "origin": answer.get("source") or "WEEKLY_MANAGER_ANSWER",
         }
 
     timeline = []
@@ -191,6 +192,18 @@ def _safe_input(result_id: str, facts: dict[str, Any]) -> dict[str, Any]:
         "project_progress": facts.get("project_progress") or [],
         "tasks": tasks,
         "manual_answers": manual_answers,
+        "daily_question_summary": {
+            key: {
+                "value": summary.get("value"), "complete": summary.get("complete"),
+                "answered_days": summary.get("answered_days"), "expected_days": summary.get("expected_days"),
+                "yes_days": summary.get("yes_days", 0), "no_days": summary.get("no_days", 0),
+                "unanswered_days": len(summary.get("missing_dates") or []),
+                "missing_dates": summary.get("missing_dates") or [],
+                "history": [{"date": item.get("date"), "value": item.get("value"), "comment": _text(item.get("comment"))} for item in summary.get("history") or []],
+                "source": "DAILY_MANAGER_ANSWERS_NOT_AUTOMATICALLY_PROVEN",
+            }
+            for key, summary in (facts.get("daily_question_summary") or {}).items()
+        },
         "observations": observations,
         "attendance": facts.get("attendance") or [],
         "meetings": facts.get("meetings") or [],
@@ -230,7 +243,7 @@ def _rule_based_analysis(facts: dict[str, Any], *, suggested_level: str | None =
         str(question.get("label") or question.get("key"))
         for question in facts.get("questions") or []
         if question.get("source_status") in {
-            "AUTO_NEEDS_CONFIRMATION", "MISSING_EVIDENCE", "MANUAL_UNANSWERED"
+            "AUTO_NEEDS_CONFIRMATION", "MISSING_EVIDENCE", "MANUAL_UNANSWERED", "MANUAL_DAILY_PARTIAL"
         }
         and str(question.get("key")) not in answers
     )

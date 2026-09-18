@@ -1072,11 +1072,11 @@ def _one_h_checklists_html(report_day: date | None = None) -> str:
 
     def question_text(questions: tuple[tuple[str, str], ...], *, extra: bool) -> str:
         if extra:
-            return "".join(
-                '<div data-extra-checklist-question="true" style="display:block;">'
+            return ' <span style="font-weight:900;"> / </span> '.join(
+                '<span data-extra-checklist-question="true" style="display:inline;">'
                 f'<strong>{index}. {html.escape(question)}</strong>'
                 + (f' <span style="color:#dc2626;font-weight:400;">({html.escape(description)})</span>' if description else "")
-                + '</div>'
+                + '</span>'
                 for index, (question, description) in enumerate(questions, 1)
             )
         separators = (
@@ -1115,24 +1115,23 @@ def _one_h_checklists_html(report_day: date | None = None) -> str:
     day_label = _day_specific_question_label(report_day)
     staff_extra = staff_questions[len(ONE_H_STAFF_CHECKLIST):]
     board_extra = board_questions[len(ONE_H_BOARD_CHECKLIST):]
+    extra_groups = [questions for questions in (staff_extra, board_extra) if questions]
     extra_columns = (
         '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
         'data-day-specific-checklist-columns="true" style="width:100%;border-collapse:collapse;margin:0 0 10px;">'
-        '<tr><td width="50%" valign="top" style="width:50%;padding:0 6px 0 0;vertical-align:top;">'
-        + (
+        '<tr>'
+        + ''.join(
+            f'<td width="{100 // len(extra_groups)}%" valign="top" '
+            f'style="width:{100 // len(extra_groups)}%;vertical-align:top;'
+            + ('padding:0 6px 0 0;' if len(extra_groups) > 1 and index == 0 else
+               'padding:0 0 0 6px;' if index > 0 else 'padding:0;')
+            + '">'
             '<div style="background:#fff7f7;border:1px solid #dc2626;border-left:6px solid #dc2626;'
             'padding:9px 10px;font-family:Arial,sans-serif;font-size:13px;line-height:1.45;color:#b91c1c;">'
-            f'{question_text(staff_extra, extra=True)}</div>'
-            if staff_extra else ""
+            f'{question_text(questions, extra=True)}</div></td>'
+            for index, questions in enumerate(extra_groups)
         )
-        + '</td><td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
-        + (
-            '<div style="background:#fff7f7;border:1px solid #dc2626;border-left:6px solid #dc2626;'
-            'padding:9px 10px;font-family:Arial,sans-serif;font-size:13px;line-height:1.45;color:#b91c1c;">'
-            f'{question_text(board_extra, extra=True)}</div>'
-            if board_extra else ""
-        )
-        + '</td></tr></table>'
+        + '</tr></table>'
         if staff_extra or board_extra else ""
     )
     weekday_block = (
@@ -3182,8 +3181,9 @@ async def _build_print_report(
     report_title = subject_for(target_date, report_day_label)
     board_questions, staff_questions = _one_h_checklists_for_day(checklist_date)
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
+<div data-report-intro="true">
 <div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">{report_title}</div>
-{_one_h_checklists_html(checklist_date)}{_task_marker_legend_html()}{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date, missing_one_h_by_slot=missing_one_h_by_slot)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
+{_one_h_checklists_html(checklist_date)}{_task_marker_legend_html()}</div>{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date, missing_one_h_by_slot=missing_one_h_by_slot)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
     content_html = (
         '<div data-today-print-report="true" style="margin:18px 0 14px">'
         + re.sub(r"^.*?<body[^>]*>|</body>.*$", "", html_body, flags=re.S)

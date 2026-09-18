@@ -181,7 +181,13 @@ async def relevant_tasks(db: AsyncSession, *, user_id: uuid.UUID, day: date) -> 
         result.update({task.id: task for task in extra})
     if primary_statement is not None and hasattr(db, "statement"):
         db.statement = primary_statement
-    return sorted(result.values(), key=lambda task: (task.due_date or day, task.created_at))
+    def sort_key(task: Task) -> tuple[date, str]:
+        raw_due = task.due_date
+        due_day = raw_due.date() if isinstance(raw_due, datetime) else raw_due or day
+        created_key = task.created_at.isoformat() if task.created_at else ""
+        return due_day, created_key
+
+    return sorted(result.values(), key=sort_key)
 
 
 async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, day: date,

@@ -73,3 +73,23 @@ def build_weekly_task_metrics(snapshot_tasks: list[dict], daily_timeline: list[d
         else 0.0
     )
     return metrics
+
+
+def build_weekly_question_metrics(daily_timeline: list[dict]) -> dict[str, int]:
+    """Aggregate day-level counters used by the weekly automatic questions."""
+    snapshot_days = [item for item in daily_timeline if item.get("has_snapshot")]
+    return {
+        "weekly_in_progress_count": sum(
+            int(item.get("in_progress_count", 0) or 0) for item in snapshot_days
+        ),
+        "weekly_no_progress_count": sum(
+            int(item.get("no_progress_count", 0) or 0) for item in snapshot_days
+        ),
+        "weekly_pending_count": sum(
+            int(item.get("pending_count", 0) or 0) for item in snapshot_days
+        ),
+        "weekly_fast_task_count": sum(
+            int(item.get("fast_task_count", 0) or 0) for item in snapshot_days
+        ),
+        "weekly_snapshot_days": len(snapshot_days),
+    }

@@ -38,8 +38,8 @@ QUESTION_LABELS = {
     "closed_tasks": "Mbylli detyrat?",
     "frequent_delays": "Vonesa të shpeshta?",
     "unexpected_absences": "Mungesa të papritura?",
-    "week_positive": "Çka ka sjellë pozitive personi në këtë javë?",
-    "week_problems": "Çka ka pasur probleme (ka prishur diçka)?",
+    "week_positive": "A solli diçka pozitive?",
+    "week_problems": "A shkaktoi problem te kolegu ose në punë?",
     "affected_other_plan": "A ja ka prishur dikujt tjetër planin?",
     "repeated_after_clarification": "A ka pasur përsëritje të detyrave edhe pas sqarimeve?",
     "current_level": "Niveli",
@@ -74,14 +74,17 @@ REPORT_QUESTION_SECTIONS = [
 ]
 
 MANUAL_BOOLEAN_QUESTION_KEYS = {
+    "respected_meetings",
     "requested_extra_tasks",
     "helped_colleague",
     "extra_engagement",
     "gave_proposal",
+    "week_positive",
+    "week_problems",
     "affected_other_plan",
     "repeated_after_clarification",
 }
-MANUAL_TEXT_QUESTION_KEYS = {"week_positive", "week_problems"}
+MANUAL_TEXT_QUESTION_KEYS: set[str] = set()
 MANDATORY_MANUAL_QUESTION_KEYS = (
     MANUAL_BOOLEAN_QUESTION_KEYS | MANUAL_TEXT_QUESTION_KEYS
 )
@@ -160,7 +163,10 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
     def count(name: str, fallback: int = 0) -> int:
         return int(person.get(name, counters.get(name, fallback)) or 0)
 
-    is_daily = bool(person.get("date"))
+    question_scope = str(person.get("question_scope") or "").upper()
+    is_daily = question_scope == "DAILY" or (
+        not question_scope and bool(person.get("date"))
+    )
     weekly_planned = count(
         "daily_planned_count" if is_daily else "weekly_planned_count"
     )
@@ -177,8 +183,16 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
         if is_daily
         else count("weekly_fast_task_count")
     )
-    no_progress_count = int(counters.get("no_progress_count", 0) or 0)
-    in_progress_count = int(counters.get("in_progress_count", 0) or 0)
+    no_progress_count = (
+        int(counters.get("no_progress_count", 0) or 0)
+        if is_daily
+        else count("weekly_no_progress_count", int(counters.get("no_progress_count", 0) or 0))
+    )
+    in_progress_count = (
+        int(counters.get("in_progress_count", 0) or 0)
+        if is_daily
+        else count("weekly_in_progress_count", int(counters.get("in_progress_count", 0) or 0))
+    )
 
     timeline_attendance = [
         item
@@ -337,12 +351,9 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
             evidence_ids=ids(proposals),
             answer_type="boolean",
         ),
-        _question(
+        _manual_question(
             "respected_meetings",
-            # No missed-meeting evidence means meetings were respected by
-            # default — matching the manual process, which only flags this
-            # when there IS a problem.
-            not missed_meetings,
+            {"missed_meeting_evidence": len(missed_meetings)},
             evidence_ids=ids(missed_meetings),
             explanation="Ka evidencë për takim të humbur." if missed_meetings else "",
             answer_type="boolean",
@@ -557,14 +568,9 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
             evidence_ids=[str(item["id"]) for item in proposals],
             answer_type="boolean",
         ),
-        _question(
+        _manual_question(
             "respected_meetings",
-            # No missed-meeting evidence means meetings were respected by
-            # default — matching the manual process, which only flags this
-            # when there IS a problem. A manager can still add a
-            # "Takim i humbur" evidence entry at any point to flip this.
-            not c.get("meeting_missed_count", 0),
-            source_status="AUTO",
+            {"missed_meeting_evidence": c.get("meeting_missed_count", 0)},
             evidence_ids=sorted(
                 set(meeting_task_ids)
                 | {str(item["id"]) for item in missed_meetings}

@@ -1,4 +1,8 @@
-from app.services.realization_weekly_metrics import build_weekly_task_metrics
+from app.services.realization_calculator import build_live_questions
+from app.services.realization_weekly_metrics import (
+    build_weekly_question_metrics,
+    build_weekly_task_metrics,
+)
 
 
 def task(task_id, attribution, classification="no_progress"):
@@ -57,3 +61,60 @@ def test_final_completed_plan_is_preserved_when_daily_entry_is_older():
     ])
     assert metrics["weekly_completed_count"] == 1
     assert metrics["weekly_progress_percent"] == 100
+
+
+def test_weekly_question_metrics_sum_every_snapshot_day():
+    metrics = build_weekly_question_metrics([
+        {
+            "has_snapshot": True,
+            "in_progress_count": 2,
+            "no_progress_count": 1,
+            "pending_count": 3,
+            "fast_task_count": 1,
+        },
+        {
+            "has_snapshot": True,
+            "in_progress_count": 4,
+            "no_progress_count": 2,
+            "pending_count": 1,
+            "fast_task_count": 2,
+        },
+        {"has_snapshot": False, "in_progress_count": 99},
+    ])
+
+    assert metrics == {
+        "weekly_in_progress_count": 6,
+        "weekly_no_progress_count": 3,
+        "weekly_pending_count": 4,
+        "weekly_fast_task_count": 3,
+        "weekly_snapshot_days": 2,
+    }
+
+
+def test_weekly_question_scope_uses_week_totals_even_when_daily_date_is_present():
+    questions = {
+        item["key"]: item
+        for item in build_live_questions({
+            "date": "2026-09-18",
+            "question_scope": "WEEKLY",
+            "daily_planned_count": 2,
+            "daily_completed_count": 1,
+            "weekly_planned_count": 10,
+            "weekly_completed_count": 8,
+            "weekly_in_progress_count": 6,
+            "weekly_no_progress_count": 3,
+            "weekly_fast_task_count": 4,
+            "weekly_additional_count": 5,
+            "counters": {"in_progress_count": 1, "no_progress_count": 0},
+            "tasks": [],
+            "observations": [],
+            "daily_timeline": [],
+        })
+    }
+
+    assert questions["plan_completed"]["auto_value"]["planned"] == 10
+    assert questions["plan_completed"]["auto_value"]["completed"] == 8
+    assert questions["in_progress_tasks"]["auto_value"]["count"] == 6
+    assert questions["no_progress_tasks"]["auto_value"]["count"] == 3
+    assert questions["new_tasks_added"]["auto_value"]["count"] == 5
+    assert questions["new_tasks_added"]["auto_value"]["fast_tasks"] == 4

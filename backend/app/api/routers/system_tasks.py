@@ -624,6 +624,8 @@ def _sync_system_task_due_date_to_done_day(task: Task, completed_at: datetime, t
         if task.due_date is not None and task.original_due_date is None:
             task.original_due_date = task.due_date
         task.due_date = completed_at
+    if task.start_date is not None and _local_date(task.start_date, tzinfo) > _local_date(completed_at, tzinfo):
+        task.start_date = completed_at
 
 
 async def _meeting_system_task_rows(

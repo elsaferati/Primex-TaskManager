@@ -89,15 +89,60 @@ export function PrintReportPage({
   const [settings, setSettings] = React.useState<SettingsState | null>(null)
   const [recipientInputs, setRecipientInputs] = React.useState({ to: "", cc: "", bcc: "" })
   const [preview, setPreview] = React.useState<Preview | null>(null)
+  const [reportIntroExpanded, setReportIntroExpanded] = React.useState(false)
   const [markerFilter, setMarkerFilter] = React.useState<TaskMarkerFilter>("all")
   const [history, setHistory] = React.useState<Delivery[]>([])
   const [loading, setLoading] = React.useState(true)
   const [saving, setSaving] = React.useState(false)
   const [sending, setSending] = React.useState(false)
   const [generatingAction, setGeneratingAction] = React.useState<"preview" | "generate" | null>(null)
-  const previewRef = React.useRef<HTMLDivElement | null>(null)
   const previewFrameRef = React.useRef<HTMLIFrameElement | null>(null)
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
+
+  const applyReportIntroVisibility = React.useCallback(() => {
+    const intro = previewFrameRef.current?.contentDocument?.querySelector<HTMLElement>('[data-report-intro="true"]')
+    if (intro) intro.hidden = !reportIntroExpanded
+  }, [reportIntroExpanded])
+
+  React.useEffect(() => {
+    applyReportIntroVisibility()
+  }, [applyReportIntroVisibility, preview])
+
+  React.useEffect(() => {
+    const frame = previewFrameRef.current
+    if (!preview || !frame) return
+
+    let resizeObserver: ResizeObserver | undefined
+    let animationFrame = 0
+    const resizePreview = () => {
+      window.cancelAnimationFrame(animationFrame)
+      animationFrame = window.requestAnimationFrame(() => {
+        const document = frame.contentDocument
+        if (!document?.body) return
+        // Measure the content without collapsing the frame and shifting the page.
+        const height = Math.ceil(document.body.getBoundingClientRect().height)
+        frame.style.height = `${height + 2}px`
+      })
+    }
+    const observePreview = () => {
+      resizeObserver?.disconnect()
+      const body = frame.contentDocument?.body
+      if (!body) return
+      // Include the report's outer margins in the observed content height.
+      body.style.display = "flow-root"
+      resizeObserver = new ResizeObserver(resizePreview)
+      resizeObserver.observe(body)
+      resizePreview()
+    }
+
+    frame.addEventListener("load", observePreview)
+    if (frame.contentDocument?.readyState === "complete") observePreview()
+    return () => {
+      frame.removeEventListener("load", observePreview)
+      resizeObserver?.disconnect()
+      window.cancelAnimationFrame(animationFrame)
+    }
+  }, [preview])
 
   const applySettings = React.useCallback((next: SettingsState) => {
     setSettings(next)
@@ -171,7 +216,6 @@ export function PrintReportPage({
       if (!response?.ok) throw new Error(await response?.text())
       setPreview(await response.json())
       toast.success(forPreview ? "Email preview ready" : `${reportName} generated`)
-      window.setTimeout(() => previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0)
     } catch (error) {
       toast.error("Report could not be generated", { description: String(error) })
     } finally {
@@ -443,17 +487,34 @@ export function PrintReportPage({
   )
 
   const generatedPreview = preview ? (
-    <div ref={previewRef} className="space-y-3 rounded-lg border bg-white p-4">
-      <div>
-        <h2 className="font-semibold">Generated email</h2>
-        <p className="text-sm text-muted-foreground">{preview.subject}</p>
+    <div className="space-y-3 rounded-lg border bg-white p-4">
+      <div className="flex items-center gap-3">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 w-8 shrink-0 p-0"
+          aria-expanded={reportIntroExpanded}
+          aria-label={reportIntroExpanded ? "Hide report questions and legend" : "Show report questions and legend"}
+          title={reportIntroExpanded ? "Hide questions and legend" : "Show questions and legend"}
+          onClick={() => setReportIntroExpanded((expanded) => !expanded)}
+        >
+          {reportIntroExpanded ? "−" : "+"}
+        </Button>
+        <div>
+          <h2 className="font-semibold">Generated email</h2>
+          <p className="text-sm text-muted-foreground">{preview.subject}</p>
+        </div>
       </div>
       <iframe
         ref={previewFrameRef}
-        onLoad={setupPreviewMarkerControls}
+        onLoad={() => {
+          applyReportIntroVisibility()
+          setupPreviewMarkerControls()
+        }}
         title={`${reportName} generated email`}
-        srcDoc={preview.html}
-        className="h-[620px] w-full rounded border bg-white"
+        srcDoc={preview.html.replace('<div data-report-intro="true">', '<div data-report-intro="true" hidden>')}
+        className={`w-full rounded border bg-white ${embedded ? "h-[620px]" : "h-dvh min-h-dvh"}`}
       />
     </div>
   ) : null

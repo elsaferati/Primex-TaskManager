@@ -16,6 +16,7 @@ from app.services.after_break_report import (
     _unheld_meeting_section,
     _unfinished_priority_task_rows,
     _waiting_client_task_rows,
+    _waiting_client_entry_dates,
     normalize_after_break_report_sections,
 )
 from app.services.meetings_report import _render_ascii_table_html, _table_tone_from_label
@@ -372,19 +373,19 @@ class WaitingClientTaskRowsTests(unittest.TestCase):
         )
 
         self.assertEqual([row[6] for row in rows], ["Waiting task", "Waiting task two"])
-        self.assertEqual(rows[0], ["1", "EU", "DEV", "This W", "AM", "FT", "Waiting task"])
-        self.assertEqual(rows[1][3], "Last W")
+        self.assertEqual(rows[0], ["1", "EU", "DEV", "Pa date", "AM", "FT", "Waiting task"])
+        self.assertEqual(rows[1][3], "Pa date")
         self.assertEqual(rows[1][4], "PM")
 
-    def test_dt_wfe_created_week_cells_use_blue_and_yellow_tones(self) -> None:
+    def test_dt_wfe_age_cells_use_blue_and_yellow_tones(self) -> None:
         lines = [
             "DT WFE:",
             "+----+---------+----------+",
-            "| NR | START    | TITULLI  |",
+            "| NR | WFE NGA  | TITULLI  |",
             "+----+---------+----------+",
-            "| 1  | This W  | Current  |",
+            "| 1  | Sot     | Current  |",
             "+----+---------+----------+",
-            "| 2  | Last W  | Previous |",
+            "| 2  | Dje     | Previous |",
             "+----+---------+----------+",
         ]
 
@@ -395,7 +396,7 @@ class WaitingClientTaskRowsTests(unittest.TestCase):
         self.assertIn('class="created-last-week"', rendered)
         self.assertIn('bgcolor="#fde68a"', rendered)
 
-    def test_dt_wfe_week_bucket_uses_start_date_only(self) -> None:
+    def test_dt_wfe_age_uses_entry_date_and_local_calendar_day(self) -> None:
         rows = _waiting_client_task_rows(
             [
                 self._task(
@@ -426,14 +427,28 @@ class WaitingClientTaskRowsTests(unittest.TestCase):
             {},
             date(2026, 8, 24),
             {"development": "DEV"},
+            entry_dates={
+                "Created earlier but starts this week": datetime(2026, 8, 24, 8, 0),
+                "Created this week but started last week": datetime(2026, 8, 23, 8, 0),
+                "Older start": datetime(2026, 8, 22, 8, 0),
+                # 22:30 UTC is already the next calendar day in Tirane.
+                "Future start": datetime(2026, 8, 23, 22, 30, tzinfo=ZoneInfo("UTC")),
+            },
         )
 
         buckets_by_title = {row[6]: row[3] for row in rows}
-        self.assertEqual(buckets_by_title["Created earlier but starts this week"], "This W")
-        self.assertEqual(buckets_by_title["Created this week but started last week"], "Last W")
-        self.assertEqual(buckets_by_title["Older start"], "Older")
-        self.assertEqual(buckets_by_title["No start"], "No start")
-        self.assertEqual(buckets_by_title["Future start"], "Future")
+        self.assertEqual(buckets_by_title["Created earlier but starts this week"], "Sot")
+        self.assertEqual(buckets_by_title["Created this week but started last week"], "Dje")
+        self.assertEqual(buckets_by_title["Older start"], "22.08")
+        self.assertEqual(buckets_by_title["No start"], "Pa date")
+        self.assertEqual(buckets_by_title["Future start"], "Sot")
+
+    def test_entry_after_report_day_is_unknown_instead_of_future(self) -> None:
+        rows = _waiting_client_task_rows(
+            [self._task("Later entry", "WAITING_CLIENT")], {}, {}, date(2026, 8, 24),
+            entry_dates={"Later entry": datetime(2026, 8, 25, 8, 0)},
+        )
+        self.assertEqual(rows[0][3], "Pa date")
 
     def test_dt_wfe_sorts_departments_then_users_by_weekly_planner_order(self) -> None:
         tasks = [
@@ -459,6 +474,60 @@ class WaitingClientTaskRowsTests(unittest.TestCase):
 
     def test_dt_wfe_uses_waiting_client_gold_tone(self) -> None:
         self.assertEqual(_table_tone_from_label("DT WFE:"), "waiting-client")
+
+    def test_dt_wfe_sorts_by_full_entry_date_oldest_first_unknown_last(self) -> None:
+        entry_dates = {
+            "Today": datetime(2026, 9, 18, 8, 0),
+            "Yesterday": datetime(2026, 9, 17, 8, 0),
+            "Previous month": datetime(2026, 8, 31, 8, 0),
+            "Previous year": datetime(2025, 12, 31, 8, 0),
+            "This month": datetime(2026, 9, 4, 8, 0),
+        }
+        tasks = [self._task(title, "WAITING_CLIENT") for title in ["Unknown", *entry_dates]]
+        rows = _waiting_client_task_rows(
+            tasks, {}, {}, date(2026, 9, 18), entry_dates=entry_dates,
+        )
+        self.assertEqual([row[6] for row in rows], [
+            "Previous year", "Previous month", "This month", "Yesterday", "Today", "Unknown",
+        ])
+        self.assertEqual([row[0] for row in rows], ["1", "2", "3", "4", "5", "6"])
+
+
+class WaitingClientEntryDatesTests(unittest.IsolatedAsyncioTestCase):
+    async def test_latest_entry_ignores_edits_and_supports_both_audit_formats(self) -> None:
+        def event(task_id, day, before, after, action="updated"):
+            return SimpleNamespace(
+                entity_id=task_id, created_at=datetime(2026, 8, day, 10, 0),
+                before=before, after=after, action=action,
+            )
+
+        events = [
+            event("reentered", 24, {"status": "WAITING_CLIENT"}, {"status": "WAITING_CLIENT"}),
+            event("semantic", 24, {"field": "status", "value": "DONE"},
+                  {"field": "status", "value": "WAITING_CLIENT"}, "task.reopened"),
+            event("reentered", 23, {"status": "TODO"}, {"status": "WFE"}),
+            event("created", 22, None, {"status": "WAITING_CLIENT"}, "created"),
+            event("unknown", 22, {"status": "WFE"}, {"status": "WAITING_CLIENT"}),
+            event("reentered", 21, {"status": "WAITING_CLIENT"}, {"status": "TODO"}),
+            event("reentered", 20, {"status": "TODO"}, {"status": "WAITING_CLIENT"}),
+        ]
+
+        class FakeDb:
+            async def execute(self, statement):
+                return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: events))
+
+        tasks = [SimpleNamespace(id=key, status="WAITING_CLIENT")
+                 for key in ("reentered", "semantic", "created", "unknown")]
+        dates = await _waiting_client_entry_dates(FakeDb(), tasks)
+        self.assertEqual(dates, {
+            "reentered": datetime(2026, 8, 23, 10, 0),
+            "semantic": datetime(2026, 8, 24, 10, 0),
+            "created": datetime(2026, 8, 22, 10, 0),
+        })
+
+    async def test_no_waiting_tasks_does_not_query_history(self) -> None:
+        dates = await _waiting_client_entry_dates(None, [SimpleNamespace(id="done", status="DONE")])
+        self.assertEqual(dates, {})
 
 
 class UnheldMeetingRowsTests(unittest.TestCase):

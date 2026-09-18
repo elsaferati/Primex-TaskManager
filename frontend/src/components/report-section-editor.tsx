@@ -89,6 +89,7 @@ function normalizeHeader(value: string) {
     LLOJI: "TYPE",
     KRIJUAR: "ADDED",
     START: "ADDED",
+    "WFE NGA": "ADDED",
     TIPI: "TYPE",
     PRODUKTE: "PRODUCTS",
   }
@@ -405,11 +406,12 @@ function priorityTaskTypeRank(headers: string[], cells: string[]) {
   return 3
 }
 
-function createdWeekCellTone(headers: string[], cells: string[], cellIndex: number) {
+function createdWeekCellTone(headers: string[], cells: string[], cellIndex: number, isWfe = false) {
   if (normalizeHeader(headers[cellIndex] || "") !== "ADDED") return ""
   const value = cells[cellIndex]?.trim().toUpperCase()
-  if (value === "THIS W") return "!bg-[#BAE6FD] !text-[#0C4A6E] font-semibold"
-  if (value === "LAST W") return "!bg-[#FDE68A] !text-[#78350F] font-semibold"
+  if (value === "THIS W" || value === "SOT") return "!bg-[#BAE6FD] !text-[#0C4A6E] font-semibold"
+  if (value === "LAST W" || value === "DJE") return "!bg-[#FDE68A] !text-[#78350F] font-semibold"
+  if (isWfe && /^\d{2}\.\d{2}$/.test(value || "")) return "!bg-[#FECACA] !text-[#991B1B] font-semibold"
   return ""
 }
 
@@ -536,13 +538,16 @@ function mergeContinuationTableRows(header: string[], rows: string[][]) {
 export function ReportSectionPreview({
   body,
   filterCreatedWeek = false,
+  filterWfeAge = false,
   projectColumnWidth,
 }: {
   body: string
   filterCreatedWeek?: boolean
+  filterWfeAge?: boolean
   projectColumnWidth?: string
 }) {
   const [createdWeekFilter, setCreatedWeekFilter] = React.useState<"all" | "this" | "last">("all")
+  const [wfeAgeFilter, setWfeAgeFilter] = React.useState("all")
   const lines = reportSectionEditorLines(body)
   const templates = tableGridTemplates(lines)
   const lineContexts = lines.reduce<{ contexts: Array<{ label: string; headers: string[] }>; label: string; headers: string[] }>(
@@ -707,17 +712,24 @@ export function ReportSectionPreview({
     const headers = withoutStatusColumn(rows[0].headers, rows[0].cells).headers
     const createdColumnIndex = headers.findIndex((header) => normalizeHeader(header) === "ADDED")
     const canFilterCreatedWeek = filterCreatedWeek && createdColumnIndex >= 0
+    const canFilterWfeAge = filterWfeAge && createdColumnIndex >= 0
     const dataRows = rows.filter((row) => !row.isHeader)
+    const wfeDates = canFilterWfeAge
+      ? [...new Set(dataRows.map((row) => row.cells[createdColumnIndex]?.trim()).filter((value) => /^\d{2}\.\d{2}$/.test(value || "")))]
+      : []
     const hasPriorityTaskTypes = dataRows.some((row) => priorityTaskTypeRank(row.headers, row.cells) < 3)
-    const orderedDataRows = hasPriorityTaskTypes
+    const orderedDataRows = hasPriorityTaskTypes && !canFilterWfeAge
       ? [...dataRows].sort(
           (left, right) =>
             priorityTaskTypeRank(left.headers, left.cells) - priorityTaskTypeRank(right.headers, right.cells),
         )
       : dataRows
+    const ageFilteredRows = canFilterWfeAge && wfeAgeFilter !== "all"
+      ? orderedDataRows.filter((row) => row.cells[createdColumnIndex]?.trim().toUpperCase() === wfeAgeFilter)
+      : orderedDataRows
     const visibleDataRows = !canFilterCreatedWeek || createdWeekFilter === "all"
-      ? orderedDataRows
-      : orderedDataRows.filter((row) => {
+      ? ageFilteredRows
+      : ageFilteredRows.filter((row) => {
           const value = row.cells[createdColumnIndex]?.trim().toUpperCase()
           return createdWeekFilter === "this" ? value === "THIS W" : value === "LAST W"
         })
@@ -765,7 +777,27 @@ export function ReportSectionPreview({
                             header === "NR" ? "w-8" : ""
                           } ${header === "WHO" || header === "DEP" ? "w-10" : ""}`}
                         >
-                          {header === "ADDED" && canFilterCreatedWeek ? (
+                          {header === "ADDED" && canFilterWfeAge ? (
+                            <label className="flex flex-col gap-1 text-left">
+                              <span>{trimTableCell(cell) || "-"}</span>
+                              <select
+                                aria-label="Filtro sipas kalimit ne WFE"
+                                value={wfeAgeFilter}
+                                onChange={(event) => setWfeAgeFilter(event.target.value)}
+                                className="h-6 rounded border border-slate-300 bg-white px-1 text-[10px] font-medium text-slate-700"
+                              >
+                                <option value="all">Të gjitha</option>
+                                {wfeDates.map((date) => (
+                                  <option key={date} value={date}>{date}</option>
+                                ))}
+                                <option value="DJE">Dje</option>
+                                <option value="SOT">Sot</option>
+                                {dataRows.some((item) => item.cells[createdColumnIndex]?.trim() === "Pa date") ? (
+                                  <option value="PA DATE">Pa datë</option>
+                                ) : null}
+                              </select>
+                            </label>
+                          ) : header === "ADDED" && canFilterCreatedWeek ? (
                             <label className="flex flex-col gap-1 text-left">
                               <span>{trimTableCell(cell) || "-"}</span>
                               <select
@@ -831,7 +863,7 @@ export function ReportSectionPreview({
                               ? "px-1 text-center"
                               : "px-2"
                           } ${diskCellTone(visible.headers, visible.cells, cellIndex)} ${tyoCellTone(visible.headers, visible.cells, cellIndex)} ${meetingStatusCellTone(visible.headers, visible.cells, cellIndex)} ${
-                            createdWeekCellTone(visible.headers, visible.cells, cellIndex)
+                            createdWeekCellTone(visible.headers, visible.cells, cellIndex, canFilterWfeAge || row.label.toUpperCase().includes("DT WFE"))
                           } ${
                             stackedDate
                               ? "w-[1%] whitespace-pre"

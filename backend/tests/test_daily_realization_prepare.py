@@ -11,6 +11,7 @@ import pytest
 from app.api.routers.realization import (
     _merge_daily_report_timeline_evidence,
     _merge_daily_report_task_evidence,
+    prepare_daily_checklist,
     prepare_daily_realization,
 )
 from app.models.enums import UserRole
@@ -178,3 +179,76 @@ def test_prepare_is_rejected_before_1530_without_writing():
     assert exc_info.value.detail["code"] == "DAILY_RLZ_CLOSE_WINDOW_NOT_OPEN"
     db.execute.assert_not_awaited()
     db.commit.assert_not_awaited()
+
+
+def test_manager_can_prepare_checklist_without_planned_snapshot():
+    department_id = uuid.uuid4()
+    person_id = uuid.uuid4()
+    manager = SimpleNamespace(
+        id=uuid.uuid4(), department_id=department_id, role=UserRole.MANAGER
+    )
+    department = SimpleNamespace(id=department_id, name="Development")
+    period = SimpleNamespace(id=uuid.uuid4(), planned_snapshot_id=None)
+    db = SimpleNamespace(
+        execute=AsyncMock(
+            side_effect=[_DepartmentResult(department), _DepartmentResult(None)]
+        ),
+        add=Mock(),
+        flush=AsyncMock(),
+        commit=AsyncMock(),
+        rollback=AsyncMock(),
+        refresh=AsyncMock(),
+    )
+    live = {
+        "people": [{
+            "user_id": str(person_id),
+            "tasks": [],
+            "metrics": {
+                "original_planned_count": 4,
+                "total_completed_today_count": 2,
+                "in_progress_count": 1,
+                "no_progress_count": 1,
+                "additional_count": 2,
+                "approved_postponement_count": 0,
+                "unapproved_postponement_count": 1,
+            },
+        }]
+    }
+
+    async def run():
+        with (
+            patch("app.api.routers.realization._ensure_department_scope"),
+            patch("app.api.routers.realization.can_review_realization", return_value=True),
+            patch("app.api.routers.realization.can_view_person_result", return_value=True),
+            patch(
+                "app.api.routers.realization.ensure_daily_period",
+                new=AsyncMock(return_value=(period, None)),
+            ),
+            patch(
+                "app.api.routers.realization.build_live_daily_realization",
+                new=AsyncMock(return_value=live),
+            ),
+            patch("app.api.routers.realization.add_audit_log", new=Mock()),
+            patch(
+                "app.api.routers.realization._daily_response",
+                new=AsyncMock(return_value={"people": [{"user_id": str(person_id)}]}),
+            ),
+        ):
+            return await prepare_daily_checklist(
+                department_id=department_id,
+                day=DAY,
+                user_id=person_id,
+                db=db,
+                user=manager,
+            )
+
+    response = asyncio.run(run())
+
+    created = db.add.call_args.args[0]
+    assert created.user_id == person_id
+    assert created.planned_count == 4
+    assert created.facts_json["checklist_without_planned_snapshot"] is True
+    assert len(created.facts_json["questions"]) == 17
+    assert response["people"][0]["user_id"] == str(person_id)
+    db.commit.assert_awaited_once()
+    db.rollback.assert_not_awaited()

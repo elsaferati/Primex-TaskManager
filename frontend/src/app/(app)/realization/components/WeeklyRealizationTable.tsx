@@ -102,7 +102,7 @@ export function WeeklyRealizationTable({ reports, personId, onSelect, loading, o
               <td className="px-2 text-center">{index + 1}</td><td className="px-2 py-2"><button type="button" onClick={() => onSelect(report, person)} className="text-left font-semibold text-blue-800 hover:underline">{person.user_name}</button></td>
               <td className="px-2 text-center font-semibold" title={report.department_name || undefined}>{realizationDepartmentTag({ name: report.department_name })}</td>
               {numbers(values)}<td className="px-2 text-center font-semibold tabular-nums">{values.percent}%</td>
-              <RealizationReviewCells periodId={person.period_id} userId={person.user_id} userName={person.user_name} refreshKey={person} locked={report.period.status === "LOCKED"} onSaved={onReviewSaved} />
+              <RealizationReviewCells periodId={person.period_id} userId={person.user_id} userName={person.user_name} result={person} refreshKey={person} locked={report.period.status === "LOCKED"} onSaved={onReviewSaved} />
             </tr>
           }) : <tr><td colSpan={15} className="p-4 text-center text-slate-500">Nuk ka të dhëna për filtrat e zgjedhur.</td></tr>}
         </tbody>
