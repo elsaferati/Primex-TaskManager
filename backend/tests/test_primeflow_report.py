@@ -39,7 +39,7 @@ from app.services.primeflow_report_delivery import (
 
 class PrimeFlowReportTests(unittest.TestCase):
     def test_combined_m2_m3_marker_renders_in_reports(self) -> None:
-        self.assertEqual(one_h_marker_symbol("M2_M3"), "M2/M3")
+        self.assertEqual(one_h_marker_symbol("M2_M3"), "M2/3")
 
     def test_done_task_appears_only_in_its_completion_report_window(self) -> None:
         report_day = date(2026, 8, 10)

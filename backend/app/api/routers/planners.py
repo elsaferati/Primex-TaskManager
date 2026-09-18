@@ -41,6 +41,7 @@ from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.models.weekly_planner_legend_entry import WeeklyPlannerLegendEntry
 from app.models.department import Department
 from app.services.task_classification import is_fast_task as is_fast_task_model
+from app.services.task_marker import historical_marker_for_day
 from app.services.system_task_schedule import matches_template_date
 from app.services.project_display_title import build_project_display_title_map
 from app.services.project_classification import (
@@ -2131,7 +2132,6 @@ async def weekly_table_planner(
             await db.execute(
                 select(TaskOneHMarkerHistory)
                 .where(TaskOneHMarkerHistory.task_id.in_(all_task_ids))
-                .where(TaskOneHMarkerHistory.marker_date >= working_days[0])
                 .where(TaskOneHMarkerHistory.marker_date <= working_days[-1])
             )
         ).scalars().all()
@@ -2148,7 +2148,7 @@ async def weekly_table_planner(
                 keys.append((key, value))
         return keys
 
-    marker_history_by_identity_day = {}
+    marker_history_by_identity: dict[tuple[str, uuid.UUID], list[TaskOneHMarkerHistory]] = {}
     current_tasks_by_identity: dict[tuple[str, uuid.UUID], list[Task]] = {}
     for candidate in all_tasks:
         for identity in _marker_identity_keys(candidate):
@@ -2158,19 +2158,28 @@ async def weekly_table_planner(
         if source_task is None:
             continue
         for identity in _marker_identity_keys(source_task):
-            marker_history_by_identity_day.setdefault((identity, row.marker_date), row)
+            marker_history_by_identity.setdefault(identity, []).append(row)
+    for rows in marker_history_by_identity.values():
+        rows.sort(key=lambda item: item.marker_date)
 
     def _marker_for_task_day(task: Task, day_date: date) -> tuple[str | None, bool, str | None]:
         identities = _marker_identity_keys(task)
-        # Prefer this exact task, then any linked task copy representing the same work.
-        for identity in identities:
-            saved = marker_history_by_identity_day.get((identity, day_date))
-            if saved is not None:
-                return saved.one_h_marker, saved.one_h_marker_by_ga, saved.one_h_marker_comment
+        # A history row remains effective until the next manual change. Prefer
+        # this exact task, then linked copies representing the same work.
+        saved = historical_marker_for_day(
+            [row for identity in identities for row in marker_history_by_identity.get(identity, [])],
+            day_date,
+        )
+        if saved is not None:
+            return saved
         # Compatibility fallback for rows created before marker history was deployed.
         for identity in identities:
             for candidate in current_tasks_by_identity.get(identity, []):
-                if candidate.one_h_marker_date == day_date and candidate.one_h_marker:
+                if (
+                    candidate.one_h_marker
+                    and candidate.one_h_marker_date is not None
+                    and candidate.one_h_marker_date <= day_date
+                ):
                     return (
                         candidate.one_h_marker,
                         candidate.one_h_marker_by_ga,

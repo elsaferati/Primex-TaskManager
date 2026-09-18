@@ -124,7 +124,9 @@ class TestGaNoteTaskInstances(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(by_owner[owner_a]["one_h_report_slot"], "11:50")
                 self.assertEqual(by_owner[owner_b]["one_h_report_slot"], "14:20")
                 self.assertEqual(by_owner[owner_a]["one_h_marker"], "FLAG")
-                self.assertIsNone(by_owner[owner_b]["one_h_marker"])
+                # Symbols persist until somebody manually changes or removes them;
+                # a marker saved on an earlier day is still active.
+                self.assertEqual(by_owner[owner_b]["one_h_marker"], "FLAG")
                 # These columns must be eagerly loaded to avoid async lazy-load errors.
                 selected_columns = str(session.statements[0]).split("FROM")[0]
                 for column in ("one_h_report_slot", "one_h_marker", "one_h_marker_date"):

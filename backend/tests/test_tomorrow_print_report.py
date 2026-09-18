@@ -48,7 +48,7 @@ def test_task_marker_legend_explains_the_report_symbols() -> None:
     assert "GENT</strong> - PYETJE/SQARIM ME GENTIN" in legend_html
     assert "M2</strong> - DOREZIM DERI NE PAUZE" in legend_html
     assert "M3</strong> - DOREZIM DERI NE FUND TE DITES" in legend_html
-    assert "M2/M3</strong> - DOREZIM EDHE NE M2 EDHE M3" in legend_html
+    assert "M2/3</strong> - DOREZIM EDHE NE M2 EDHE M3" in legend_html
     assert legend_html.count('aria-hidden="true"') == 10
 
 

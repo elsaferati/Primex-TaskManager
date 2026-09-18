@@ -503,7 +503,7 @@ def apply_ga_note_assignee_execution_states(
             task.one_h_report_slot = state.one_h_report_slot
             changed = True
         if state.one_h_marker_is_set:
-            marker_date = current_effective_marker_date() if state.one_h_marker else None
+            marker_date = current_effective_marker_date()
             if task.one_h_marker != state.one_h_marker or task.one_h_marker_date != marker_date:
                 task.one_h_marker = state.one_h_marker
                 task.one_h_marker_date = marker_date

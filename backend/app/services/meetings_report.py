@@ -2881,7 +2881,7 @@ def _is_m3_start_due_table(caption: str) -> bool:
 
 
 def _split_leading_task_marker(value: str) -> tuple[str, str] | None:
-    match = re.match(r"^(\(?\s*(?:!!!|GENT|M2/M3|M2|M3|KA|👁|◉|⚑|X|!|\?)\s*\)?)\s+(.+)$", str(value or ""))
+    match = re.match(r"^(\(?\s*(?:!!!|GENT|M2/3|M2|M3|KA|👁|◉|⚑|X|!|\?)\s*\)?)\s+(.+)$", str(value or ""))
     return (match.group(1), match.group(2)) if match else None
 
 

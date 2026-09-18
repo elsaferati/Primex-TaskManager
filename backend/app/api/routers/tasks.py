@@ -3908,7 +3908,7 @@ async def update_task_one_h_marker(
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     await sync_task_marker(
-        db, task, payload.one_h_marker, actor_email=user.email,
+        db, task, payload.one_h_marker, actor_email=getattr(user, "email", None),
         marker_comment=payload.one_h_marker_comment,
     )
 

@@ -49,16 +49,16 @@ def test_future_date_is_unchanged():
     assert effective_slot_date(FRI, at(MON, 17, 0)) == FRI
 
 
-def test_symbol_refreshes_with_the_1600_workday_rollover():
+def test_symbol_does_not_refresh_with_the_1600_workday_rollover():
     task = SimpleNamespace(one_h_marker="M2", one_h_marker_date=TUE)
     assert active_one_h_marker(task, now=at(TUE, 15, 59)) == "M2"
-    assert active_one_h_marker(task, now=at(TUE, 16, 0)) is None
+    assert active_one_h_marker(task, now=at(TUE, 16, 0)) == "M2"
 
 
-def test_symbol_saved_for_next_workday_appears_after_1600():
+def test_saved_symbol_is_visible_without_waiting_for_1600():
     wednesday = date(2026, 7, 8)
     task = SimpleNamespace(one_h_marker="M3", one_h_marker_date=wednesday)
-    assert active_one_h_marker(task, now=at(TUE, 15, 59)) is None
+    assert active_one_h_marker(task, now=at(TUE, 15, 59)) == "M3"
     assert active_one_h_marker(task, now=at(TUE, 16, 0)) == "M3"
 
 
@@ -75,24 +75,24 @@ def test_friday_symbols_remain_active_during_weekend():
     assert active_one_h_marker(task, now=at(SUN, 20, 0)) == "EXCLAMATION"
 
 
-def test_friday_symbols_remain_active_until_monday_1600():
+def test_friday_symbols_remain_active_after_monday_1600():
     monday = date(2026, 7, 13)
     task = SimpleNamespace(one_h_marker="FLAG", one_h_marker_date=FRI)
     assert active_one_h_marker(task, now=at(monday, 15, 59)) == "FLAG"
-    assert active_one_h_marker(task, now=at(monday, 16, 0)) is None
+    assert active_one_h_marker(task, now=at(monday, 16, 0)) == "FLAG"
 
 
-def test_monday_1600_activates_tuesday_symbols():
+def test_symbol_is_not_hidden_by_its_saved_date():
     monday = date(2026, 7, 13)
     tuesday = date(2026, 7, 14)
     task = SimpleNamespace(one_h_marker="M2", one_h_marker_date=tuesday)
-    assert active_one_h_marker(task, now=at(monday, 15, 59)) is None
+    assert active_one_h_marker(task, now=at(monday, 15, 59)) == "M2"
     assert active_one_h_marker(task, now=at(monday, 16, 0)) == "M2"
 
 
-def test_manual_marker_changes_before_monday_1600_use_friday_date():
+def test_manual_marker_changes_use_the_actual_calendar_date():
     monday = date(2026, 7, 13)
-    assert effective_marker_date(monday, at(monday, 10, 0)) == FRI
+    assert effective_marker_date(monday, at(monday, 10, 0)) == monday
 
 
 def test_slot_rollover_on_friday_is_unchanged():

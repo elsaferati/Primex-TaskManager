@@ -245,7 +245,7 @@ def _task_marker_label(item: dict[str, Any]) -> str:
         "GENT": "GENT",
         "M2": "M2",
         "M3": "M3",
-        "M2_M3": "M2/M3",
+        "M2_M3": "M2/3",
         "MONITOR": "👁",
         "CLOSE": "X",
         "FLAG": "⚑",
@@ -278,7 +278,7 @@ def _task_marker_legend_text() -> str:
         "X - MBYLL DETYREN / "
         "M2 - DOREZIM DERI NE PAUZE / "
         "M3 - DOREZIM DERI NE FUND TE DITES / "
-        "M2/M3 - DOREZIM EDHE NE M2 EDHE M3 / "
+        "M2/3 - DOREZIM EDHE NE M2 EDHE M3 / "
         "GENT - PYETJE/SQARIM ME GENTIN / "
         "KA - PYETJE/SQARIM ME KA / ⚑ - PYETJE/SQARIM ME GA"
     )
@@ -1168,7 +1168,7 @@ def _task_marker_legend_html() -> str:
         ("X", "MBYLL DETYREN"),
         ("M2", "DOREZIM DERI NE PAUZE"),
         ("M3", "DOREZIM DERI NE FUND TE DITES"),
-        ("M2/M3", "DOREZIM EDHE NE M2 EDHE M3"),
+        ("M2/3", "DOREZIM EDHE NE M2 EDHE M3"),
         ("GENT", "PYETJE/SQARIM ME GENTIN"),
         ("KA", "PYETJE/SQARIM ME KA"),
         ("⚑", "PYETJE/SQARIM ME GA"),
@@ -1179,7 +1179,7 @@ def _task_marker_legend_html() -> str:
     )
     content = separator.join(
         '<span style="display:inline-block;margin:2px 16px 2px 0;white-space:nowrap;">'
-        f'<strong style="color:#DC2626;font-size:{"12px" if symbol in {"KA", "GENT", "M2", "M3", "M2/M3"} else "17px"};font-weight:900;">{symbol}</strong> - '
+        f'<strong style="color:#DC2626;font-size:{"12px" if symbol in {"KA", "GENT", "M2", "M3", "M2/3"} else "17px"};font-weight:900;">{symbol}</strong> - '
         f'{html.escape(description)}</span>'
         for symbol, description in items
     )
@@ -3229,7 +3229,7 @@ async def _build_print_report(
         "!!! - KLIENT/URGJENT / "
         "👁 - KËRKON MONITORIM NGA DIKUSH TJETËR / X - MBYLL DETYREN / "
         "M2 - DOREZIM DERI NE PAUZE / M3 - DOREZIM DERI NE FUND TE DITES / "
-        "M2/M3 - DOREZIM EDHE NE M2 EDHE M3 / "
+        "M2/3 - DOREZIM EDHE NE M2 EDHE M3 / "
         "GENT - PYETJE/SQARIM ME GENTIN / KA - PYETJE/SQARIM ME KA / ⚑ - PYETJE/SQARIM ME GA",
         "",
         "TASKS",

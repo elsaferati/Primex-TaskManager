@@ -60,7 +60,7 @@ def test_m2_m3_symbols_are_available_in_shared_editors_and_legends():
         source = (ROOT / relative_path).read_text(encoding="utf-8")
         assert "M2" in source, relative_path
         assert "M3" in source, relative_path
-        assert "M2/M3" in source, relative_path
+        assert "M2/3" in source, relative_path
     legend_paths = (
         "frontend/src/components/task-one-h-marker-legend.tsx",
         "frontend/src/app/(app)/common/page.tsx",
@@ -121,7 +121,7 @@ def test_marker_dropdowns_and_legends_use_the_requested_order():
         assert positions == sorted(positions), relative_path
 
     legend = (ROOT / "frontend/src/components/task-one-h-marker-legend.tsx").read_text(encoding="utf-8")
-    legend_tokens = ('["?"', '["!"', '["M2"', '["M3"', '["M2/M3"', '["GENT"', '["KA"', '["⚑"')
+    legend_tokens = ('["?"', '["!"', '["M2"', '["M3"', '["M2/3"', '["GENT"', '["KA"', '["⚑"')
     positions = [legend.index(token) for token in legend_tokens]
     assert positions == sorted(positions)
 
@@ -210,11 +210,12 @@ def test_weekly_planner_uses_saved_daily_symbols_in_live_snapshot_and_print_view
         assert "one_h_marker_by_ga" in source
 
     planner = (ROOT / "backend/app/api/routers/planners.py").read_text(encoding="utf-8")
-    migration = (ROOT / "backend/alembic/versions/0122_add_task_marker_history.py").read_text(encoding="utf-8")
+    migration = (ROOT / "backend/alembic/versions/0123_persistent_task_symbols.py").read_text(encoding="utf-8")
     assert "TaskOneHMarkerHistory.marker_date" in planner
-    assert "marker_history_by_identity_day" in planner
+    assert "historical_marker_for_day" in planner
     assert '("ga_note", task.ga_note_origin_id)' in planner
     assert '("plan_note", task.plan_note_origin_id)' in planner
     assert '("fast_group", task.fast_task_group_id)' in planner
     assert "ON CONFLICT (task_id, marker_date) DO UPDATE" in migration
     assert "trg_sync_task_one_h_marker_history" in migration
+    assert "one_h_marker IS NULL" in migration
