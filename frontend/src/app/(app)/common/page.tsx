@@ -11500,6 +11500,11 @@ export default function CommonViewPage() {
           border-color: #d1d5db;
           color: #9ca3af;
         }
+        .week-table-entry.calendar-internal-muted .week-table-meeting-title,
+        .swimlane-cell.calendar-internal-muted .swimlane-title {
+          color: #64748b;
+          font-weight: 400;
+        }
         .form-error {
           color: #b91c1c;
           font-size: 12px;
@@ -11797,6 +11802,10 @@ export default function CommonViewPage() {
           color: #111827 !important;
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
+        }
+        .week-table-entry.personal-ga-task.repeat-task-muted,
+        .week-table-view.neutral-all-days .week-table-entry.personal-ga-task.repeat-task-muted {
+          color: #9ca3af !important;
         }
 
         /* Modern Toolbar */
@@ -15800,6 +15809,7 @@ export default function CommonViewPage() {
                             className={[
                               "week-table-entry",
                               internalMeetingLegendTone(e),
+                              isCalendarLinkedInternalMeeting(e) ? "calendar-internal-muted" : "",
                               isManualInternalMeeting(e) ? "manual-internal-meeting" : "",
                               isOneTimeMeeting(e.recurrenceType ?? e.recurrence_type) ? "one-time-meeting" : "",
                             ]
@@ -16249,6 +16259,7 @@ export default function CommonViewPage() {
                                 className={[
                                   "swimlane-cell",
                                   cell.accentClass || "",
+                                  row.id === "internal" && cell.isCalendarMeeting ? "calendar-internal-muted" : "",
                                   getSwimlaneDividerClass(row.id, cells, index),
                                   cell.placeholder ? "placeholder" : "",
                                   commonTaskHighlightClassName(cell),

@@ -62,14 +62,14 @@ def test_open_ended_task_windows(window_from, window_to, expected):
 @pytest.mark.parametrize(
     "important,status,completed_at,expected",
     [
-        (True, "IN_PROGRESS", None, True),
+        (True, "IN_PROGRESS", None, False),
         (True, "DONE", None, False),
-        (True, "DONE", "2026-09-23", True),
+        (True, "DONE", "2026-09-23", False),
         (True, "IN_PROGRESS", "2026-09-19", False),
         (False, "IN_PROGRESS", None, False),
     ],
 )
-def test_common_view_week_query_includes_deadline_tasks_until_completion(
+def test_common_view_week_query_excludes_deadline_tasks_after_due_date(
     important, status, completed_at, expected
 ):
     engine = create_engine("sqlite://")
@@ -90,6 +90,21 @@ def test_common_view_week_query_includes_deadline_tasks_until_completion(
         )
         assert bool(db.execute(query).all()) is expected
     engine.dispose()
+
+
+@pytest.mark.parametrize("status,completed_at", [
+    ("TODO", None), ("IN_PROGRESS", None), ("DONE", datetime(2026, 9, 25)),
+])
+def test_deadline_important_dates_stop_at_due_date(status, completed_at):
+    task = SimpleNamespace(
+        start_date=datetime(2026, 9, 14), due_date=datetime(2026, 9, 22),
+        created_at=datetime(2026, 9, 14), is_deadline_important=True,
+        status=status, completed_at=completed_at,
+    )
+    dates = _get_task_dates(task, False, range_end=date(2026, 9, 27))
+    assert date(2026, 9, 21) in dates
+    assert date(2026, 9, 22) in dates
+    assert not any(day > date(2026, 9, 22) for day in dates)
 
 
 def test_reported_personal_task_is_rendered_on_today_and_routed_to_gent():

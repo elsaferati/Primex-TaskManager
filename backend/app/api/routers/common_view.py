@@ -70,7 +70,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "17"
+COMMON_VIEW_CACHE_VERSION = "18"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -279,21 +279,8 @@ def _get_task_dates(task: Task, single_day_only: bool, range_end: date | None = 
         source = _get_task_date_source(task)
         start = end = _as_tirane_date(source) or date.today()
 
-    completed_at = getattr(task, "completed_at", None)
-    status_value = str(getattr(task, "status", "") or "").strip().upper()
-    is_done = bool(completed_at) or status_value in {"DONE", "COMPLETED"}
-    if bool(getattr(task, "is_deadline_important", False)):
-        # Deadline-important tasks are active from their start date, not only
-        # from their due date. Keep them on every Common View weekday until
-        # their completion day (or the end of the requested range while open).
-        deadline_start_source = start_dt or due_dt or _get_task_date_source(task)
-        deadline_start = _as_tirane_date(deadline_start_source) or start
-        start = deadline_start
-        if completed_at:
-            completion_day = _as_tirane_date(completed_at) or completed_at.date()
-            end = max(start, completion_day)
-        elif not is_done and range_end is not None:
-            end = max(start, range_end)
+    # Deadline importance changes highlighting, not the scheduled date range.
+    # range_end is retained for callers, but must never extend a task's due date.
 
     dates: list[date] = []
     current = start

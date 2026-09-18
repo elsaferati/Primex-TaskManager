@@ -50,13 +50,11 @@ def _task(*, important: bool, completed_at=None, status="IN_PROGRESS"):
     )
 
 
-def test_open_deadline_task_is_in_common_view_from_start_and_after_due_date():
+def test_open_deadline_task_is_in_common_view_from_start_through_due_date_only():
     assert _get_task_dates(_task(important=True), False, date(2026, 9, 25)) == [
         date(2026, 9, 21),
         date(2026, 9, 22),
         date(2026, 9, 23),
-        date(2026, 9, 24),
-        date(2026, 9, 25),
     ]
 
 
