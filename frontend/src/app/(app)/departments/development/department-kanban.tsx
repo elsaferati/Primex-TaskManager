@@ -7908,10 +7908,7 @@ export default function DepartmentKanban() {
                               </td>
                               <td className="border border-slate-200 w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
                                 {row.typeLabel === "SYS" ? (
-                                  <div className="flex flex-col items-center gap-1">
-                                    <span className="text-xs font-semibold text-slate-600">SYS</span>
-                                    <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} markerByGa={row.oneHMarkerByGa} className="mx-auto shrink-0" />
-                                  </div>
+                                  <span className="text-xs font-semibold text-slate-600">SYS</span>
                                 ) : (
                                   <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} markerByGa={row.oneHMarkerByGa} className="mx-auto shrink-0" />
                                 )}
@@ -8558,10 +8555,7 @@ export default function DepartmentKanban() {
                               </div>
                             </TableCell>
                             <TableCell className="w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
-                              <div className="flex flex-col items-center gap-1">
-                                <span className="text-xs font-semibold text-slate-600">SYS</span>
-                                <TaskOneHMarkerEditor taskId={task.id} marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} markerComment={task.one_h_marker_comment} className="mx-auto shrink-0" />
-                              </div>
+                              <span className="text-xs font-semibold text-slate-600">SYS</span>
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
                               {reportStatusLabel(taskStatusValue(task))}
@@ -11350,10 +11344,7 @@ export default function DepartmentKanban() {
                             </td>
                             <td className="border border-slate-900 w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
                               {row.typeLabel === "SYS" ? (
-                                <div className="flex flex-col items-center gap-1">
-                                  <span className="text-xs font-semibold text-slate-600">SYS</span>
-                                  <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} markerByGa={row.oneHMarkerByGa} className="mx-auto shrink-0" />
-                                </div>
+                                <span className="text-xs font-semibold text-slate-600">SYS</span>
                               ) : (
                                 <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} markerByGa={row.oneHMarkerByGa} className="mx-auto shrink-0" />
                               )}
@@ -11483,10 +11474,7 @@ export default function DepartmentKanban() {
                         </td>
                         <td className="border border-slate-900 w-[100px] min-w-[100px] px-2 py-2 text-center align-middle">
                           {row.typeLabel === "SYS" ? (
-                            <div className="flex flex-col items-center gap-1">
-                              <span className="text-xs font-semibold text-slate-600">SYS</span>
-                              <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} markerByGa={row.oneHMarkerByGa} className="mx-auto shrink-0" />
-                            </div>
+                            <span className="text-xs font-semibold text-slate-600">SYS</span>
                           ) : (
                             <TaskOneHMarkerEditor taskId={row.taskId} marker={row.oneHMarker} markerByGa={row.oneHMarkerByGa} className="mx-auto shrink-0" />
                           )}
