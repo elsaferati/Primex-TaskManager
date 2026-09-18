@@ -2738,6 +2738,7 @@ def _normalized_table_header(value: str) -> str:
         "LLOJI": "TYPE",
         "KRIJUAR": "ADDED",
         "START": "ADDED",
+        "WFE NGA": "ADDED",
         "ARSYEJA": "REASON",
         "KOMENT": "COMMENT",
         "PRODUKTE": "PRODUCTS",
@@ -2861,10 +2862,12 @@ def _table_cell_style_override(header: str, value: str) -> tuple[str, str, bool]
         if value.strip() == "\u2715":
             return "#FEE2E2", "#991B1B", True
     if header_name == "ADDED":
-        if normalized == "THIS W":
+        if normalized in {"THIS W", "SOT"}:
             return "#BAE6FD", "#0C4A6E", True
-        if normalized == "LAST W":
+        if normalized in {"LAST W", "DJE"}:
             return "#FDE68A", "#78350F", True
+        if header.strip().upper() == "WFE NGA" and re.fullmatch(r"\d{2}\.\d{2}", normalized):
+            return "#FECACA", "#991B1B", True
     return None
 
 
@@ -3052,17 +3055,23 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
                     cell_classes.append("canceled")
             if added_index is not None and index == added_index:
                 created_week = cell.strip().upper()
-                if created_week == "THIS W":
+                if created_week in {"THIS W", "SOT"}:
                     cell_classes.append("created-this-week")
                     cell_style = (
                         ' bgcolor="#bae6fd" style="background-color:#bae6fd!important;'
                         'color:#0c4a6e!important;font-weight:700;"'
                     )
-                elif created_week == "LAST W":
+                elif created_week in {"LAST W", "DJE"}:
                     cell_classes.append("created-last-week")
                     cell_style = (
                         ' bgcolor="#fde68a" style="background-color:#fde68a!important;'
                         'color:#78350f!important;font-weight:700;"'
+                    )
+                elif header[index].strip().upper() == "WFE NGA" and re.fullmatch(r"\d{2}\.\d{2}", created_week):
+                    cell_classes.append("wfe-older")
+                    cell_style = (
+                        ' bgcolor="#fecaca" style="background-color:#fecaca!important;'
+                        'color:#991b1b!important;font-weight:700;"'
                     )
             if _normalized_table_header(header[index]) == "T/Y/O" and _is_overdue_tyo_value(current_cell):
                 cell_classes.append("tyo-overdue")

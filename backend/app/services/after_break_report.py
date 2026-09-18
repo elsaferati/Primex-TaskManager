@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.after_break_report_settings import AfterBreakReportSettings
+from app.models.audit_log import AuditLog
 from app.models.department import Department
 from app.models.enums import CommonApprovalStatus, GaNoteStatus, TaskStatus
 from app.models.ga_note import GaNote
@@ -105,7 +106,7 @@ DONE_AM_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7), ("TITULLI", 58),
 ]
 WAITING_CLIENT_COLUMNS = [
-    ("NR", 2), ("KUSH", 12), ("DEP", 5), ("START", 8), ("AM/PM", 5), ("LLOJI", 7), ("TITULLI", 58),
+    ("NR", 2), ("KUSH", 12), ("DEP", 5), ("WFE NGA", 8), ("AM/PM", 5), ("LLOJI", 7), ("TITULLI", 58),
 ]
 PERSONAL_GROUPS = [
     ("TODO", "TODO"),
@@ -337,39 +338,71 @@ def _done_am_task_rows(
     ]
 
 
+async def _waiting_client_entry_dates(db: AsyncSession, tasks: list[Task]) -> dict[Any, datetime]:
+    """Read the latest actual WFE entry, ignoring edits made while already in WFE."""
+    task_ids = [task.id for task in tasks if _normalize_report_status(task.status) == TaskStatus.WAITING_CLIENT.value]
+    if not task_ids:
+        return {}
+    events = (await db.execute(
+        select(AuditLog)
+        .where(AuditLog.entity_type == "task", AuditLog.entity_id.in_(task_ids))
+        .where(
+            AuditLog.after["status"].astext.is_not(None)
+            | (AuditLog.after["field"].astext == "status")
+        )
+        .order_by(AuditLog.created_at.desc())
+    )).scalars().all()
+    entries: dict[Any, datetime] = {}
+    for event in events:
+        before, after = event.before or {}, event.after or {}
+        old_status = before.get("value") if before.get("field") == "status" else before.get("status")
+        new_status = after.get("value") if after.get("field") == "status" else after.get("status")
+        if (
+            event.entity_id not in entries
+            and _normalize_report_status(new_status) == TaskStatus.WAITING_CLIENT.value
+            and _normalize_report_status(old_status) != TaskStatus.WAITING_CLIENT.value
+            and (old_status is not None or event.action == "created")
+        ):
+            entries[event.entity_id] = event.created_at
+    return entries
+
+
 def _waiting_client_task_rows(
     tasks: list[Task],
     names: dict[Any, str],
     assignee_ids_by_task: dict[Any, set[Any]],
     report_day: date,
     department_codes: dict[Any, str] | None = None,
+    entry_dates: dict[Any, datetime] | None = None,
+    timezone: ZoneInfo | None = None,
 ) -> list[list[str]]:
     """All active tasks currently waiting for action or information from the client."""
-    week_start = report_day - timedelta(days=report_day.weekday())
-    previous_week_start = week_start - timedelta(days=7)
-    next_week_start = week_start + timedelta(days=7)
-
-    def start_week_label(task: Task) -> str:
-        start_day = _local_date(getattr(task, "start_date", None))
-        if start_day is None:
-            return "No start"
-        if week_start <= start_day < next_week_start:
-            return "This W"
-        if previous_week_start <= start_day < week_start:
-            return "Last W"
-        return "Older" if start_day < previous_week_start else "Future"
+    def entry_day_label(task: Task) -> str:
+        entered_at = _as_timezone((entry_dates or {}).get(task.id), timezone or ZoneInfo("Europe/Tirane"))
+        if entered_at is None or entered_at.date() > report_day:
+            return "Pa date"
+        age = (report_day - entered_at.date()).days
+        return "Sot" if age == 0 else "Dje" if age == 1 else entered_at.strftime("%d.%m")
 
     waiting = [
         task for task in tasks
         if _normalize_report_status(task.status) == TaskStatus.WAITING_CLIENT.value
     ]
-    waiting.sort(key=lambda task: common_view_task_sort_key(task, names, assignee_ids_by_task))
+    def entry_sort_key(task: Task) -> tuple:
+        entered_at = _as_timezone((entry_dates or {}).get(task.id), timezone or ZoneInfo("Europe/Tirane"))
+        known_date = entered_at is not None and entered_at.date() <= report_day
+        return (
+            entered_at.timestamp() if known_date else float("inf"),
+            common_view_task_sort_key(task, names, assignee_ids_by_task),
+        )
+
+    waiting.sort(key=entry_sort_key)
     return [
         [
             str(index),
             _task_owners(task, names, assignee_ids_by_task),
             _m3_department_label(task, department_codes),
-            start_week_label(task),
+            entry_day_label(task),
             _m3_am_pm_label(task),
             _m3_task_type_label(task),
             _display_title(task.title),
@@ -435,7 +468,11 @@ async def apply_waiting_client_task_table(
     await apply_weekly_planner_task_order(
         db, tasks, assignee_ids_by_task, department_codes
     )
-    rows = _waiting_client_task_rows(tasks, names, assignee_ids_by_task, report_day, department_codes)
+    entry_dates = await _waiting_client_entry_dates(db, tasks)
+    _, report_timezone = await _after_break_cutoff(db, report_day)
+    rows = _waiting_client_task_rows(
+        tasks, names, assignee_ids_by_task, report_day, department_codes, entry_dates, report_timezone,
+    )
     body = _normalize_section(
         _ascii_table(WAITING_CLIENT_TABLE_LABEL, WAITING_CLIENT_COLUMNS, rows)
     )
@@ -926,12 +963,15 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         cutoff_timezone,
         department_codes,
     )
+    entry_dates = await _waiting_client_entry_dates(db, tasks)
     waiting_client_rows = _waiting_client_task_rows(
         tasks,
         names,
         assignee_ids_by_task,
         report_day,
         department_codes,
+        entry_dates,
+        cutoff_timezone,
     )
     meetings = (await db.execute(select(Meeting).where(Meeting.starts_at.is_not(None)))).scalars().all()
     meetings = [meeting for meeting in meetings if is_common_view_visible_meeting(meeting)]
