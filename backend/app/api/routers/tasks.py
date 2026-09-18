@@ -254,6 +254,9 @@ def _sync_due_date_to_done_day(task: Task) -> None:
     ):
         task.original_due_date = task.due_date
     task.due_date = next_due_date
+    start_date = getattr(task, "start_date", None)
+    if start_date is not None and _as_local_date(start_date) > _as_local_date(task.completed_at):
+        task.start_date = task.completed_at
 
 
 def _due_date_on_done_day(due_date: datetime | None, completed_at: datetime) -> datetime:
@@ -2146,6 +2149,8 @@ async def create_task(
         due_date_value = _due_date_on_done_day(due_date_value, completed_at)
         if original_due_date_value == due_date_value:
             original_due_date_value = None
+        if _as_local_date(start_date_value) > _as_local_date(completed_at):
+            start_date_value = completed_at
     if payload.fast_task_order is not None and not is_fast:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

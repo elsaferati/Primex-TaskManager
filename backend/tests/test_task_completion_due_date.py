@@ -11,9 +11,27 @@ from app.api.routers.tasks import (
     _task_planned_date,
 )
 from app.models.enums import TaskStatus
+from app.models.task import Task, normalize_completed_task_dates
 
 
 class TestTaskCompletionDueDate(unittest.TestCase):
+    def test_storage_guard_normalizes_dates_for_other_completion_workflows(self) -> None:
+        task = Task(status="DONE", start_date=datetime(2031, 6, 5, tzinfo=timezone.utc),
+                    due_date=datetime(2031, 6, 9, tzinfo=timezone.utc),
+                    completed_at=datetime(2026, 6, 12, 9, 51, tzinfo=timezone.utc))
+        old_due = task.due_date
+        normalize_completed_task_dates(None, None, task)
+        self.assertEqual(task.due_date, task.completed_at)
+        self.assertEqual(task.start_date, task.completed_at)
+        self.assertEqual(task.original_due_date, old_due)
+
+    def test_storage_guard_does_not_change_open_future_tasks(self) -> None:
+        task = Task(status="TODO", start_date=datetime(2031, 6, 5, tzinfo=timezone.utc),
+                    due_date=datetime(2031, 6, 9, tzinfo=timezone.utc))
+        old_dates = (task.start_date, task.due_date)
+        normalize_completed_task_dates(None, None, task)
+        self.assertEqual((task.start_date, task.due_date), old_dates)
+
     def test_date_input_can_be_compared_with_a_stored_task_date(self) -> None:
         # A browser date input becomes a timezone-naive datetime, while dates
         # loaded from PostgreSQL are timezone-aware.
@@ -93,6 +111,28 @@ class TestTaskCompletionDueDate(unittest.TestCase):
         )
 
         self.assertEqual(_task_planned_date(task), task.due_date)
+
+    def test_done_task_future_start_is_clamped_to_completion(self) -> None:
+        task = SimpleNamespace(
+            status="DONE", start_date=datetime(2031, 6, 5, tzinfo=timezone.utc),
+            due_date=datetime(2031, 6, 9, tzinfo=timezone.utc),
+            original_due_date=None,
+            completed_at=datetime(2026, 6, 12, 9, 51, tzinfo=timezone.utc),
+        )
+        _sync_due_date_to_done_day(task)
+        self.assertEqual(task.start_date, task.completed_at)
+        self.assertEqual(task.due_date, task.completed_at)
+
+    def test_done_task_preserves_an_earlier_start(self) -> None:
+        start = datetime(2026, 6, 1, tzinfo=timezone.utc)
+        task = SimpleNamespace(
+            status="DONE", start_date=start, due_date=None,
+            original_due_date=None,
+            completed_at=datetime(2026, 6, 12, tzinfo=timezone.utc),
+        )
+        _sync_due_date_to_done_day(task)
+        self.assertEqual(task.start_date, start)
+        self.assertEqual(task.due_date, task.completed_at)
 
 
 if __name__ == "__main__":

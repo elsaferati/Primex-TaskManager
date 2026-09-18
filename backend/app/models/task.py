@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, event, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -118,3 +118,31 @@ class Task(Base):
     # this relationship unloaded prevents a second, duplicate SELECT on every
     # ordinary Task query.
     assignees = relationship("TaskAssignee", backref="task", lazy="noload", passive_deletes=True)
+
+
+@event.listens_for(Task, "before_insert")
+@event.listens_for(Task, "before_update")
+def normalize_completed_task_dates(mapper, connection, task: Task) -> None:
+    """Keep completion dates consistent across all task-writing workflows."""
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+
+    from app.config import settings
+
+    status = getattr(task.status, "value", task.status)
+    if str(status or "").upper() != "DONE" or task.completed_at is None:
+        return
+    tz = ZoneInfo(settings.APP_TIMEZONE)
+
+    def local_day(value):
+        if value is None:
+            return None
+        return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).astimezone(tz).date()
+
+    completed_day = local_day(task.completed_at)
+    if local_day(task.due_date) != completed_day:
+        if task.due_date is not None and task.original_due_date is None:
+            task.original_due_date = task.due_date
+        task.due_date = task.completed_at
+    if task.start_date is not None and local_day(task.start_date) > completed_day:
+        task.start_date = task.completed_at
