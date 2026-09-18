@@ -117,14 +117,16 @@ class TestGaNoteTaskInstances(unittest.IsolatedAsyncioTestCase):
                 payload_fields[source.replace("_id", "_ids")] = [note_id]
                 payload = GaNoteTaskBatchRequest(**payload_fields)
                 with patch("app.api.routers.tasks._assignees_for_tasks", new=AsyncMock(return_value={})), \
-                     patch("app.services.task_marker.current_effective_slot_date", return_value=day):
+                     patch("app.services.task_marker.current_effective_marker_date", return_value=day):
                     summaries = await list_task_summaries_by_ga_notes(payload, db=session, _=None)
 
                 by_owner = {item.assigned_to: item.model_dump() for item in summaries}
                 self.assertEqual(by_owner[owner_a]["one_h_report_slot"], "11:50")
                 self.assertEqual(by_owner[owner_b]["one_h_report_slot"], "14:20")
                 self.assertEqual(by_owner[owner_a]["one_h_marker"], "FLAG")
-                self.assertIsNone(by_owner[owner_b]["one_h_marker"])
+                # Symbols persist until somebody manually changes or removes them;
+                # a marker saved on an earlier day is still active.
+                self.assertEqual(by_owner[owner_b]["one_h_marker"], "FLAG")
                 # These columns must be eagerly loaded to avoid async lazy-load errors.
                 selected_columns = str(session.statements[0]).split("FROM")[0]
                 for column in ("one_h_report_slot", "one_h_marker", "one_h_marker_date"):

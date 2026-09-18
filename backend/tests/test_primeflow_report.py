@@ -13,7 +13,7 @@ from unittest.mock import patch
 from app.services.primeflow_report_access import can_manage_reports
 from app.services.primeflow_report import (
     GmailService, REPORT_SENDER_EMAIL, STATUS_MARKERS, build_report, clean_description, clean_title, employee_initials,
-    exact_subject, filter_tasks,
+    exact_subject, filter_tasks, one_h_marker_symbol,
     build_report_document, predecessor, previous_working_day, render_docx, render_html,
     render_plain_text, render_png, report_subject, ReportReminderQuestion, BOARD_REMINDER_SECTION_TITLE,
     REMINDER_SECTION_TITLE, ReportUndiscussedNote, UNDISCUSSED_NOTES_SECTION_TITLE,
@@ -38,6 +38,9 @@ from app.services.primeflow_report_delivery import (
 
 
 class PrimeFlowReportTests(unittest.TestCase):
+    def test_combined_m2_m3_marker_renders_in_reports(self) -> None:
+        self.assertEqual(one_h_marker_symbol("M2_M3"), "M2/3")
+
     def test_done_task_appears_only_in_its_completion_report_window(self) -> None:
         report_day = date(2026, 8, 10)
         completed_task = {

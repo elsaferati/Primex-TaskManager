@@ -18,6 +18,8 @@ import { formatDepartmentName } from "@/lib/department-name"
 import { formatDateTimeDMY } from "@/lib/dates"
 import { toast } from "sonner"
 import { Printer } from "lucide-react"
+import { TaskOneHMarker, taskOneHMarkerLabel } from "@/components/task-one-h-marker"
+import type { Task } from "@/lib/types"
 
 type SnapshotType = "PLANNED" | "FINAL"
 type SlotType = "am" | "pm"
@@ -84,6 +86,9 @@ type SnapshotTaskEntry = {
   is_personal: boolean
   is_deadline_important?: boolean
   ga_note_origin_id: string | null
+  one_h_marker?: Task["one_h_marker"]
+  one_h_marker_by_ga?: boolean
+  one_h_marker_comment?: string | null
 }
 
 type SnapshotProjectEntry = {
@@ -614,7 +619,13 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                                 ),
                               ].join(" ")}
                             >
-                              <span className={["truncate whitespace-nowrap font-semibold", titleColorClass].join(" ")}>
+                              <TaskOneHMarker
+                                marker={task.one_h_marker}
+                                markerByGa={task.one_h_marker_by_ga}
+                                comment={task.one_h_marker_comment}
+                                className="h-4 min-h-4 min-w-4 rounded px-0.5 text-[10px] !text-red-600"
+                              />
+                              <span className={["min-w-0 flex-1 truncate whitespace-nowrap font-semibold", titleColorClass].join(" ")}>
                                 {projectIndex + 1}.{taskIndex + 1}. {task.task_title || task.title || "-"}
                               </span>
                               <div className="flex items-center gap-1">
@@ -670,7 +681,13 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                             ),
                           ].join(" ")}
                         >
-                          <span className={["truncate whitespace-nowrap font-semibold", titleColorClass].join(" ")}>
+                          <TaskOneHMarker
+                            marker={task.one_h_marker}
+                            markerByGa={task.one_h_marker_by_ga}
+                            comment={task.one_h_marker_comment}
+                            className="h-4 min-h-4 min-w-4 rounded px-0.5 text-[10px] !text-red-600"
+                          />
+                          <span className={["min-w-0 flex-1 truncate whitespace-nowrap font-semibold", titleColorClass].join(" ")}>
                             {idx + 1}. {task.title || task.task_title || "-"}
                           </span>
                           <div className="flex items-center gap-1">
@@ -718,7 +735,13 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                             ),
                           ].join(" ")}
                         >
-                          <span className={["truncate whitespace-nowrap font-semibold", titleColorClass].join(" ")}>
+                          <TaskOneHMarker
+                            marker={task.one_h_marker}
+                            markerByGa={task.one_h_marker_by_ga}
+                            comment={task.one_h_marker_comment}
+                            className="h-4 min-h-4 min-w-4 rounded px-0.5 text-[10px] !text-red-600"
+                          />
+                          <span className={["min-w-0 flex-1 truncate whitespace-nowrap font-semibold", titleColorClass].join(" ")}>
                             {idx + 1}. {task.title || task.task_title || "-"}
                           </span>
                           <div className="flex items-center gap-1">
@@ -1293,6 +1316,10 @@ export function WeeklyPlannerSnapshotsView({
       if (!isTaskNewForWeek(createdAt, activeSnapshot.payload.week_start)) return ""
       return ` <span class="badge badge-new">NEW</span>`
     }
+    const buildPrintTaskMarker = (task: Pick<SnapshotTaskEntry, "one_h_marker" | "one_h_marker_by_ga">) => {
+      const label = taskOneHMarkerLabel(task.one_h_marker, task.one_h_marker_by_ga)
+      return label ? `<span class="task-marker">${label}</span>` : ""
+    }
 
     const renderDayGroupHtml = (day: SnapshotDay, dayIndex: number, usersChunk: { user_id: string; user_name: string }[]) => {
       const dayName = DAY_NAMES[dayIndex] || ""
@@ -1325,7 +1352,7 @@ export function WeeklyPlannerSnapshotsView({
               project.tasks.forEach((task, taskIndex) => {
                 const statusClass = getPrintTaskStatusClass(task, dayIso)
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
-                html += `<div class="task-item ${statusClass}">${taskNumber}. ${getTaskDisplayTitle(task)}`
+                html += `<div class="task-item ${statusClass}">${taskNumber}. ${buildPrintTaskMarker(task)}${getTaskDisplayTitle(task)}`
                 if (task.daily_products) {
                   html += ` <span class="products">${task.daily_products} pcs</span>`
                 }
@@ -1343,7 +1370,7 @@ export function WeeklyPlannerSnapshotsView({
             html += `<div style="margin-top: 1px; font-size: 4pt; color: #1e40af;"><strong>System Tasks:</strong>`
             systemTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
-              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${getTaskDisplayTitle(task)}`
+              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${buildPrintTaskMarker(task)}${getTaskDisplayTitle(task)}`
               const badge = getTaskStatusBadge(task)
               if (badge) {
                 html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
@@ -1371,7 +1398,7 @@ export function WeeklyPlannerSnapshotsView({
           html += `<div style="font-size: 4pt; color: #0f172a;">`
           fastTasks.forEach((task, taskIndex) => {
             const statusClass = getPrintTaskStatusClass(task, dayIso)
-            html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${getTaskDisplayTitle(task)}`
+            html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${buildPrintTaskMarker(task)}${getTaskDisplayTitle(task)}`
             const badge = getFastTaskBadge(task)
             if (badge) {
               html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
@@ -1404,7 +1431,7 @@ export function WeeklyPlannerSnapshotsView({
               project.tasks.forEach((task, taskIndex) => {
                 const statusClass = getPrintTaskStatusClass(task, dayIso)
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
-                html += `<div class="task-item ${statusClass}">${taskNumber}. ${getTaskDisplayTitle(task)}`
+                html += `<div class="task-item ${statusClass}">${taskNumber}. ${buildPrintTaskMarker(task)}${getTaskDisplayTitle(task)}`
                 if (task.daily_products) {
                   html += ` <span class="products">${task.daily_products} pcs</span>`
                 }
@@ -1422,7 +1449,7 @@ export function WeeklyPlannerSnapshotsView({
             html += `<div style="margin-top: 1px; font-size: 4pt; color: #1e40af;"><strong>System Tasks:</strong>`
             systemTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
-              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${getTaskDisplayTitle(task)}`
+              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${buildPrintTaskMarker(task)}${getTaskDisplayTitle(task)}`
               const badge = getTaskStatusBadge(task)
               if (badge) {
                 html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
@@ -1450,7 +1477,7 @@ export function WeeklyPlannerSnapshotsView({
           html += `<div style="font-size: 4pt; color: #0f172a;">`
           fastTasks.forEach((task, taskIndex) => {
             const statusClass = getPrintTaskStatusClass(task, dayIso)
-            html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${getTaskDisplayTitle(task)}`
+            html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${buildPrintTaskMarker(task)}${getTaskDisplayTitle(task)}`
             const badge = getFastTaskBadge(task)
             if (badge) {
               html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
@@ -1739,6 +1766,7 @@ export function WeeklyPlannerSnapshotsView({
               overflow-wrap: anywhere;
               word-break: break-word;
             }
+            .task-marker { color: #dc2626; font-weight: 900; margin-right: 2px; }
             .task-status-todo { background-color: #FFC4ED; }
             .task-status-in-progress { background-color: #FFFF00; }
             .task-status-waiting { background-color: #FFEDD5; border-color: #C2410C; color: #9A3412; }

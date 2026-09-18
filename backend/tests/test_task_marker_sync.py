@@ -1,11 +1,12 @@
 from types import SimpleNamespace
+from datetime import date
 from uuid import uuid4
 
 import pytest
 
 from app.schemas.ga_note import GaNoteTaskAssigneeStateUpdate, GaNoteTaskBundleUpdate
 from app.models.enums import TaskStatus
-from app.services.task_marker import note_bundle_marker_update
+from app.services.task_marker import historical_marker_for_day, note_bundle_marker_update, one_h_marker_label
 
 
 def _task(assignee_id, marker):
@@ -80,3 +81,66 @@ def test_conflicting_assignee_symbols_are_rejected():
             payload,
             [_task(first, None), _task(second, None)],
         )
+
+
+def test_weekly_planner_marker_label_preserves_ga_parentheses():
+    assert one_h_marker_label("M2_M3") == "M2/3"
+    assert one_h_marker_label("QUESTION", True) == "(?)"
+
+
+def test_weekly_planner_carries_a_symbol_into_the_next_week():
+    rows = [
+        SimpleNamespace(
+            marker_date=date(2026, 9, 18),
+            one_h_marker="M2_M3",
+            one_h_marker_by_ga=False,
+            one_h_marker_comment="Deliver twice",
+        )
+    ]
+    assert historical_marker_for_day(rows, date(2026, 9, 21)) == (
+        "M2_M3",
+        False,
+        "Deliver twice",
+    )
+
+
+def test_weekly_planner_keeps_old_days_and_applies_manual_changes_forward():
+    rows = [
+        SimpleNamespace(
+            marker_date=date(2026, 9, 14),
+            one_h_marker="M2_M3",
+            one_h_marker_by_ga=False,
+            one_h_marker_comment=None,
+        ),
+        SimpleNamespace(
+            marker_date=date(2026, 9, 16),
+            one_h_marker="EXCLAMATION",
+            one_h_marker_by_ga=True,
+            one_h_marker_comment="Changed Wednesday",
+        ),
+    ]
+    assert historical_marker_for_day(rows, date(2026, 9, 15)) == ("M2_M3", False, None)
+    assert historical_marker_for_day(rows, date(2026, 9, 17)) == (
+        "EXCLAMATION",
+        True,
+        "Changed Wednesday",
+    )
+
+
+def test_weekly_planner_manual_clear_stops_symbol_carryover():
+    rows = [
+        SimpleNamespace(
+            marker_date=date(2026, 9, 14),
+            one_h_marker="QUESTION",
+            one_h_marker_by_ga=False,
+            one_h_marker_comment=None,
+        ),
+        SimpleNamespace(
+            marker_date=date(2026, 9, 17),
+            one_h_marker=None,
+            one_h_marker_by_ga=False,
+            one_h_marker_comment=None,
+        ),
+    ]
+    assert historical_marker_for_day(rows, date(2026, 9, 16)) == ("QUESTION", False, None)
+    assert historical_marker_for_day(rows, date(2026, 9, 18)) == (None, False, None)

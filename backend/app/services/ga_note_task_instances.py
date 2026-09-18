@@ -15,6 +15,7 @@ from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
 from app.models.enums import TaskFinishPeriod, TaskPriority, TaskStatus
 from app.services.one_h_slots import current_effective_slot_date
+from app.services.task_marker import current_effective_marker_date
 
 
 @dataclass(slots=True)
@@ -502,7 +503,7 @@ def apply_ga_note_assignee_execution_states(
             task.one_h_report_slot = state.one_h_report_slot
             changed = True
         if state.one_h_marker_is_set:
-            marker_date = current_effective_slot_date() if state.one_h_marker else None
+            marker_date = current_effective_marker_date()
             if task.one_h_marker != state.one_h_marker or task.one_h_marker_date != marker_date:
                 task.one_h_marker = state.one_h_marker
                 task.one_h_marker_date = marker_date

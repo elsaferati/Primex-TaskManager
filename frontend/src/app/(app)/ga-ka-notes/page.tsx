@@ -32,7 +32,7 @@ import type { Department, GaNote, GaNoteAttachment, PlanNote, Project, SkillCate
 
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
-type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
+type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
 type OneHMarkerFilter = "all" | "with" | "none" | OneHMarker
 const ONE_H_MARKER_NONE = "__none__"
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
@@ -43,6 +43,7 @@ const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "CLOSE", label: "X" },
   { value: "M2", label: "M2" },
   { value: "M3", label: "M3" },
+  { value: "M2_M3", label: "M2/3" },
   { value: "GENT", label: "GENT" },
   { value: "KA", label: "KA" },
   { value: "FLAG", label: "⚑" },
@@ -3331,6 +3332,8 @@ export default function GaKaNotesPage() {
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
             <span><b className="text-xs font-black text-red-600">M3</b> - DOREZIM DERI NE FUND TE DITES</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
+            <span><b className="text-xs font-black text-red-600">M2/3</b> - DOREZIM EDHE NE M2 EDHE M3</span>
+            <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
             <span><b className="text-xs font-black text-red-600">GENT</b> - PYETJE/SQARIM ME GENTIN</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
             <span><b className="text-xs font-black text-red-600">KA</b> - PYETJE/SQARIM ME KA</span>
@@ -3360,6 +3363,7 @@ export default function GaKaNotesPage() {
                       ["X", "MBYLL DETYREN"],
                       ["M2", "DOREZIM DERI NE PAUZE"],
                       ["M3", "DOREZIM DERI NE FUND TE DITES"],
+                      ["M2/3", "DOREZIM EDHE NE M2 EDHE M3"],
                       ["GENT", "PYETJE/SQARIM ME GENTIN"],
                       ["KA", "PYETJE/SQARIM ME KA"],
                       ["⚑", "PYETJE/SQARIM ME GA"],

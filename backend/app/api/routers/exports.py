@@ -66,6 +66,7 @@ from app.services.daily_report_logic import (
 )
 from app.services.ga_time_table import get_ga_time_table_rows
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
+from app.services.task_marker import one_h_marker_label
 
 
 router = APIRouter()
@@ -682,6 +683,10 @@ def _planner_cell_items(
                 created_at=getattr(task, "created_at", None),
                 week_start_date=week_start_date,
             )
+            marker = one_h_marker_label(
+                getattr(task, "one_h_marker", None),
+                bool(getattr(task, "one_h_marker_by_ga", False)),
+            )
             if project_title:
                 items.append(
                     {
@@ -689,6 +694,7 @@ def _planner_cell_items(
                         "title": project_title,
                         "rest": task_name,
                         "status": status_value,
+                        "marker": marker,
                     }
                 )
             else:
@@ -698,6 +704,7 @@ def _planner_cell_items(
                         "title": task_name,
                         "rest": "",
                         "status": status_value,
+                        "marker": marker,
                     }
                 )
             task_num += 1
@@ -716,6 +723,10 @@ def _planner_cell_items(
                         day_date=day_date,
                         created_at=getattr(task, "created_at", None),
                         week_start_date=week_start_date,
+                    ),
+                    "marker": one_h_marker_label(
+                        getattr(task, "one_h_marker", None),
+                        bool(getattr(task, "one_h_marker_by_ga", False)),
                     ),
                 }
             )
@@ -739,6 +750,10 @@ def _planner_cell_items(
                             day_date=day_date,
                             created_at=getattr(task, "created_at", None),
                             week_start_date=week_start_date,
+                        ),
+                        "marker": one_h_marker_label(
+                            getattr(task, "one_h_marker", None),
+                            bool(getattr(task, "one_h_marker_by_ga", False)),
                         ),
                     }
                 )
@@ -830,7 +845,14 @@ def _planner_item_rich_text(item: dict[str, str | None]) -> CellRichText | str:
     number = item.get("number") or ""
     title = item.get("title") or ""
     rest = item.get("rest") or ""
-    return _create_rich_text_cell([(number, title, rest)])
+    marker = item.get("marker") or ""
+    parts = [TextBlock(text=f"{number}. ", font=InlineFont())]
+    if marker:
+        parts.append(TextBlock(text=f"{marker} ", font=InlineFont(b=True, color="FF0000")))
+    parts.append(TextBlock(text=title, font=InlineFont(b=True)))
+    if rest:
+        parts.append(TextBlock(text=f": {rest}", font=InlineFont()))
+    return CellRichText(parts)
 
 
 def _effective_status(status: str | None, completed_at: datetime | None, day_date: date) -> str:

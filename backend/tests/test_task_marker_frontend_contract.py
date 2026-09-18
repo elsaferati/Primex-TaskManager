@@ -47,7 +47,7 @@ def test_symbol_filters_include_all_marked_tasks_in_1h_and_px_notes():
         assert '"with" ? Boolean(marker)' in source or 'oneHMarkerFilter === "with"' in source
 
 
-def test_m2_and_m3_symbols_are_available_in_shared_editors_and_legends():
+def test_m2_m3_symbols_are_available_in_shared_editors_and_legends():
     paths = (
         "frontend/src/components/task-one-h-marker-editor.tsx",
         "frontend/src/app/(app)/common/page.tsx",
@@ -60,6 +60,17 @@ def test_m2_and_m3_symbols_are_available_in_shared_editors_and_legends():
         source = (ROOT / relative_path).read_text(encoding="utf-8")
         assert "M2" in source, relative_path
         assert "M3" in source, relative_path
+        assert "M2/3" in source, relative_path
+    legend_paths = (
+        "frontend/src/components/task-one-h-marker-legend.tsx",
+        "frontend/src/app/(app)/common/page.tsx",
+        "frontend/src/app/(app)/ga-ka-notes/page.tsx",
+        "backend/app/services/primeflow_report.py",
+        "backend/app/services/tomorrow_print_report.py",
+    )
+    for relative_path in legend_paths:
+        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert "DOREZIM EDHE NE M2 EDHE M3" in source, relative_path
 
 
 def test_monitor_close_and_symbol_comments_are_available_everywhere():
@@ -97,7 +108,7 @@ def test_client_urgent_symbol_is_available_in_editors_legends_and_reports():
 
 
 def test_marker_dropdowns_and_legends_use_the_requested_order():
-    ordered_tokens = ("QUESTION", "EXCLAMATION", "M2", "M3", "GENT", "KA", "FLAG")
+    ordered_tokens = ("QUESTION", "EXCLAMATION", "M2", "M3", "M2_M3", "GENT", "KA", "FLAG")
     dropdown_paths = (
         "frontend/src/components/task-one-h-marker-editor.tsx",
         "frontend/src/app/(app)/common/page.tsx",
@@ -110,7 +121,7 @@ def test_marker_dropdowns_and_legends_use_the_requested_order():
         assert positions == sorted(positions), relative_path
 
     legend = (ROOT / "frontend/src/components/task-one-h-marker-legend.tsx").read_text(encoding="utf-8")
-    legend_tokens = ('["?"', '["!"', '["M2"', '["M3"', '["GENT"', '["KA"', '["⚑"')
+    legend_tokens = ('["?"', '["!"', '["M2"', '["M3"', '["M2/3"', '["GENT"', '["KA"', '["⚑"')
     positions = [legend.index(token) for token in legend_tokens]
     assert positions == sorted(positions)
 
@@ -188,3 +199,23 @@ def test_symbol_views_refresh_when_the_user_returns_to_them():
     for relative_path in paths:
         source = (ROOT / relative_path).read_text(encoding="utf-8")
         assert "useVisibleRefresh" in source, relative_path
+
+
+def test_weekly_planner_uses_saved_daily_symbols_in_live_snapshot_and_print_views():
+    live = (ROOT / "frontend/src/app/(app)/weekly-planner/page.tsx").read_text(encoding="utf-8")
+    snapshots = (ROOT / "frontend/src/components/weekly-planner-snapshots-view.tsx").read_text(encoding="utf-8")
+    for source in (live, snapshots):
+        assert source.count("<TaskOneHMarker") >= 3
+        assert "buildPrintTaskMarker" in source
+        assert "one_h_marker_by_ga" in source
+
+    planner = (ROOT / "backend/app/api/routers/planners.py").read_text(encoding="utf-8")
+    migration = (ROOT / "backend/alembic/versions/0123_persistent_task_symbols.py").read_text(encoding="utf-8")
+    assert "TaskOneHMarkerHistory.marker_date" in planner
+    assert "historical_marker_for_day" in planner
+    assert '("ga_note", task.ga_note_origin_id)' in planner
+    assert '("plan_note", task.plan_note_origin_id)' in planner
+    assert '("fast_group", task.fast_task_group_id)' in planner
+    assert "ON CONFLICT (task_id, marker_date) DO UPDATE" in migration
+    assert "trg_sync_task_one_h_marker_history" in migration
+    assert "one_h_marker IS NULL" in migration

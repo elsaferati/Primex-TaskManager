@@ -36,6 +36,11 @@ class TestTaskSkillCategorySchemas(unittest.TestCase):
 
         self.assertEqual(payload.one_h_marker, "EXCLAMATION")
 
+    def test_create_accepts_combined_m2_m3_marker(self) -> None:
+        payload = TaskCreate(title="Combined delivery", one_h_marker="M2_M3")
+
+        self.assertEqual(payload.one_h_marker, "M2_M3")
+
     def test_create_accepts_each_matrix_category(self) -> None:
         for category in TaskSkillCategory:
             payload = TaskCreate(title="Valid task", skill_category=category.value)

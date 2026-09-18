@@ -45,7 +45,7 @@ import {
   type LegendEntry,
 } from "@/components/weekly-planner-legend-table"
 import { WeeklyPlannerSnapshotsView } from "@/components/weekly-planner-snapshots-view"
-import { TaskOneHMarker } from "@/components/task-one-h-marker"
+import { TaskOneHMarker, taskOneHMarkerLabel } from "@/components/task-one-h-marker"
 import { WeeklyPlanPerformanceView, type WeeklyPlanPerformanceResponse } from "@/components/weekly-plan-performance-view"
 import type { Department, GaNote, Project, Task, UserLookup } from "@/lib/types"
 
@@ -71,6 +71,9 @@ type WeeklyTableProjectTaskEntry = {
   is_deadline_important?: boolean
   ga_note_origin_id: string | null
   plan_note_origin_id?: string | null
+  one_h_marker?: Task["one_h_marker"]
+  one_h_marker_by_ga?: boolean
+  one_h_marker_comment?: string | null
 }
 
 type WeeklyTableProjectEntry = {
@@ -101,6 +104,9 @@ type WeeklyTableTaskEntry = {
   is_deadline_important?: boolean
   ga_note_origin_id: string | null
   plan_note_origin_id?: string | null
+  one_h_marker?: Task["one_h_marker"]
+  one_h_marker_by_ga?: boolean
+  one_h_marker_comment?: string | null
 }
 
 type WeeklyTableUserDay = {
@@ -2189,6 +2195,7 @@ export default function WeeklyPlannerPage() {
               overflow-wrap: anywhere;
               word-break: break-word;
             }
+            .task-marker { color: #dc2626; font-weight: 900; margin-right: 2px; }
             .task-status-todo { background-color: #FFC4ED; }
             .task-status-in-progress { background-color: #FFFF00; }
             .task-status-waiting { background-color: #FFEDD5; border-color: #C2410C; color: #9A3412; }
@@ -2684,6 +2691,11 @@ export default function WeeklyPlannerPage() {
       return ` <span class="badge badge-new">NEW</span>`
     }
 
+    const buildPrintTaskMarker = (task: Pick<WeeklyTableTaskEntry, "one_h_marker" | "one_h_marker_by_ga">) => {
+      const label = taskOneHMarkerLabel(task.one_h_marker, task.one_h_marker_by_ga)
+      return label ? `<span class="task-marker">${escapeHtml(label)}</span>` : ""
+    }
+
     const renderDayGroupHtml = (
       day: WeeklyTableDay,
       dayIndex: number,
@@ -2730,7 +2742,7 @@ export default function WeeklyPlannerPage() {
             systemTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
               const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
-              html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}${buildPrintNewBadge(task.created_at)}</div>`
+              html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${buildPrintTaskMarker(task)}${escapeHtml(getPlannerTaskDisplayTitle(task))}${buildPrintNewBadge(task.created_at)}</div>`
             })
             html += `</div>`
           } else {
@@ -2760,7 +2772,7 @@ export default function WeeklyPlannerPage() {
             fastTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
               const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
-              html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
+              html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${buildPrintTaskMarker(task)}${escapeHtml(getPlannerTaskDisplayTitle(task))}`
               const badge = getFastTaskBadge({ ...task, day_date: dayIso })
               if (badge) {
                 html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
@@ -2814,7 +2826,7 @@ export default function WeeklyPlannerPage() {
                 const statusClass = getPrintTaskStatusClass(task, dayIso)
                 const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
-                html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskNumber}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
+                html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskNumber}. ${buildPrintTaskMarker(task)}${escapeHtml(getPlannerTaskDisplayTitle(task))}`
                 const productLabel = formatTaskProducts(task, project, departmentName)
                 if (productLabel) {
                   html += ` <span class="products">${productLabel}</span>`
@@ -2857,7 +2869,7 @@ export default function WeeklyPlannerPage() {
           fastTasks.forEach((task, taskIndex) => {
             const statusClass = getPrintTaskStatusClass(task, dayIso)
             const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
-            html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
+            html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${buildPrintTaskMarker(task)}${escapeHtml(getPlannerTaskDisplayTitle(task))}`
             const badge = getFastTaskBadge({ ...task, day_date: dayIso })
             if (badge) {
               html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
@@ -2897,7 +2909,7 @@ export default function WeeklyPlannerPage() {
             systemTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
               const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
-              html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}${buildPrintNewBadge(task.created_at)}</div>`
+              html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${buildPrintTaskMarker(task)}${escapeHtml(getPlannerTaskDisplayTitle(task))}${buildPrintNewBadge(task.created_at)}</div>`
             })
             html += `</div>`
           } else {
@@ -2927,7 +2939,7 @@ export default function WeeklyPlannerPage() {
             fastTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
               const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
-              html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
+              html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${buildPrintTaskMarker(task)}${escapeHtml(getPlannerTaskDisplayTitle(task))}`
               const badge = getFastTaskBadge({ ...task, day_date: dayIso })
               if (badge) {
                 html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
@@ -2974,7 +2986,7 @@ export default function WeeklyPlannerPage() {
                 const statusClass = getPrintTaskStatusClass(task, dayIso)
                 const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
-                html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskNumber}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
+                html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskNumber}. ${buildPrintTaskMarker(task)}${escapeHtml(getPlannerTaskDisplayTitle(task))}`
                 const productLabel = formatTaskProducts(task, project, departmentName)
                 if (productLabel) {
                   html += ` <span class="products">${productLabel}</span>`
@@ -3017,7 +3029,7 @@ export default function WeeklyPlannerPage() {
           fastTasks.forEach((task, taskIndex) => {
             const statusClass = getPrintTaskStatusClass(task, dayIso)
             const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
-            html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
+            html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${buildPrintTaskMarker(task)}${escapeHtml(getPlannerTaskDisplayTitle(task))}`
             const badge = getFastTaskBadge({ ...task, day_date: dayIso })
             if (badge) {
               html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
@@ -4680,7 +4692,7 @@ export default function WeeklyPlannerPage() {
                             )
                             const repeatedTaskCardClassName = (task: { task_id?: string | null }) =>
                               isRepeatedTaskForDay(task)
-                                ? "[&>button]:!text-[#9ca3af] [&_span]:!text-[#9ca3af]"
+                                ? "[&_.weekly-task-title]:!text-[#9ca3af] [&_span]:!text-[#9ca3af]"
                                 : ""
 
                             const hasContent = projectsList.length > 0 || systemTasksList.length > 0 || fastTasksList.length > 0
@@ -4776,11 +4788,18 @@ export default function WeeklyPlannerPage() {
                                                   repeatedTaskCardClassName(task),
                                                 ].join(" ")}
                                               >
+                                                  <TaskOneHMarker
+                                                    marker={task.one_h_marker}
+                                                    markerByGa={task.one_h_marker_by_ga}
+                                                    comment={task.one_h_marker_comment}
+                                                    className="h-4 min-h-4 min-w-4 rounded px-0.5 text-[10px] !text-red-600"
+                                                  />
                                                   <button
                                                     type="button"
                                                     onClick={() => openTaskTitle(fullTitle)}
                                                     className={[
                                                       "min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded",
+                                                      "weekly-task-title",
                                                       titleColorClass,
                                                     ].join(" ")}
                                                     title={`${taskNumber}. ${displayTitle}`}
@@ -4862,11 +4881,18 @@ export default function WeeklyPlannerPage() {
                                             repeatedTaskCardClassName(task),
                                           ].join(" ")}
                                         >
+                                            <TaskOneHMarker
+                                              marker={task.one_h_marker}
+                                              markerByGa={task.one_h_marker_by_ga}
+                                              comment={task.one_h_marker_comment}
+                                              className="h-4 min-h-4 min-w-4 rounded px-0.5 text-[10px] !text-red-600"
+                                            />
                                             <button
                                               type="button"
                                               onClick={() => openTaskTitle(fullTitle)}
                                               className={[
                                                 "min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded",
+                                                "weekly-task-title",
                                                 titleColorClass,
                                               ].join(" ")}
                                               title={`${idx + 1}. ${displayTitle}`}
@@ -4930,11 +4956,18 @@ export default function WeeklyPlannerPage() {
                                             repeatedTaskCardClassName(task),
                                           ].join(" ")}
                                         >
+                                        <TaskOneHMarker
+                                          marker={task.one_h_marker}
+                                          markerByGa={task.one_h_marker_by_ga}
+                                          comment={task.one_h_marker_comment}
+                                          className="h-4 min-h-4 min-w-4 rounded px-0.5 text-[10px] !text-red-600"
+                                        />
                                         <button
                                           type="button"
                                           onClick={() => openTaskTitle(fullTitle)}
                                           className={[
                                             "min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded",
+                                            "weekly-task-title",
                                             titleColorClass,
                                           ].join(" ")}
                                           title={`${idx + 1}. ${displayTitle}`}

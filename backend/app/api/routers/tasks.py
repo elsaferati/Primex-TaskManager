@@ -34,7 +34,7 @@ from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_planner_exclusion import TaskPlannerExclusion
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
-from app.services.one_h_slots import current_effective_slot_date, effective_slot_date
+from app.services.one_h_slots import effective_slot_date
 from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.user import User
 from app.schemas.task import (
@@ -56,7 +56,7 @@ from app.services.task_daily_progress import (
     upsert_task_daily_progress,
 )
 from app.services.task_date_window import task_date_window_filter
-from app.services.task_marker import active_one_h_marker, marker_is_by_ga, normalize_marker_comment, sync_task_marker
+from app.services.task_marker import active_one_h_marker, current_effective_marker_date, marker_is_by_ga, normalize_marker_comment, sync_task_marker
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
 from app.services.daily_report_logic import business_days_between, parse_ko_user_id
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
@@ -2200,7 +2200,7 @@ async def create_task(
                     is_1h_report=payload.is_1h_report or False,
                     one_h_report_slot=payload.one_h_report_slot if (payload.is_1h_report or payload.is_r1) else None,
                     one_h_marker=payload.one_h_marker,
-                    one_h_marker_date=current_effective_slot_date() if payload.one_h_marker else None,
+                    one_h_marker_date=current_effective_marker_date() if payload.one_h_marker else None,
                     one_h_marker_by_ga=bool(payload.one_h_marker and marker_is_by_ga(user.email)),
                     one_h_marker_comment=normalize_marker_comment(payload.one_h_marker, payload.one_h_marker_comment),
                     is_r1=payload.is_r1 or False,
@@ -2333,7 +2333,7 @@ async def create_task(
                             is_1h_report=payload.is_1h_report or False,
                             one_h_report_slot=payload.one_h_report_slot if (payload.is_1h_report or payload.is_r1) else None,
                             one_h_marker=payload.one_h_marker,
-                            one_h_marker_date=current_effective_slot_date() if payload.one_h_marker else None,
+                            one_h_marker_date=current_effective_marker_date() if payload.one_h_marker else None,
                             one_h_marker_by_ga=bool(payload.one_h_marker and marker_is_by_ga(user.email)),
                             one_h_marker_comment=normalize_marker_comment(payload.one_h_marker, payload.one_h_marker_comment),
                             is_r1=payload.is_r1 or False,
@@ -2449,7 +2449,7 @@ async def create_task(
                 is_1h_report=payload.is_1h_report or False,
                 one_h_report_slot=payload.one_h_report_slot if (payload.is_1h_report or payload.is_r1) else None,
                 one_h_marker=payload.one_h_marker,
-                one_h_marker_date=current_effective_slot_date() if payload.one_h_marker else None,
+                one_h_marker_date=current_effective_marker_date() if payload.one_h_marker else None,
                 one_h_marker_by_ga=bool(payload.one_h_marker and marker_is_by_ga(user.email)),
                 one_h_marker_comment=normalize_marker_comment(payload.one_h_marker, payload.one_h_marker_comment),
                 is_r1=payload.is_r1 or False,
@@ -2554,7 +2554,7 @@ async def create_task(
                 is_1h_report=payload.is_1h_report or False,
                 one_h_report_slot=payload.one_h_report_slot if (payload.is_1h_report or payload.is_r1) else None,
                 one_h_marker=payload.one_h_marker,
-                one_h_marker_date=current_effective_slot_date() if payload.one_h_marker else None,
+                one_h_marker_date=current_effective_marker_date() if payload.one_h_marker else None,
                 one_h_marker_by_ga=bool(payload.one_h_marker and marker_is_by_ga(user.email)),
                 one_h_marker_comment=normalize_marker_comment(payload.one_h_marker, payload.one_h_marker_comment),
                 is_r1=payload.is_r1 or False,
@@ -2656,7 +2656,7 @@ async def create_task(
         is_1h_report=payload.is_1h_report or False,
         one_h_report_slot=payload.one_h_report_slot if (payload.is_1h_report or payload.is_r1) else None,
         one_h_marker=payload.one_h_marker,
-        one_h_marker_date=current_effective_slot_date() if payload.one_h_marker else None,
+        one_h_marker_date=current_effective_marker_date() if payload.one_h_marker else None,
         one_h_marker_by_ga=bool(payload.one_h_marker and marker_is_by_ga(user.email)),
         one_h_marker_comment=normalize_marker_comment(payload.one_h_marker, payload.one_h_marker_comment),
         is_r1=payload.is_r1 or False,
@@ -3817,7 +3817,7 @@ class TaskOneHReportSlotUpdate(BaseModel):
 
 
 class TaskOneHMarkerUpdate(BaseModel):
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|M2|M3|MONITOR|CLOSE|CLIENT_URGENT)$")
+    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT)$")
     one_h_marker_comment: str | None = Field(default=None, max_length=1000)
 
 
@@ -3908,7 +3908,7 @@ async def update_task_one_h_marker(
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     await sync_task_marker(
-        db, task, payload.one_h_marker, actor_email=user.email,
+        db, task, payload.one_h_marker, actor_email=getattr(user, "email", None),
         marker_comment=payload.one_h_marker_comment,
     )
 

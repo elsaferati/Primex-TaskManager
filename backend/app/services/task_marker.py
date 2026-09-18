@@ -1,15 +1,47 @@
 """Keep the symbol shared by a note and its linked task representations."""
 from __future__ import annotations
 
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
 from sqlalchemy import or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ga_note import GaNote
 from app.models.plan_note import PlanNote
 from app.models.task import Task
-from app.services.one_h_slots import current_effective_slot_date, effective_slot_date
-
 GA_MARKER_EMAIL = "ga@primexeu.com"
+ONE_H_MARKER_SYMBOLS = {
+    "EXCLAMATION": "!",
+    "CLIENT_URGENT": "!!!",
+    "QUESTION": "?",
+    "KA": "KA",
+    "GENT": "GENT",
+    "M2": "M2",
+    "M3": "M3",
+    "M2_M3": "M2/3",
+    "FLAG": "⚑",
+    "MONITOR": "👁",
+    "CLOSE": "X",
+}
+
+
+def one_h_marker_label(marker: str | None, marker_by_ga: bool = False) -> str:
+    symbol = ONE_H_MARKER_SYMBOLS.get((marker or "").strip().upper(), "")
+    return f"({symbol})" if symbol and marker_by_ga else symbol
+
+
+def effective_marker_date(view_date: date, now: datetime | None = None) -> date:
+    """Return the requested calendar date; task symbols no longer auto-refresh."""
+    return view_date
+
+
+def current_effective_marker_date(now: datetime | None = None) -> date:
+    if now is None:
+        from app.config import settings
+
+        now = datetime.now(ZoneInfo(settings.APP_TIMEZONE))
+    return now.date()
 
 
 def marker_is_by_ga(actor_email: str | None) -> bool:
@@ -23,19 +55,23 @@ def normalize_marker_comment(marker: str | None, comment: str | None) -> str | N
     return normalized or None
 
 
-def active_one_h_marker(item, report_date=None, now=None) -> str | None:
-    marker = getattr(item, "one_h_marker", None)
-    if marker and not hasattr(item, "one_h_marker_date"):
-        return marker
-    marker_date = getattr(item, "one_h_marker_date", None)
-    if not marker or marker_date is None:
+def historical_marker_for_day(rows, target_date: date) -> tuple[str | None, bool, str | None] | None:
+    """Resolve the last manual marker change effective on or before a day."""
+    applicable = [row for row in rows if row.marker_date <= target_date]
+    if not applicable:
         return None
-    target_date = (
-        effective_slot_date(report_date, now)
-        if report_date is not None
-        else current_effective_slot_date(now)
+    latest = max(applicable, key=lambda row: row.marker_date)
+    marker = latest.one_h_marker
+    return (
+        marker,
+        bool(marker and latest.one_h_marker_by_ga),
+        latest.one_h_marker_comment if marker else None,
     )
-    return marker if marker_date == target_date else None
+
+
+def active_one_h_marker(item, report_date=None, now=None) -> str | None:
+    """Return the saved symbol until a user manually changes or removes it."""
+    return getattr(item, "one_h_marker", None)
 
 
 def active_one_h_marker_by_ga(item, report_date=None, now=None) -> bool:
@@ -46,7 +82,7 @@ async def sync_note_task_marker(
     db: AsyncSession, note: GaNote | PlanNote, marker: str | None, *, actor_email: str | None = None,
     marker_comment: str | None = None,
 ) -> None:
-    marker_date = current_effective_slot_date() if marker else None
+    marker_date = current_effective_marker_date()
     marker_by_ga = bool(marker and marker_is_by_ga(actor_email))
     marker_comment = normalize_marker_comment(marker, marker_comment)
     note.one_h_marker = marker
@@ -66,7 +102,7 @@ async def sync_task_marker(
     db: AsyncSession, task: Task, marker: str | None, *, actor_email: str | None = None,
     marker_comment: str | None = None,
 ) -> None:
-    marker_date = current_effective_slot_date() if marker else None
+    marker_date = current_effective_marker_date()
     marker_by_ga = bool(marker and marker_is_by_ga(actor_email))
     marker_comment = normalize_marker_comment(marker, marker_comment)
     task.one_h_marker = marker
