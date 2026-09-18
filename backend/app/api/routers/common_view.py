@@ -41,7 +41,7 @@ from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.system_task_schedule import matches_template_date
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
 from app.services.task_marker import active_one_h_marker, active_one_h_marker_by_ga
-from app.services.task_date_window import task_date_window_filter
+from app.services.task_date_window import common_view_task_date_window_filter
 
 
 router = APIRouter()
@@ -264,28 +264,44 @@ def _get_task_date_source(task: Task) -> datetime | None:
     return planned_for or task.due_date or task.start_date or task.created_at
 
 
-def _get_task_dates(task: Task, single_day_only: bool) -> list[date]:
-    if single_day_only:
-        source = _get_task_date_source(task)
-        return [_as_tirane_date(source) or date.today()]
-
+def _get_task_dates(task: Task, single_day_only: bool, range_end: date | None = None) -> list[date]:
     start_dt = task.start_date
     due_dt = task.due_date
-    if start_dt and due_dt:
+    if single_day_only:
+        source = _get_task_date_source(task)
+        start = end = _as_tirane_date(source) or date.today()
+    elif start_dt and due_dt:
         start = _as_tirane_date(start_dt) or start_dt.date()
         end = _as_tirane_date(due_dt) or due_dt.date()
         if start > end:
             start, end = end, start
-        dates: list[date] = []
-        current = start
-        while current <= end:
-            if current.weekday() < 5:
-                dates.append(current)
-            current = current + timedelta(days=1)
-        return dates if dates else [start]
+    else:
+        source = _get_task_date_source(task)
+        start = end = _as_tirane_date(source) or date.today()
 
-    source = _get_task_date_source(task)
-    return [_as_tirane_date(source) or date.today()]
+    completed_at = getattr(task, "completed_at", None)
+    status_value = str(getattr(task, "status", "") or "").strip().upper()
+    is_done = bool(completed_at) or status_value in {"DONE", "COMPLETED"}
+    if bool(getattr(task, "is_deadline_important", False)):
+        # Deadline-important tasks are active from their start date, not only
+        # from their due date. Keep them on every Common View weekday until
+        # their completion day (or the end of the requested range while open).
+        deadline_start_source = start_dt or due_dt or _get_task_date_source(task)
+        deadline_start = _as_tirane_date(deadline_start_source) or start
+        start = deadline_start
+        if completed_at:
+            completion_day = _as_tirane_date(completed_at) or completed_at.date()
+            end = max(start, completion_day)
+        elif not is_done and range_end is not None:
+            end = max(start, range_end)
+
+    dates: list[date] = []
+    current = start
+    while current <= end:
+        if current.weekday() < 5:
+            dates.append(current)
+        current = current + timedelta(days=1)
+    return dates if dates else [start]
 
 
 def _meeting_occurs_on_date(meeting: Meeting, day: date) -> bool:
@@ -391,7 +407,7 @@ async def _compute_etag(
     if "tasks" in requested:
         task_filters = [
             Task.is_active.is_(True),
-            task_date_window_filter(week_start, week_end),
+            common_view_task_date_window_filter(week_start, week_end),
         ]
         active_task_ids = select(Task.id).where(*task_filters)
         active_task_assignee_count = (
@@ -753,7 +769,7 @@ async def get_common_view(
             stmt = stmt.outerjoin(Project, Task.project_id == Project.id).where(
                 or_(Task.department_id == department_id, Project.department_id == department_id)
             )
-        stmt = stmt.where(task_date_window_filter(week_start_date, week_end))
+        stmt = stmt.where(common_view_task_date_window_filter(week_start_date, week_end))
         tasks = (await db.execute(stmt.order_by(Task.created_at))).scalars().all()
         tasks = [t for t in tasks if _should_include_task(t)]
 
@@ -871,7 +887,7 @@ async def get_common_view(
 
             phase_value = (t.phase or "").upper()
             is_check_phase = phase_value in {"CHECK", "CONTROL"}
-            task_dates = _get_task_dates(t, is_check_phase)
+            task_dates = _get_task_dates(t, is_check_phase, week_end)
             task_dates = [d for d in task_dates if week_start_date <= d <= week_end]
             if not task_dates:
                 continue
