@@ -49,7 +49,7 @@ function canCreatePimImageTestTaskForMeeting(meeting: Meeting): boolean {
 
 type PersonalTaskGroup = "GA" | "KA" | "GENT" | "PX"
 type PersonalRowId = "personalGA" | "personalKA" | "personalGENT" | "personalPX"
-type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
+type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
 type OneHMarkerFilter = "none" | OneHMarker
 
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
@@ -60,6 +60,7 @@ const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "CLOSE", label: "X" },
   { value: "M2", label: "M2" },
   { value: "M3", label: "M3" },
+  { value: "M2_M3", label: "M2/M3" },
   { value: "GENT", label: "GENT" },
   { value: "KA", label: "KA" },
   { value: "FLAG", label: "⚑" },
@@ -293,7 +294,7 @@ const oneHPrintChecklistsHtml = (reportDay: Date) =>
   ).join("")}</section>`
 
 const oneHMarkerLegendHtml = () =>
-  `<div class="one-h-marker-legend"><strong>LEGJENDA:</strong><span><b>?</b> - PYETJE/PAQARTESI</span><i aria-hidden="true">/</i><span><b>!</b> - DYSHIM/ NUK KUPTOHET DET</span><i aria-hidden="true">/</i><span><b>!!!</b> - KLIENT/URGJENT</span><i aria-hidden="true">/</i><span><b>👁</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span><i aria-hidden="true">/</i><span><b>X</b> - MBYLL DETYREN</span><i aria-hidden="true">/</i><span><b class="compact-marker">M2</b> - DOREZIM DERI NE PAUZE</span><i aria-hidden="true">/</i><span><b class="compact-marker">M3</b> - DOREZIM DERI NE FUND TE DITES</span><i aria-hidden="true">/</i><span><b class="compact-marker">GENT</b> - PYETJE/SQARIM ME GENTIN</span><i aria-hidden="true">/</i><span><b class="compact-marker">KA</b> - PYETJE/SQARIM ME KA</span><i aria-hidden="true">/</i><span><b>⚑</b> - PYETJE/SQARIM ME GA</span></div>`
+  `<div class="one-h-marker-legend"><strong>LEGJENDA:</strong><span><b>?</b> - PYETJE/PAQARTESI</span><i aria-hidden="true">/</i><span><b>!</b> - DYSHIM/ NUK KUPTOHET DET</span><i aria-hidden="true">/</i><span><b>!!!</b> - KLIENT/URGJENT</span><i aria-hidden="true">/</i><span><b>👁</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span><i aria-hidden="true">/</i><span><b>X</b> - MBYLL DETYREN</span><i aria-hidden="true">/</i><span><b class="compact-marker">M2</b> - DOREZIM DERI NE PAUZE</span><i aria-hidden="true">/</i><span><b class="compact-marker">M3</b> - DOREZIM DERI NE FUND TE DITES</span><i aria-hidden="true">/</i><span><b class="compact-marker">M2/M3</b> - DET QE DUHET TE DORZOHEN EDHE M2 EDHE M3</span><i aria-hidden="true">/</i><span><b class="compact-marker">GENT</b> - PYETJE/SQARIM ME GENTIN</span><i aria-hidden="true">/</i><span><b class="compact-marker">KA</b> - PYETJE/SQARIM ME KA</span><i aria-hidden="true">/</i><span><b>⚑</b> - PYETJE/SQARIM ME GA</span></div>`
 
 function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
   return (
@@ -353,6 +354,8 @@ function OneHMarkerLegend() {
       <span><b className="compact-marker">M2</b> - DOREZIM DERI NE PAUZE</span>
       <i aria-hidden="true">/</i>
       <span><b className="compact-marker">M3</b> - DOREZIM DERI NE FUND TE DITES</span>
+      <i aria-hidden="true">/</i>
+      <span><b className="compact-marker">M2/M3</b> - DET QE DUHET TE DORZOHEN EDHE M2 EDHE M3</span>
       <i aria-hidden="true">/</i>
       <span><b className="compact-marker">GENT</b> - PYETJE/SQARIM ME GENTIN</span>
       <i aria-hidden="true">/</i>

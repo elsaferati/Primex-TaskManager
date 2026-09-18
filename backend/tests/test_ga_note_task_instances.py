@@ -117,7 +117,7 @@ class TestGaNoteTaskInstances(unittest.IsolatedAsyncioTestCase):
                 payload_fields[source.replace("_id", "_ids")] = [note_id]
                 payload = GaNoteTaskBatchRequest(**payload_fields)
                 with patch("app.api.routers.tasks._assignees_for_tasks", new=AsyncMock(return_value={})), \
-                     patch("app.services.task_marker.current_effective_slot_date", return_value=day):
+                     patch("app.services.task_marker.current_effective_marker_date", return_value=day):
                     summaries = await list_task_summaries_by_ga_notes(payload, db=session, _=None)
 
                 by_owner = {item.assigned_to: item.model_dump() for item in summaries}

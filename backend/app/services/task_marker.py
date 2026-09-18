@@ -1,15 +1,57 @@
 """Keep the symbol shared by a note and its linked task representations."""
 from __future__ import annotations
 
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
+
 from sqlalchemy import or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ga_note import GaNote
 from app.models.plan_note import PlanNote
 from app.models.task import Task
-from app.services.one_h_slots import current_effective_slot_date, effective_slot_date
-
 GA_MARKER_EMAIL = "ga@primexeu.com"
+MARKER_ROLLOVER_TIME = time(16, 0)
+
+
+def _previous_friday(day: date) -> date:
+    return day - timedelta(days=(day.weekday() - 4) % 7)
+
+
+def _next_working_day(day: date) -> date:
+    next_day = day + timedelta(days=1)
+    while next_day.weekday() >= 5:
+        next_day += timedelta(days=1)
+    return next_day
+
+
+def effective_marker_date(view_date: date, now: datetime | None = None) -> date:
+    """Return the active symbol date, keeping Friday active until Monday 16:00."""
+    if now is None:
+        from app.config import settings
+
+        now = datetime.now(ZoneInfo(settings.APP_TIMEZONE))
+    if view_date != now.date():
+        return view_date
+
+    weekday = view_date.weekday()
+    if weekday == 4:  # Friday never rolls over automatically.
+        return view_date
+    if weekday in {5, 6}:  # Weekend keeps Friday's symbols active.
+        return _previous_friday(view_date)
+    if weekday == 0 and now.time() < MARKER_ROLLOVER_TIME:
+        return _previous_friday(view_date)
+    if now.time() < MARKER_ROLLOVER_TIME:
+        return view_date
+    return _next_working_day(view_date)
+
+
+def current_effective_marker_date(now: datetime | None = None) -> date:
+    if now is None:
+        from app.config import settings
+
+        now = datetime.now(ZoneInfo(settings.APP_TIMEZONE))
+    return effective_marker_date(now.date(), now)
 
 
 def marker_is_by_ga(actor_email: str | None) -> bool:
@@ -31,9 +73,9 @@ def active_one_h_marker(item, report_date=None, now=None) -> str | None:
     if not marker or marker_date is None:
         return None
     target_date = (
-        effective_slot_date(report_date, now)
+        effective_marker_date(report_date, now)
         if report_date is not None
-        else current_effective_slot_date(now)
+        else current_effective_marker_date(now)
     )
     return marker if marker_date == target_date else None
 
@@ -46,7 +88,7 @@ async def sync_note_task_marker(
     db: AsyncSession, note: GaNote | PlanNote, marker: str | None, *, actor_email: str | None = None,
     marker_comment: str | None = None,
 ) -> None:
-    marker_date = current_effective_slot_date() if marker else None
+    marker_date = current_effective_marker_date() if marker else None
     marker_by_ga = bool(marker and marker_is_by_ga(actor_email))
     marker_comment = normalize_marker_comment(marker, marker_comment)
     note.one_h_marker = marker
@@ -66,7 +108,7 @@ async def sync_task_marker(
     db: AsyncSession, task: Task, marker: str | None, *, actor_email: str | None = None,
     marker_comment: str | None = None,
 ) -> None:
-    marker_date = current_effective_slot_date() if marker else None
+    marker_date = current_effective_marker_date() if marker else None
     marker_by_ga = bool(marker and marker_is_by_ga(actor_email))
     marker_comment = normalize_marker_comment(marker, marker_comment)
     task.one_h_marker = marker

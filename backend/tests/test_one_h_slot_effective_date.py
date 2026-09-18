@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from app.services.one_h_slots import effective_slot_date
-from app.services.task_marker import active_one_h_marker
+from app.services.task_marker import active_one_h_marker, effective_marker_date
 from types import SimpleNamespace
 
 
@@ -50,12 +50,50 @@ def test_future_date_is_unchanged():
 
 
 def test_symbol_refreshes_with_the_1600_workday_rollover():
-    task = SimpleNamespace(one_h_marker="M2", one_h_marker_date=MON)
-    assert active_one_h_marker(task, now=at(MON, 15, 59)) == "M2"
-    assert active_one_h_marker(task, now=at(MON, 16, 0)) is None
+    task = SimpleNamespace(one_h_marker="M2", one_h_marker_date=TUE)
+    assert active_one_h_marker(task, now=at(TUE, 15, 59)) == "M2"
+    assert active_one_h_marker(task, now=at(TUE, 16, 0)) is None
 
 
 def test_symbol_saved_for_next_workday_appears_after_1600():
-    task = SimpleNamespace(one_h_marker="M3", one_h_marker_date=TUE)
-    assert active_one_h_marker(task, now=at(MON, 15, 59)) is None
-    assert active_one_h_marker(task, now=at(MON, 16, 0)) == "M3"
+    wednesday = date(2026, 7, 8)
+    task = SimpleNamespace(one_h_marker="M3", one_h_marker_date=wednesday)
+    assert active_one_h_marker(task, now=at(TUE, 15, 59)) is None
+    assert active_one_h_marker(task, now=at(TUE, 16, 0)) == "M3"
+
+
+def test_friday_symbols_do_not_refresh_at_1600():
+    task = SimpleNamespace(one_h_marker="QUESTION", one_h_marker_date=FRI)
+    assert active_one_h_marker(task, now=at(FRI, 15, 59)) == "QUESTION"
+    assert active_one_h_marker(task, now=at(FRI, 16, 0)) == "QUESTION"
+    assert active_one_h_marker(task, now=at(FRI, 23, 59)) == "QUESTION"
+
+
+def test_friday_symbols_remain_active_during_weekend():
+    task = SimpleNamespace(one_h_marker="EXCLAMATION", one_h_marker_date=FRI)
+    assert active_one_h_marker(task, now=at(SAT, 12, 0)) == "EXCLAMATION"
+    assert active_one_h_marker(task, now=at(SUN, 20, 0)) == "EXCLAMATION"
+
+
+def test_friday_symbols_remain_active_until_monday_1600():
+    monday = date(2026, 7, 13)
+    task = SimpleNamespace(one_h_marker="FLAG", one_h_marker_date=FRI)
+    assert active_one_h_marker(task, now=at(monday, 15, 59)) == "FLAG"
+    assert active_one_h_marker(task, now=at(monday, 16, 0)) is None
+
+
+def test_monday_1600_activates_tuesday_symbols():
+    monday = date(2026, 7, 13)
+    tuesday = date(2026, 7, 14)
+    task = SimpleNamespace(one_h_marker="M2", one_h_marker_date=tuesday)
+    assert active_one_h_marker(task, now=at(monday, 15, 59)) is None
+    assert active_one_h_marker(task, now=at(monday, 16, 0)) == "M2"
+
+
+def test_manual_marker_changes_before_monday_1600_use_friday_date():
+    monday = date(2026, 7, 13)
+    assert effective_marker_date(monday, at(monday, 10, 0)) == FRI
+
+
+def test_slot_rollover_on_friday_is_unchanged():
+    assert effective_slot_date(FRI, at(FRI, 16, 0)) == date(2026, 7, 13)

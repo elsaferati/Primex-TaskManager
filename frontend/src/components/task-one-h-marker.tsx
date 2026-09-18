@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 const SYMBOLS: Record<NonNullable<Task["one_h_marker"]>, string> = {
-  EXCLAMATION: "!", CLIENT_URGENT: "!!!", QUESTION: "?", KA: "KA", GENT: "GENT", M2: "M2", M3: "M3", FLAG: "⚑", MONITOR: "👁", CLOSE: "X",
+  EXCLAMATION: "!", CLIENT_URGENT: "!!!", QUESTION: "?", KA: "KA", GENT: "GENT", M2: "M2", M3: "M3", M2_M3: "M2/M3", FLAG: "⚑", MONITOR: "👁", CLOSE: "X",
 }
 
 export function TaskOneHMarker({ marker, markerByGa, comment, className }: {

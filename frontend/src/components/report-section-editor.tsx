@@ -174,7 +174,7 @@ function previewTableCell(value: string, header: string) {
 }
 
 function splitLeadingTaskMarker(value: string) {
-  const match = value.match(/^(⚑|GENT|KA|[!?])\s+(.+)$/)
+  const match = value.match(/^(\(?\s*(?:!!!|GENT|M2\/M3|M2|M3|KA|👁|◉|⚑|X|!|\?)\s*\)?)\s+(.+)$/)
   return match ? { marker: match[1], text: match[2] } : null
 }
 
@@ -184,7 +184,7 @@ function renderPreviewTableCell(value: string, header: string) {
   if (!marked) return value || "-"
   return (
     <>
-      <strong className="mr-1 inline-block text-sm font-black leading-none [text-shadow:0_0_0_currentColor]">
+      <strong className="mr-1 inline-block text-sm font-black leading-none text-red-600 [text-shadow:0_0_0_currentColor]">
         {marked.marker}
       </strong>
       {marked.text}
