@@ -337,15 +337,29 @@ def calendar_preparation_start(
         )
         candidate = max(external_local - CALENDAR_PREPARATION_DELAY, earliest)
     else:
-        candidate = external_local.replace(
+        candidate = _previous_working_day(external_local).replace(
             hour=ADVANCE_PREPARATION_FIRST_TIME.hour,
             minute=ADVANCE_PREPARATION_FIRST_TIME.minute,
             second=0,
             microsecond=0,
         )
 
+    # A late-created event must not schedule preparation in the past. Keep
+    # the existing 15-minute allocation, starting strictly after creation.
+    if candidate <= created_local:
+        candidate = created_local.replace(second=0, microsecond=0)
+        candidate += timedelta(minutes=15 - candidate.minute % 15)
+
     reserved = reserved_starts or set()
     while True:
+        if candidate.weekday() >= 5:
+            candidate = _next_working_day(candidate).replace(
+                hour=SAME_DAY_PREPARATION_FIRST_TIME.hour,
+                minute=SAME_DAY_PREPARATION_FIRST_TIME.minute,
+                second=0,
+                microsecond=0,
+            )
+            continue
         candidate_time = candidate.time().replace(tzinfo=None)
         if BREAK_START_TIME <= candidate_time < BREAK_END_TIME:
             candidate = candidate.replace(

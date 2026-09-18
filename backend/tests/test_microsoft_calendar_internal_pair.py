@@ -356,6 +356,17 @@ class TestCalendarPreparationSchedule(unittest.TestCase):
 
         self.assertEqual(first.astimezone(self.timezone).time(), time(8, 15))
         self.assertEqual(second.astimezone(self.timezone).time(), time(8, 30))
+        self.assertEqual(first.astimezone(self.timezone).date(), self.local_datetime(9, 8).date())
+        self.assertEqual(second.astimezone(self.timezone).date(), self.local_datetime(9, 8).date())
+
+    def test_advance_monday_meeting_prepares_on_friday(self) -> None:
+        result = calendar_preparation_start(
+            self.local_datetime(14, 10),
+            self.local_datetime(10, 9),
+        ).astimezone(self.timezone)
+
+        self.assertEqual(result.date(), self.local_datetime(11, 8).date())
+        self.assertEqual(result.time(), time(8, 15))
 
     def test_multiple_0800_meetings_share_the_0800_fallback_slot(self) -> None:
         external_start = self.local_datetime(14, 8)
@@ -370,6 +381,39 @@ class TestCalendarPreparationSchedule(unittest.TestCase):
         self.assertEqual(first.astimezone(self.timezone).time(), time(8, 0))
         self.assertEqual(second.astimezone(self.timezone).time(), time(8, 0))
 
+    def test_created_at_noon_prepares_today_after_break(self) -> None:
+        result = calendar_preparation_start(
+            self.local_datetime(10, 16),
+            self.local_datetime(9, 12),
+        ).astimezone(self.timezone)
+
+        self.assertEqual(result, self.local_datetime(9, 13, 15))
+
+    def test_late_creation_rounds_forward_and_respects_reserved_slots(self) -> None:
+        result = calendar_preparation_start(
+            self.local_datetime(10, 16),
+            self.local_datetime(9, 10, 2),
+            reserved_starts={self.local_datetime(9, 10, 15).astimezone(timezone.utc)},
+        ).astimezone(self.timezone)
+
+        self.assertEqual(result, self.local_datetime(9, 10, 30))
+
+    def test_creation_at_end_of_day_prepares_next_workday(self) -> None:
+        result = calendar_preparation_start(
+            self.local_datetime(10, 16),
+            self.local_datetime(9, 16, 30),
+        ).astimezone(self.timezone)
+
+        self.assertEqual(result, self.local_datetime(10, 8, 15))
+
+    def test_same_day_creation_never_prepares_before_creation(self) -> None:
+        result = calendar_preparation_start(
+            self.local_datetime(9, 16),
+            self.local_datetime(9, 15),
+        ).astimezone(self.timezone)
+
+        self.assertEqual(result, self.local_datetime(9, 15, 15))
+
     def test_later_meeting_uses_0815_after_an_0800_preparation(self) -> None:
         result = calendar_preparation_start(
             self.local_datetime(14, 10),
@@ -383,7 +427,7 @@ class TestCalendarPreparationSchedule(unittest.TestCase):
         external_start = self.local_datetime(10, 15)
         created_at = self.local_datetime(8, 9)
         reserved = {
-            self.local_datetime(10, 8, 20).astimezone(timezone.utc)
+            self.local_datetime(9, 8, 20).astimezone(timezone.utc)
             + timedelta(minutes=15 * index)
             for index in range(14)
         }

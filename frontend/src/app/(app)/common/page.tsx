@@ -766,6 +766,29 @@ const commonTaskStateClassName = (status?: string | null, isDone?: boolean) => {
   return ""
 }
 
+const renderCommonTaskStatusIndicator = (
+  entry: { status?: string | null; isDone?: boolean; isDeadlineImportant?: boolean },
+  isPersonal = false,
+) => {
+  if (!entry.isDeadlineImportant && !isPersonal) return null
+  if (entry.status == null && typeof entry.isDone !== "boolean") return null
+  const status = normalizeCommonTaskStatus(entry.status, entry.isDone)
+  const indicators: Record<string, { label: string; symbol: string; tone: string }> = {
+    TODO: { label: "To do", symbol: "○", tone: "todo" },
+    IN_PROGRESS: { label: "In progress", symbol: "◔", tone: "in-progress" },
+    DONE: { label: "Done", symbol: "✓", tone: "done" },
+    WAITING_CONFIRMATION: { label: "Waiting confirmation", symbol: "◷", tone: "waiting" },
+    WAITING_CLIENT: { label: "Waiting client", symbol: "◷", tone: "waiting-client" },
+  }
+  const indicator = indicators[status]
+  if (!indicator) return null
+  return (
+    <span className={`common-task-status-indicator status-${indicator.tone}`} title={`Status: ${indicator.label}`} aria-label={`Status: ${indicator.label}`}>
+      {indicator.label}
+    </span>
+  )
+}
+
 type CommonColorFilter = "all" | "pink" | "yellow" | "red" | "green" | "orange" | "gold"
 type CommonTaskFocusFilter = "all" | "new" | "eightAm" | "deadline"
 
@@ -11500,6 +11523,39 @@ export default function CommonViewPage() {
           border-color: #d1d5db;
           color: #9ca3af;
         }
+        .common-task-status-indicator {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          box-sizing: border-box;
+          width: fit-content;
+          flex-shrink: 0;
+          vertical-align: middle;
+          margin: 1px 3px 1px 0;
+          padding: 1px 3px;
+          border: 1px solid currentColor;
+          border-radius: 5px;
+          font-size: 9px;
+          font-weight: 700;
+          line-height: 1.2;
+          white-space: nowrap;
+          background: #fff !important;
+          color: #475569 !important;
+        }
+        .common-task-status-indicator.status-todo {
+          background: #fbcfe8 !important;
+          color: #831843 !important;
+        }
+        .common-task-status-indicator.status-in-progress {
+          background: #fef08a !important;
+          color: #854d0e !important;
+        }
+        .common-task-status-indicator.status-done {
+          background: #bbf7d0 !important;
+          color: #166534 !important;
+        }
+        .common-task-status-indicator.status-waiting { color: #9a3412 !important; }
+        .common-task-status-indicator.status-waiting-client { color: #854d0e !important; }
         .week-table-entry.calendar-internal-muted .week-table-meeting-title,
         .swimlane-cell.calendar-internal-muted .swimlane-title {
           color: #64748b;
@@ -15650,6 +15706,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title, e.isSystemTask) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
+                                  {renderCommonTaskStatusIndicator(e)}
                                   {renderWfcText(commonPrintTaskTitle(e))}
                                 </span>
                               </div>
@@ -15714,6 +15771,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title, e.isSystemTask) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
+                                  {renderCommonTaskStatusIndicator(e)}
                                   {renderWfcText(commonPrintTitleLine(e.title))}
                                 </span>
                               </div>
@@ -15748,6 +15806,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title, e.isSystemTask) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
+                                  {renderCommonTaskStatusIndicator(e, true)}
                                   {renderWfcText(commonPrintPersonalTaskTitle(e))}
                                 </span>
                               </div>
@@ -16230,6 +16289,9 @@ export default function CommonViewPage() {
                             const isNoteOpen = openSwimlaneNoteId === noteKey
                             const isTitleRowOpen = openSwimlaneTitleRows.has(row.id)
                             const isTitleExpandable = TITLE_EXPANDABLE_SWIMLANE_ROWS.includes(row.id)
+                            const taskStatusIndicator = !cell.placeholder && isFastTaskRowId(row.id)
+                              ? renderCommonTaskStatusIndicator(cell, isPersonalRowId(row.id))
+                              : null
                             const existingReview = cell.taskId && cell.userId
                               ? diamondReviewByTaskUser.get(`${cell.taskId}:${cell.userId}`)
                               : null
@@ -16324,6 +16386,7 @@ export default function CommonViewPage() {
                                         ) : null}
                                         {isFastTaskRowId(row.id) ? renderWfcIndicator(cell) : null}
                                         {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(cell) : null}
+                                        {taskStatusIndicator}
                                         {isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title, cell.isSystemTask) ? (
                                           <span className="time-indicator" title="08:00 task">
                                             08:00
@@ -16363,6 +16426,7 @@ export default function CommonViewPage() {
                                         ) : null}
                                         {isFastTaskRowId(row.id) ? renderWfcIndicator(cell) : null}
                                         {isShtypiTaskRowId(row.id) ? renderOneHMarkerControl(cell) : null}
+                                        {taskStatusIndicator}
                                         {isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title, cell.isSystemTask) ? (
                                           <span className="time-indicator" title="08:00 task">
                                             08:00
@@ -16408,6 +16472,7 @@ export default function CommonViewPage() {
                                       </span>
                                     ) : null}
                                     <div className="swimlane-title">
+                                      {!cell.assignees?.length && !cell.assigneeLabels?.length ? taskStatusIndicator : null}
                                       <span className="swimlane-print-title">
                                         {commonPrintTitleLine(
                                           `${cell.title}${cell.meetingTimeLabel ? ` ${cell.meetingTimeLabel}` : ""}`,
