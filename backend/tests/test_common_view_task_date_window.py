@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, select, text
 
 from app.api.routers.common_view import _get_task_dates
 from app.models.task import Task
-from app.services.task_date_window import task_date_window_filter
+from app.services.task_date_window import common_view_task_date_window_filter, task_date_window_filter
 from app.services.tomorrow_print_report import _personal_task_group
 
 
@@ -56,6 +56,39 @@ def test_open_ended_task_windows(window_from, window_to, expected):
         db.execute(text("CREATE TABLE tasks (title TEXT, start_date TEXT, due_date TEXT, phase TEXT, created_at TEXT)"))
         db.execute(text("INSERT INTO tasks VALUES ('Personal', '2026-09-16', '2026-09-25', NULL, '2026-09-14')"))
         assert bool(db.execute(select(Task.title).where(task_date_window_filter(window_from, window_to))).all()) is expected
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "important,status,completed_at,expected",
+    [
+        (True, "IN_PROGRESS", None, True),
+        (True, "DONE", None, False),
+        (True, "DONE", "2026-09-23", True),
+        (True, "IN_PROGRESS", "2026-09-19", False),
+        (False, "IN_PROGRESS", None, False),
+    ],
+)
+def test_common_view_week_query_includes_deadline_tasks_until_completion(
+    important, status, completed_at, expected
+):
+    engine = create_engine("sqlite://")
+    with engine.begin() as db:
+        db.execute(text(
+            "CREATE TABLE tasks (title TEXT, start_date TEXT, due_date TEXT, phase TEXT, "
+            "created_at TEXT, is_deadline_important BOOLEAN, status TEXT, completed_at TEXT)"
+        ))
+        db.execute(
+            text(
+                "INSERT INTO tasks VALUES ('Deadline', '2026-09-14', '2026-09-18', NULL, "
+                "'2026-09-14', :important, :status, :completed_at)"
+            ),
+            dict(important=important, status=status, completed_at=completed_at),
+        )
+        query = select(Task.title).where(
+            common_view_task_date_window_filter(date(2026, 9, 21), date(2026, 9, 25))
+        )
+        assert bool(db.execute(query).all()) is expected
     engine.dispose()
 
 

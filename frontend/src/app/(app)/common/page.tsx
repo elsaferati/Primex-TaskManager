@@ -717,19 +717,24 @@ const getCommonTaskNewCategory = (entry: {
   return null
 }
 
-const isCommonTaskDueOnDate = (entry: {
+const isCommonTaskDeadlineActiveOnDate = (entry: {
+  status?: string | null
+  isDone?: boolean
   isDeadlineImportant?: boolean
-  dueDate?: string | null
+  startDate?: string | null
   date?: string | null
   entryDate?: string | null
 }) => {
   if (!entry.isDeadlineImportant) return false
-  const dueDate = normalizeCommonDateOnly(entry.dueDate)
+  if (isCommonTaskDone(entry.status, entry.isDone)) return false
+  const startDate = normalizeCommonDateOnly(entry.startDate)
   const targetDate = normalizeCommonDateOnly(entry.date ?? entry.entryDate)
-  return Boolean(dueDate && targetDate && dueDate === targetDate)
+  return Boolean(startDate && targetDate && targetDate >= startDate)
 }
 
 const commonTaskHighlightClassName = (entry: {
+  status?: string | null
+  isDone?: boolean
   isDeadlineImportant?: boolean
   dueDate?: string | null
   startDate?: string | null
@@ -737,6 +742,7 @@ const commonTaskHighlightClassName = (entry: {
   date?: string | null
   entryDate?: string | null
 }) => {
+  if (isCommonTaskDeadlineActiveOnDate(entry)) return "deadline-important"
   const newCategory = getCommonTaskNewCategory(entry)
   if (newCategory) {
     return [
@@ -744,7 +750,6 @@ const commonTaskHighlightClassName = (entry: {
       newCategory,
     ].filter(Boolean).join(" ")
   }
-  if (isCommonTaskDueOnDate(entry)) return "deadline-important"
   return ""
 }
 
@@ -768,13 +773,13 @@ const getCommonTaskColor = (entry: {
   status?: string | null
   isDone?: boolean
   isDeadlineImportant?: boolean
-  dueDate?: string | null
+  startDate?: string | null
   date?: string | null
   entryDate?: string | null
 }): Exclude<CommonColorFilter, "all"> | null => {
   const normalized = normalizeCommonTaskStatus(entry.status, entry.isDone)
   if (normalized === "DONE") return "green"
-  if (isCommonTaskDueOnDate(entry)) return "red"
+  if (isCommonTaskDeadlineActiveOnDate(entry)) return "red"
   if (normalized === "IN_PROGRESS") return "yellow"
   if (normalized === "WAITING_CONFIRMATION") return "orange"
   if (normalized === "WAITING_CLIENT") return "gold"
