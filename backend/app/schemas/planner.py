@@ -51,6 +51,9 @@ class WeeklyTableProjectTaskEntry(BaseModel):
     is_r1: bool = False
     is_personal: bool = False
     is_deadline_important: bool = False
+    one_h_marker: str | None = None
+    one_h_marker_by_ga: bool = False
+    one_h_marker_comment: str | None = None
     ga_note_origin_id: uuid.UUID | None = None
     plan_note_origin_id: uuid.UUID | None = None
 
@@ -84,6 +87,9 @@ class WeeklyTableTaskEntry(BaseModel):
     is_r1: bool = False
     is_personal: bool = False
     is_deadline_important: bool = False
+    one_h_marker: str | None = None
+    one_h_marker_by_ga: bool = False
+    one_h_marker_comment: str | None = None
     ga_note_origin_id: uuid.UUID | None = None
     plan_note_origin_id: uuid.UUID | None = None
 

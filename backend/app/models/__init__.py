@@ -86,6 +86,7 @@ from app.models.task_planner_exclusion import TaskPlannerExclusion
 from app.models.task_review import TaskReview
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
+from app.models.task_one_h_marker_history import TaskOneHMarkerHistory
 from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.task_status import TaskStatus
 from app.models.task_strike_event import TaskStrikeEvent
@@ -187,6 +188,7 @@ __all__ = [
     "TaskReview",
     "TaskDailyProgress",
     "TaskOneHReportSlot",
+    "TaskOneHMarkerHistory",
     "TaskDailyRlzState",
     "TaskStatus",
     "TaskStrikeEvent",

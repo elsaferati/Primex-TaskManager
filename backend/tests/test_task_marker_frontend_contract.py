@@ -70,7 +70,7 @@ def test_m2_m3_symbols_are_available_in_shared_editors_and_legends():
     )
     for relative_path in legend_paths:
         source = (ROOT / relative_path).read_text(encoding="utf-8")
-        assert "DET QE DUHET TE DORZOHEN EDHE M2 EDHE M3" in source, relative_path
+        assert "DOREZIM EDHE NE M2 EDHE M3" in source, relative_path
 
 
 def test_monitor_close_and_symbol_comments_are_available_everywhere():
@@ -199,3 +199,22 @@ def test_symbol_views_refresh_when_the_user_returns_to_them():
     for relative_path in paths:
         source = (ROOT / relative_path).read_text(encoding="utf-8")
         assert "useVisibleRefresh" in source, relative_path
+
+
+def test_weekly_planner_uses_saved_daily_symbols_in_live_snapshot_and_print_views():
+    live = (ROOT / "frontend/src/app/(app)/weekly-planner/page.tsx").read_text(encoding="utf-8")
+    snapshots = (ROOT / "frontend/src/components/weekly-planner-snapshots-view.tsx").read_text(encoding="utf-8")
+    for source in (live, snapshots):
+        assert source.count("<TaskOneHMarker") >= 3
+        assert "buildPrintTaskMarker" in source
+        assert "one_h_marker_by_ga" in source
+
+    planner = (ROOT / "backend/app/api/routers/planners.py").read_text(encoding="utf-8")
+    migration = (ROOT / "backend/alembic/versions/0122_add_task_marker_history.py").read_text(encoding="utf-8")
+    assert "TaskOneHMarkerHistory.marker_date" in planner
+    assert "marker_history_by_identity_day" in planner
+    assert '("ga_note", task.ga_note_origin_id)' in planner
+    assert '("plan_note", task.plan_note_origin_id)' in planner
+    assert '("fast_group", task.fast_task_group_id)' in planner
+    assert "ON CONFLICT (task_id, marker_date) DO UPDATE" in migration
+    assert "trg_sync_task_one_h_marker_history" in migration

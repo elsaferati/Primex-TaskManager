@@ -278,7 +278,7 @@ def _task_marker_legend_text() -> str:
         "X - MBYLL DETYREN / "
         "M2 - DOREZIM DERI NE PAUZE / "
         "M3 - DOREZIM DERI NE FUND TE DITES / "
-        "M2/M3 - DET QE DUHET TE DORZOHEN EDHE M2 EDHE M3 / "
+        "M2/M3 - DOREZIM EDHE NE M2 EDHE M3 / "
         "GENT - PYETJE/SQARIM ME GENTIN / "
         "KA - PYETJE/SQARIM ME KA / ⚑ - PYETJE/SQARIM ME GA"
     )
@@ -1168,7 +1168,7 @@ def _task_marker_legend_html() -> str:
         ("X", "MBYLL DETYREN"),
         ("M2", "DOREZIM DERI NE PAUZE"),
         ("M3", "DOREZIM DERI NE FUND TE DITES"),
-        ("M2/M3", "DET QE DUHET TE DORZOHEN EDHE M2 EDHE M3"),
+        ("M2/M3", "DOREZIM EDHE NE M2 EDHE M3"),
         ("GENT", "PYETJE/SQARIM ME GENTIN"),
         ("KA", "PYETJE/SQARIM ME KA"),
         ("⚑", "PYETJE/SQARIM ME GA"),
@@ -3229,7 +3229,7 @@ async def _build_print_report(
         "!!! - KLIENT/URGJENT / "
         "👁 - KËRKON MONITORIM NGA DIKUSH TJETËR / X - MBYLL DETYREN / "
         "M2 - DOREZIM DERI NE PAUZE / M3 - DOREZIM DERI NE FUND TE DITES / "
-        "M2/M3 - DET QE DUHET TE DORZOHEN EDHE M2 EDHE M3 / "
+        "M2/M3 - DOREZIM EDHE NE M2 EDHE M3 / "
         "GENT - PYETJE/SQARIM ME GENTIN / KA - PYETJE/SQARIM ME KA / ⚑ - PYETJE/SQARIM ME GA",
         "",
         "TASKS",

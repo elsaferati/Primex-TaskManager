@@ -12,6 +12,24 @@ from app.models.plan_note import PlanNote
 from app.models.task import Task
 GA_MARKER_EMAIL = "ga@primexeu.com"
 MARKER_ROLLOVER_TIME = time(16, 0)
+ONE_H_MARKER_SYMBOLS = {
+    "EXCLAMATION": "!",
+    "CLIENT_URGENT": "!!!",
+    "QUESTION": "?",
+    "KA": "KA",
+    "GENT": "GENT",
+    "M2": "M2",
+    "M3": "M3",
+    "M2_M3": "M2/M3",
+    "FLAG": "⚑",
+    "MONITOR": "👁",
+    "CLOSE": "X",
+}
+
+
+def one_h_marker_label(marker: str | None, marker_by_ga: bool = False) -> str:
+    symbol = ONE_H_MARKER_SYMBOLS.get((marker or "").strip().upper(), "")
+    return f"({symbol})" if symbol and marker_by_ga else symbol
 
 
 def _previous_friday(day: date) -> date:

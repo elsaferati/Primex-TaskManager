@@ -3332,7 +3332,7 @@ export default function GaKaNotesPage() {
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
             <span><b className="text-xs font-black text-red-600">M3</b> - DOREZIM DERI NE FUND TE DITES</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
-            <span><b className="text-xs font-black text-red-600">M2/M3</b> - DET QE DUHET TE DORZOHEN EDHE M2 EDHE M3</span>
+            <span><b className="text-xs font-black text-red-600">M2/M3</b> - DOREZIM EDHE NE M2 EDHE M3</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
             <span><b className="text-xs font-black text-red-600">GENT</b> - PYETJE/SQARIM ME GENTIN</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
@@ -3363,7 +3363,7 @@ export default function GaKaNotesPage() {
                       ["X", "MBYLL DETYREN"],
                       ["M2", "DOREZIM DERI NE PAUZE"],
                       ["M3", "DOREZIM DERI NE FUND TE DITES"],
-                      ["M2/M3", "DET QE DUHET TE DORZOHEN EDHE M2 EDHE M3"],
+                      ["M2/M3", "DOREZIM EDHE NE M2 EDHE M3"],
                       ["GENT", "PYETJE/SQARIM ME GENTIN"],
                       ["KA", "PYETJE/SQARIM ME KA"],
                       ["⚑", "PYETJE/SQARIM ME GA"],

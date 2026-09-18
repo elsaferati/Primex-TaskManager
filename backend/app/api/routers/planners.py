@@ -34,6 +34,7 @@ from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_planner_exclusion import TaskPlannerExclusion
 from app.models.task_daily_progress import TaskDailyProgress
+from app.models.task_one_h_marker_history import TaskOneHMarkerHistory
 from app.models.user import User
 from app.models.weekly_plan import WeeklyPlan
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
@@ -2123,6 +2124,59 @@ async def weekly_table_planner(
             task_project_ids.add(t.project_id)
 
     week_task_ids = [t.id for t in week_tasks]
+
+    marker_history_rows = []
+    if all_task_ids:
+        marker_history_rows = (
+            await db.execute(
+                select(TaskOneHMarkerHistory)
+                .where(TaskOneHMarkerHistory.task_id.in_(all_task_ids))
+                .where(TaskOneHMarkerHistory.marker_date >= working_days[0])
+                .where(TaskOneHMarkerHistory.marker_date <= working_days[-1])
+            )
+        ).scalars().all()
+    all_tasks_by_id = {task.id: task for task in all_tasks}
+
+    def _marker_identity_keys(task: Task) -> list[tuple[str, uuid.UUID]]:
+        keys = [("task", task.id)]
+        for key, value in (
+            ("ga_note", task.ga_note_origin_id),
+            ("plan_note", task.plan_note_origin_id),
+            ("fast_group", task.fast_task_group_id),
+        ):
+            if value is not None:
+                keys.append((key, value))
+        return keys
+
+    marker_history_by_identity_day = {}
+    current_tasks_by_identity: dict[tuple[str, uuid.UUID], list[Task]] = {}
+    for candidate in all_tasks:
+        for identity in _marker_identity_keys(candidate):
+            current_tasks_by_identity.setdefault(identity, []).append(candidate)
+    for row in marker_history_rows:
+        source_task = all_tasks_by_id.get(row.task_id)
+        if source_task is None:
+            continue
+        for identity in _marker_identity_keys(source_task):
+            marker_history_by_identity_day.setdefault((identity, row.marker_date), row)
+
+    def _marker_for_task_day(task: Task, day_date: date) -> tuple[str | None, bool, str | None]:
+        identities = _marker_identity_keys(task)
+        # Prefer this exact task, then any linked task copy representing the same work.
+        for identity in identities:
+            saved = marker_history_by_identity_day.get((identity, day_date))
+            if saved is not None:
+                return saved.one_h_marker, saved.one_h_marker_by_ga, saved.one_h_marker_comment
+        # Compatibility fallback for rows created before marker history was deployed.
+        for identity in identities:
+            for candidate in current_tasks_by_identity.get(identity, []):
+                if candidate.one_h_marker_date == day_date and candidate.one_h_marker:
+                    return (
+                        candidate.one_h_marker,
+                        candidate.one_h_marker_by_ga,
+                        candidate.one_h_marker_comment,
+                    )
+        return None, False, None
     
     # Ensure project_map includes all projects referenced by tasks
     missing_project_ids = task_project_ids - set(project_map.keys())
@@ -2729,6 +2783,7 @@ async def weekly_table_planner(
 
                     is_pm = finish_period_upper == "PM"
                     is_both = not finish_period_upper or finish_period_upper not in ("AM", "PM")
+                    marker, marker_by_ga, marker_comment = _marker_for_task_day(system_task, day_date)
 
                     entry = WeeklyTableTaskEntry(
                         task_id=system_task.id,
@@ -2745,6 +2800,9 @@ async def weekly_table_planner(
                         is_r1=False,
                         is_personal=False,
                         is_deadline_important=system_task.is_deadline_important,
+                        one_h_marker=marker,
+                        one_h_marker_by_ga=marker_by_ga,
+                        one_h_marker_comment=marker_comment,
                         ga_note_origin_id=None,
                         plan_note_origin_id=None,
                     )
@@ -2781,6 +2839,7 @@ async def weekly_table_planner(
                     # Fast tasks (standalone ad-hoc tasks only)
                     elif is_fast_task_model(task):
                         daily_status_value = _daily_status_for_task_day(task, day_date)
+                        marker, marker_by_ga, marker_comment = _marker_for_task_day(task, day_date)
                         entry = WeeklyTableTaskEntry(
                             task_id=task.id,
                             title=task.title,
@@ -2796,6 +2855,9 @@ async def weekly_table_planner(
                             is_r1=task.is_r1,
                             is_personal=task.is_personal,
                             is_deadline_important=task.is_deadline_important,
+                            one_h_marker=marker,
+                            one_h_marker_by_ga=marker_by_ga,
+                            one_h_marker_comment=marker_comment,
                             ga_note_origin_id=task.ga_note_origin_id,
                             plan_note_origin_id=task.plan_note_origin_id,
                         )
@@ -2864,6 +2926,7 @@ async def weekly_table_planner(
                 for project_id, tasks_list in am_projects_map.items():
                     task_entries: list[WeeklyTableProjectTaskEntry] = []
                     for t in tasks_list:
+                        marker, marker_by_ga, marker_comment = _marker_for_task_day(t, day_date)
                         base_total_products, base_completed_products = _task_product_counts(t)
                         progress_counts = _progress_counts_for_day(t.id, day_date)
                         daily_status_value = _override_daily_status_from_progress(
@@ -2909,6 +2972,9 @@ async def weekly_table_planner(
                                 is_r1=t.is_r1,
                                 is_personal=t.is_personal,
                                 is_deadline_important=t.is_deadline_important,
+                                one_h_marker=marker,
+                                one_h_marker_by_ga=marker_by_ga,
+                                one_h_marker_comment=marker_comment,
                                 ga_note_origin_id=t.ga_note_origin_id,
                                 plan_note_origin_id=t.plan_note_origin_id,
                             )
@@ -2930,6 +2996,7 @@ async def weekly_table_planner(
                 for project_id, tasks_list in pm_projects_map.items():
                     task_entries: list[WeeklyTableProjectTaskEntry] = []
                     for t in tasks_list:
+                        marker, marker_by_ga, marker_comment = _marker_for_task_day(t, day_date)
                         base_total_products, base_completed_products = _task_product_counts(t)
                         progress_counts = _progress_counts_for_day(t.id, day_date)
                         daily_status_value = _override_daily_status_from_progress(
@@ -2975,6 +3042,9 @@ async def weekly_table_planner(
                                 is_r1=t.is_r1,
                                 is_personal=t.is_personal,
                                 is_deadline_important=t.is_deadline_important,
+                                one_h_marker=marker,
+                                one_h_marker_by_ga=marker_by_ga,
+                                one_h_marker_comment=marker_comment,
                                 ga_note_origin_id=t.ga_note_origin_id,
                                 plan_note_origin_id=t.plan_note_origin_id,
                             )

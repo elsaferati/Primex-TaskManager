@@ -5,7 +5,7 @@ import pytest
 
 from app.schemas.ga_note import GaNoteTaskAssigneeStateUpdate, GaNoteTaskBundleUpdate
 from app.models.enums import TaskStatus
-from app.services.task_marker import note_bundle_marker_update
+from app.services.task_marker import note_bundle_marker_update, one_h_marker_label
 
 
 def _task(assignee_id, marker):
@@ -80,3 +80,8 @@ def test_conflicting_assignee_symbols_are_rejected():
             payload,
             [_task(first, None), _task(second, None)],
         )
+
+
+def test_weekly_planner_marker_label_preserves_ga_parentheses():
+    assert one_h_marker_label("M2_M3") == "M2/M3"
+    assert one_h_marker_label("QUESTION", True) == "(?)"

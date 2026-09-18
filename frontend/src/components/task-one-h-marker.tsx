@@ -10,6 +10,12 @@ const SYMBOLS: Record<NonNullable<Task["one_h_marker"]>, string> = {
   EXCLAMATION: "!", CLIENT_URGENT: "!!!", QUESTION: "?", KA: "KA", GENT: "GENT", M2: "M2", M3: "M3", M2_M3: "M2/M3", FLAG: "⚑", MONITOR: "👁", CLOSE: "X",
 }
 
+export function taskOneHMarkerLabel(marker?: Task["one_h_marker"], markerByGa = false) {
+  const symbol = marker ? SYMBOLS[marker] : null
+  if (!symbol) return null
+  return markerByGa ? `(${symbol})` : symbol
+}
+
 export function TaskOneHMarker({ marker, markerByGa, comment, className }: {
   marker?: Task["one_h_marker"]
   markerByGa?: boolean
@@ -17,9 +23,8 @@ export function TaskOneHMarker({ marker, markerByGa, comment, className }: {
   className?: string
 }) {
   const [open, setOpen] = React.useState(false)
-  const symbol = marker ? SYMBOLS[marker] : null
-  if (!symbol) return null
-  const shownSymbol = markerByGa ? `(${symbol})` : symbol
+  const shownSymbol = taskOneHMarkerLabel(marker, markerByGa)
+  if (!shownSymbol) return null
   return (
     <>
       <button type="button" className={cn("inline-flex min-h-6 min-w-6 shrink-0 items-center justify-center rounded-md border border-blue-300 bg-blue-50 px-1.5 text-base font-black leading-none text-red-600 [text-shadow:0_0_0_currentColor]", className)} title={comment?.trim() || `Task symbol: ${shownSymbol}`} aria-label={`Task symbol ${shownSymbol}${comment ? ". View comment" : ""}`} onClick={(event) => { if (comment?.trim()) { event.stopPropagation(); setOpen(true) } }}>
