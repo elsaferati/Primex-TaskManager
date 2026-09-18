@@ -1017,7 +1017,7 @@ const commonPrintTaskTitle = (entry: { title: string; assignees?: string[]; pers
   const assigneeInitials = entryAssignees(entry).map((name) => initials(name)).filter(Boolean)
   return assigneeInitials.length ? `${assigneeInitials.join("/")}: ${title}` : title
 }
-const commonPrintPersonalTaskTitle = (entry: { title: string }) => commonPrintTitleLine(entry.title)
+const commonPrintPersonalTaskTitle = (entry: { title: string }) => getPlainMarkedText(entry.title).trim()
 const renderWfcText = (value: string) =>
   value.split(/(\bWFC\b)/gi).map((part, index) =>
     /^WFC$/i.test(part) ? (
@@ -15700,7 +15700,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title, e.isSystemTask) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
-                                  {renderWfcText(commonPrintPersonalTaskTitle(e))}
+                                  {renderWfcText(commonPrintTitleLine(e.title))}
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -15734,7 +15734,9 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title, e.isSystemTask) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
-                                  {renderWfcText(commonPrintTaskTitle(e))}
+                                  <span className="personal-full-title" style={{ whiteSpace: "pre-wrap" }}>
+                                    {renderWfcText(commonPrintPersonalTaskTitle(e))}
+                                  </span>
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -16213,7 +16215,7 @@ export default function CommonViewPage() {
                             }
                             const noteKey = cell.entryId || `${row.id}-${index}`
                             const isNoteOpen = openSwimlaneNoteId === noteKey
-                            const isTitleRowOpen = openSwimlaneTitleRows.has(row.id)
+                            const isTitleRowOpen = isPersonalRowId(row.id) || openSwimlaneTitleRows.has(row.id)
                             const isTitleExpandable = TITLE_EXPANDABLE_SWIMLANE_ROWS.includes(row.id)
                             const existingReview = cell.taskId && cell.userId
                               ? diamondReviewByTaskUser.get(`${cell.taskId}:${cell.userId}`)
