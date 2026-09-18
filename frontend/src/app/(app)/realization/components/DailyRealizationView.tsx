@@ -24,6 +24,7 @@ import { RealizationQuantitySummary, RealizationTaskQuantity } from "@/component
 import { MarkedTaskBlock } from "@/lib/note-markup"
 import type { DailyRealizationLive, DailyRealizationMetrics, DailyRealizationPerson, DailyRealizationTask, Department, RealizationPersonResult, RealizationQuestion } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { manualChecklistBooleanKeys, dailyChecklistLabels, checklistAnswerLabel } from "@/lib/realization-checklist"
 
 const TZ = "Europe/Tirane"
 const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(new Date())
@@ -52,11 +53,11 @@ const closeUi: Record<DailyRealizationPerson["close_state"], [string, string]> =
 const events: Record<string, string> = { PLANNED_FOR_DAY: "Planifikuar për ditën", POSTPONED: "Afati u shty", POSTPONED_AGAIN: "Afati u shty përsëri", POSTPONEMENT_APPROVED: "Shtyrja u aprovua", POSTPONEMENT_REJECTED: "Shtyrja u refuzua", MOVED_BACK_TO_TODAY: "Afati u rikthye për sot", MOVED_EARLIER: "Afati u afrua", COMPLETED: "Detyra u krye", STARTED: "Puna filloi", DUE_DATE_CHANGED: "Afati ndryshoi", STATUS_CHANGED: "Statusi ndryshoi", ASSIGNEE_CHANGED: "Punonjësi ndryshoi", ASSIGNEES_CHANGED: "Punonjësit ndryshuan", CREATED: "Detyra u krijua", UPDATED: "Detyra u përditësua" }
 const reasonIssues = new Set(["MISSING_REASON", "REASON_MISSING"])
 const commentIssues = new Set(["MISSING_REQUIRED_COMMENT", "COMMENT_MISSING"])
-const dailyManualBooleanKeys = new Set(["requested_extra_tasks", "helped_colleague", "extra_engagement", "gave_proposal", "affected_other_plan", "repeated_after_clarification"])
+const dailyManualBooleanKeys = manualChecklistBooleanKeys
 const dailyQuestionSections = [
   ["1. Detyrat", ["plan_completed", "no_progress_tasks", "in_progress_tasks", "new_tasks_added", "approved_postponement"]],
   ["2. Angazhimi · input", ["requested_extra_tasks", "helped_colleague", "extra_engagement", "gave_proposal"]],
-  ["3. Disiplina · automatike", ["respected_meetings", "closed_tasks", "frequent_delays", "unexpected_absences"]],
+  ["3. Disiplina", ["respected_meetings", "closed_tasks", "frequent_delays", "unexpected_absences"]],
   ["4. Ndikimi · input", ["week_positive", "week_problems", "affected_other_plan", "repeated_after_clarification"]],
 ] as const
 const dailyQuestionLabels: Record<string, string> = {
@@ -70,7 +71,7 @@ const dailyQuestionLabels: Record<string, string> = {
   frequent_delays: "A ka vonesë në prezencë këtë ditë?",
   unexpected_absences: "A ka mungesë të papritur këtë ditë?",
 }
-const dailyValueLabels: Record<string, string> = { answer:"Përgjigjja",planned:"Planifikuar",completed:"Kryer",remaining:"Mbetur",count:"Numri",yes:"Po",fast_tasks:"Fast Tasks",approved:"Aprovuar",unapproved:"Pa aprovim",needs_review:"Për konfirmim",all_closed:"Të gjitha të mbyllura",closed:"Mbyllur",attendance_tardiness:"Vonesa",frequent:"Të shpeshta",threshold:"Pragu",tasks_completed_late:"Kryer me vonesë",tasks_late_open:"Të vonuara të hapura",additional_tasks_candidate:"Detyra shtesë",verified_categories:"Kategori të verifikuara" }
+const dailyValueLabels: Record<string, string> = { missed_meeting_evidence:"Evidenca për takime të humbura", answer:"Përgjigjja",planned:"Planifikuar",completed:"Kryer",remaining:"Mbetur",count:"Numri",yes:"Po",fast_tasks:"Fast Tasks",approved:"Aprovuar",unapproved:"Pa aprovim",needs_review:"Për konfirmim",all_closed:"Të gjitha të mbyllura",closed:"Mbyllur",attendance_tardiness:"Vonesa",frequent:"Të shpeshta",threshold:"Pragu",tasks_completed_late:"Kryer me vonesë",tasks_late_open:"Të vonuara të hapura",additional_tasks_candidate:"Detyra shtesë",verified_categories:"Kategori të verifikuara" }
 const labelOutcome = (v: string) => outcomeLabels[v] || "Rezultat ditor"
 const shortDate = (v?: string | null) => { const m = v?.match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}.${m[2]}` : v || "—" }
 const dailyQuestionValue = (value: unknown): string => { if(value==null||value==="")return"—";if(typeof value==="boolean")return value?"Po":"Jo";if(typeof value==="string"||typeof value==="number")return String(value);if(Array.isArray(value))return value.length?value.map(dailyQuestionValue).join("; "):"—";if(typeof value==="object")return Object.entries(value as Record<string,unknown>).map(([key,item])=>`${dailyValueLabels[key]||key.replaceAll("_"," ")}: ${dailyQuestionValue(item)}`).join(" · ");return String(value) }
@@ -119,39 +120,118 @@ function Timeline({task,open,onOpenChange,timezone}:{task:DailyRealizationTask|n
 
 function DailyChecklist({ result, canEdit, onSaved }: { result: RealizationPersonResult; canEdit: boolean; onSaved: () => Promise<void> }) {
   const { apiFetch } = useAuth()
-  const questions = React.useMemo(
-    () => result.facts_json.questions || [],
-    [result.facts_json.questions]
-  )
+  const questions = React.useMemo(() => result.facts_json.questions || [], [result.facts_json.questions])
   const [drafts, setDrafts] = React.useState<Record<string, { value: string; comment: string }>>({})
   const [saving, setSaving] = React.useState<string | null>(null)
+  const dirtyKeys = React.useRef(new Set<string>())
+
   React.useEffect(() => {
     const next: Record<string, { value: string; comment: string }> = {}
     for (const question of questions) {
       if (!question.source_status.startsWith("MANUAL")) continue
       const value = question.final_value
       next[question.key] = {
-        value: dailyManualBooleanKeys.has(question.key) ? value === true ? "YES" : value === false ? "NO" : "" : typeof value === "string" ? value : "",
+        value: dailyManualBooleanKeys.has(question.key)
+          ? value === true ? "YES" : value === false ? "NO" : ""
+          : typeof value === "string" ? value : "",
         comment: question.manager_comment || "",
       }
     }
-    setDrafts(next)
-  }, [result.id, questions])
+    setDrafts(current => {
+      for (const key of dirtyKeys.current) if (current[key]) next[key] = current[key]
+      return next
+    })
+  }, [questions])
+
+  const updateDraft = (key: string, patch: Partial<{ value: string; comment: string }>) => {
+    dirtyKeys.current.add(key)
+    setDrafts(current => ({ ...current, [key]: { ...(current[key] || { value: "", comment: "" }), ...patch } }))
+  }
   const save = async (question: RealizationQuestion) => {
     const draft = drafts[question.key]
-    if (!draft?.value) return
+    if (!draft) return
     setSaving(question.key)
     try {
-      const value = dailyManualBooleanKeys.has(question.key) ? draft.value === "YES" ? true : draft.value === "NO" ? false : null : draft.value.trim()
-      const response = await apiFetch(`/realization/periods/${result.period_id}/results/${result.id}/questions/${question.key}`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ value, comment:draft.comment.trim()||null, evidence_ids:[] }) })
-      if (!response.ok) { const payload=await response.json().catch(()=>({})); throw new Error(typeof payload?.detail==="string"?payload.detail:"Përgjigjja nuk u ruajt") }
-      toast.success("Përgjigjja ditore u ruajt")
+      const value = draft.value === "YES"
+      const response = await apiFetch(`/realization/periods/${result.period_id}/results/${result.id}/questions/${question.key}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value, clear: false, comment: null, evidence_ids: [] }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(typeof payload?.detail === "string" ? payload.detail : "Përgjigjja nuk u ruajt")
+      }
+      dirtyKeys.current.delete(question.key)
+      toast.success("Përgjigjja ditore u ruajt dhe lidhet me raportin javor")
       await onSaved()
-    } catch (error) { toast.error(error instanceof Error?error.message:"Përgjigjja nuk u ruajt") } finally { setSaving(null) }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Përgjigjja nuk u ruajt")
+    } finally {
+      setSaving(null)
+    }
   }
-  const automaticCount = questions.filter(question => question.source_status.startsWith("AUTO") && dailyQuestionSections.some(([,keys]) => (keys as readonly string[]).includes(question.key))).length
+  const automaticCount = questions.filter(question => question.source_status.startsWith("AUTO") && dailyQuestionSections.some(([, keys]) => (keys as readonly string[]).includes(question.key))).length
   const completeness = result.facts_json.manual_question_completeness
-  return <Card className="rounded-xl shadow-sm"><CardHeader className="border-b p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><CardTitle className="text-base">Checklist-a ditore</CardTitle><p className="mt-1 text-xs text-slate-500">Vonesat, mungesat, takimet dhe detyrat dalin automatikisht. Përgjegjësi plotëson vetëm inputet e gjykimit.</p></div><Badge variant="outline">{automaticCount} automatike · {completeness?.answered||0}/{completeness?.required||8} inpute</Badge></div></CardHeader><CardContent className="grid gap-4 p-4 xl:grid-cols-2">{dailyQuestionSections.map(([title,keys])=>{const rows=keys.map(key=>questions.find(question=>question.key===key)).filter((question):question is RealizationQuestion=>Boolean(question));return <section key={title} className="overflow-hidden rounded-lg border"><h3 className="border-b bg-slate-50 px-3 py-2 text-xs font-semibold uppercase text-slate-700">{title}</h3><div className="divide-y">{rows.map(question=>{const manual=question.source_status.startsWith("MANUAL"),answered=question.source_status==="MANUAL_ANSWERED",draft=drafts[question.key]||{value:"",comment:""};return <div key={question.key} className="space-y-2 p-3"><div className="flex items-start justify-between gap-2"><p className="text-sm font-medium">{dailyQuestionLabels[question.key]||question.label}</p><Badge variant={manual&&!answered?"destructive":"secondary"} className="shrink-0 text-[9px]">{manual?(answered?"INPUT · Ruajtur":"INPUT"):question.source_status==="AUTO_NEEDS_CONFIRMATION"?"AUTO · Konfirmo":"AUTO"}</Badge></div>{manual&&canEdit?<div className="space-y-2">{dailyManualBooleanKeys.has(question.key)?<Select value={draft.value} onValueChange={value=>setDrafts(current=>({...current,[question.key]:{...draft,value}}))}><SelectTrigger className="h-8"><SelectValue placeholder="Po / Jo / N/A"/></SelectTrigger><SelectContent><SelectItem value="YES">Po</SelectItem><SelectItem value="NO">Jo</SelectItem><SelectItem value="NA">Nuk aplikohet / Nuk dihet</SelectItem></SelectContent></Select>:<Textarea rows={2} value={draft.value} onChange={event=>setDrafts(current=>({...current,[question.key]:{...draft,value:event.target.value}}))} placeholder="Shkruaj përgjigjen ditore"/>}<div className="flex gap-2"><Input className="h-8" value={draft.comment} onChange={event=>setDrafts(current=>({...current,[question.key]:{...draft,comment:event.target.value}}))} placeholder="Koment opsional"/><Button size="sm" variant="outline" disabled={!draft.value||saving===question.key} onClick={()=>void save(question)}>{saving===question.key?"Duke ruajtur…":"Ruaj"}</Button></div><p className="text-[11px] text-slate-500"><b>Fakte:</b> {dailyQuestionValue(question.auto_value)}</p></div>:<p className="text-sm text-slate-700">{dailyQuestionValue(question.final_value??question.auto_value)}</p>}{question.explanation?<p className="text-[11px] text-slate-500">{question.explanation}</p>:null}</div>})}{!rows.length?<p className="p-3 text-xs text-slate-500">Të dhënat do të shfaqen pas kalkulimit ditor.</p>:null}</div></section>})}</CardContent></Card>
+  return (
+    <Card className="rounded-xl shadow-sm">
+      <CardHeader className="border-b p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <CardTitle className="text-base">Checklist-a ditore → raporti javor</CardTitle>
+            <p className="mt-1 text-xs text-slate-500">Zgjidh përgjigjen për këtë ditë dhe shto sqarimin. Përgjigjet mblidhen automatikisht në javë për këtë person.</p>
+            <p className="mt-1 text-xs text-slate-500">Mbyllja e detyrave, vonesat dhe mungesat dalin nga sistemi. Takimet dhe gjykimi plotësohen nga përgjegjësi.</p>
+          </div>
+          <Badge variant="outline">{automaticCount} automatike · {completeness?.answered || 0}/{completeness?.required || 9} inpute</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-4 p-4 xl:grid-cols-2">
+        {dailyQuestionSections.map(([title, keys]) => {
+          const rows = keys.map(key => questions.find(question => question.key === key)).filter((question): question is RealizationQuestion => Boolean(question))
+          return (
+            <section key={title} className="overflow-hidden rounded-lg border">
+              <h3 className="border-b bg-slate-50 px-3 py-2 text-xs font-semibold uppercase text-slate-700">{title}</h3>
+              <div className="divide-y">
+                {rows.map(question => {
+                  const manual = question.source_status.startsWith("MANUAL")
+                  const answered = question.source_status === "MANUAL_ANSWERED"
+                  const draft = drafts[question.key] || { value: "", comment: "" }
+                  const label = dailyChecklistLabels[question.key] || dailyQuestionLabels[question.key] || question.label
+                  return (
+                    <div key={question.key} className="space-y-2 p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <Label htmlFor={manual ? `daily-question-${question.key}` : undefined} className="text-sm font-medium">{label}</Label>
+                        <Badge variant={manual && !answered ? "destructive" : "secondary"} className="shrink-0 text-[9px]">
+                          {manual ? answered ? "INPUT · Ruajtur" : "INPUT" : question.source_status === "AUTO_NEEDS_CONFIRMATION" ? "AUTO · Konfirmo" : "AUTO"}
+                        </Badge>
+                      </div>
+                      {manual && canEdit ? (
+                        <div className="flex items-center justify-between gap-3 rounded-md border bg-white px-3 py-2">
+                          <label className="flex items-center gap-2 text-xs font-semibold">
+                            <Checkbox checked={draft.value === "YES"} disabled={saving !== null} onCheckedChange={checked => updateDraft(question.key, { value: checked ? "YES" : "NO" })} />
+                            {draft.value === "YES" ? "Po" : "Jo"}
+                          </label>
+                          <Button size="sm" variant="outline" disabled={saving !== null} onClick={() => void save(question)}>
+                            {saving === question.key ? "Duke ruajtur…" : "Ruaj përgjigjen ditore"}
+                          </Button>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-700">
+                          {manual ? answered ? checklistAnswerLabel(question.key, question.final_value) : "Pa përgjigje ditore" : dailyQuestionValue(question.final_value ?? question.auto_value)}
+                        </p>
+                      )}
+                      {question.manager_comment && (!manual || !canEdit) ? <p className="text-xs text-slate-600">{question.manager_comment}</p> : null}
+                      {question.explanation ? <p className="text-[11px] text-slate-500">{question.explanation}</p> : null}
+                    </div>
+                  )
+                })}
+                {!rows.length ? <p className="p-3 text-xs text-slate-500">Të dhënat do të shfaqen pas kalkulimit ditor.</p> : null}
+              </div>
+            </section>
+          )
+        })}
+      </CardContent>
+    </Card>
+  )
 }
 
 export function DailyRealizationView() {
@@ -190,6 +270,32 @@ export function DailyRealizationView() {
    }
  }, [apiFetch, day, departmentId, departments, user])
 
+ const prepareDailyResult = React.useCallback(async (currentDepartmentId: string, currentUserId: string) => {
+   const params = new URLSearchParams({ department_id: currentDepartmentId, day, user_id: currentUserId })
+   const response = await apiFetch(`/realization/daily/checklist/prepare?${params}`, { method: "POST" })
+   if (!response.ok) {
+     const payload = await response.json().catch(() => ({})) as { detail?: unknown }
+     const detail = payload.detail
+     const message = typeof detail === "string"
+       ? detail
+       : detail && typeof detail === "object" && "message" in detail
+         ? String((detail as { message?: unknown }).message || "")
+         : ""
+     throw new Error(message || "Checklist-a ditore nuk mund të përgatitej")
+   }
+   const payload = await response.json() as { period?: { id: string }; people?: RealizationPersonResult[] }
+   if (payload.people?.length) {
+     setDailyResults(current => ({
+       ...current,
+       ...Object.fromEntries(payload.people!.map(result => [`${currentDepartmentId}:${result.user_id}`, result])),
+     }))
+   }
+   if (payload.period?.id) {
+     setPeriodIds(current => ({ ...current, [currentDepartmentId]: payload.period!.id }))
+   }
+   await load(true)
+ }, [apiFetch, day, load])
+
  React.useEffect(()=>{queueMicrotask(()=>void load())},[load]); React.useEffect(()=>{const tick=()=>{if(document.visibilityState==="visible")void load(true)},interval=window.setInterval(tick,12000);document.addEventListener("visibilitychange",tick);return()=>{window.clearInterval(interval);document.removeEventListener("visibilitychange",tick)}},[load])
  const people = React.useMemo(() => {
    const departmentMap = new Map(departments.map(department => [department.id, department]))
@@ -215,11 +321,11 @@ export function DailyRealizationView() {
   {loading&&<p role="status" className="py-3 text-center text-sm text-slate-500">Duke ngarkuar...</p>}
   {!loading&&failedDepartments>0&&<p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">{failedDepartments} departamente nuk u ngarkuan. Përmbledhja përfshin vetëm departamentet e ngarkuara. Rifresko për të provuar përsëri.</p>}
   {metrics&&<><Summary m={metrics}/><RealizationQuantitySummary metrics={metrics}/></>}
-   {user?.role!=="STAFF"&&!personId&&<DailyStaffTable people={filteredPeople} filterPeople={people} departments={departments} departmentId={departmentId} personFilter={personFilter} onDepartmentFilter={id=>{setDepartmentId(id);setPersonFilter("ALL");setPersonId("");setAdjustmentTask(null);setTimelineTask(null);clear()}} onPersonFilter={id=>{setPersonFilter(id);setPersonId("");clear()}} periodIds={periodIds} sort={sort} onSort={setSort} onSelect={id=>{setPersonId(id);clear()}} onSelectExtra={(id,state)=>{setPersonId(id);setSource("ALL");setExceptionsOnly(false);setClassification(({completed:"EXTRA_DONE",progress:"EXTRA_PROGRESS","no-progress":"EXTRA_NO_PROGRESS",all:"EXTRA_ALL"})[state])}} onSelectDeadline={(id,state)=>{setPersonId(id);setSource("ALL");setExceptionsOnly(false);setClassification(({completed:"DEADLINE_DONE","not-completed":"DEADLINE_NOT_DONE",all:"DEADLINE_ALL"})[state])}} reviewVersion={reviewVersion}/>}
+   {user?.role!=="STAFF"&&!personId&&<DailyStaffTable people={filteredPeople} filterPeople={people} departments={departments} departmentId={departmentId} personFilter={personFilter} onDepartmentFilter={id=>{setDepartmentId(id);setPersonFilter("ALL");setPersonId("");setAdjustmentTask(null);setTimelineTask(null);clear()}} onPersonFilter={id=>{setPersonFilter(id);setPersonId("");clear()}} periodIds={periodIds} results={dailyResults} sort={sort} onSort={setSort} onSelect={id=>{setPersonId(id);clear()}} onSelectExtra={(id,state)=>{setPersonId(id);setSource("ALL");setExceptionsOnly(false);setClassification(({completed:"EXTRA_DONE",progress:"EXTRA_PROGRESS","no-progress":"EXTRA_NO_PROGRESS",all:"EXTRA_ALL"})[state])}} onSelectDeadline={(id,state)=>{setPersonId(id);setSource("ALL");setExceptionsOnly(false);setClassification(({completed:"DEADLINE_DONE","not-completed":"DEADLINE_NOT_DONE",all:"DEADLINE_ALL"})[state])}} reviewVersion={reviewVersion} onReviewSaved={()=>{setReviewVersion(value=>value+1);void load(true)}} onPrepareResult={prepareDailyResult}/>}
 
   {selected&&<Card className="rounded-xl shadow-sm"><CardHeader className="border-b p-4">{user?.role!=="STAFF"&&<Button variant="ghost" size="sm" className="mb-2 h-7 w-fit px-1 text-xs" onClick={()=>setPersonId("")}><ArrowLeft className="h-4 w-4"/>Kthehu te stafi</Button>}<div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between"><div><CardTitle className="text-lg">{selected.user_name}</CardTitle><p className="text-xs text-slate-500">{dept||"Departamenti"}</p><div className="mt-2 flex flex-wrap items-start gap-2"><CloseBadge person={selected} timezone={data?.timezone}/><Badge variant="outline" className={selected.metrics.daily_control_state==="ACTION_REQUIRED"?"border-amber-200 bg-amber-50 text-amber-800":"border-emerald-200 bg-emerald-50 text-emerald-800"}>{selected.metrics.daily_control_state==="ACTION_REQUIRED"?"Kërkon veprim":"Dita në rregull"}</Badge>{selected.metrics.unapproved_postponement_count>0?<Badge variant="outline" className="border-violet-200 bg-violet-50 text-violet-800">Pret aprovim: {selected.metrics.unapproved_postponement_count}</Badge>:null}</div></div><div className="flex flex-wrap gap-4 text-xs">{[["Plan",selected.metrics.original_planned_count],["Kryer",selected.metrics.total_completed_today_count],["Në progres",selected.metrics.in_progress_count],["Shtyrë",selected.metrics.postponed_count],["Pa progres",selected.metrics.no_progress_count],["Ekstra gjithsej",selected.metrics.additional_count],["Ekstra të kryera",selected.metrics.additional_completed_count],["Afat sot",selected.metrics.deadlines_today_count],["Afat kryer",selected.metrics.deadlines_completed_count],["Afat pa kryer",Math.max(0,selected.metrics.deadlines_today_count-selected.metrics.deadlines_completed_count)],["Important",selected.metrics.critical_deadlines_today_count],["Imp. kryer",selected.metrics.critical_deadlines_completed_count],["Imp. pa kryer",Math.max(0,selected.metrics.critical_deadlines_today_count-selected.metrics.critical_deadlines_completed_count)]].map(([l,v])=><span key={l}><b className="text-sm">{v}</b> {l}</span>)}</div><div><p className="text-[10px] uppercase">Plan RLZ</p><Bar m={selected.metrics} compact/><p className="text-[10px] text-slate-500">Total të kryera: {selected.metrics.total_completed_today_count}</p></div></div></CardHeader><CardContent className="overflow-x-auto p-0"><Table className="min-w-[1080px] table-fixed"><TableHeader className="sticky top-0 bg-white"><TableRow>{[["Detyra","w-[26%]"],["Plan / Afati","w-[12%]"],["Rezultati","w-[14%]"],["Progresi","w-[7%]"],["Sasi: plan / kryer / +−","w-[12%]"],["Sqarimi","w-[13%]"],["Ndryshimi","w-[10%]"],["Historia","w-[6%]"]].map(([l,w])=><TableHead key={l} className={cn("text-[10px] uppercase",w)}>{l}</TableHead>)}</TableRow></TableHeader><TableBody>{tasks.map((t,index)=><TableRow key={t.match_key} className="align-top"><TableCell className="whitespace-normal"><div className="flex gap-2"><div className="min-w-0 flex-1"><MarkedTaskBlock content={t.title} ordinal={index+1}/>{!t.in_original_plan&&<Badge variant="outline" className="ml-8 mt-1 border-blue-200 bg-blue-50 text-[10px] text-blue-800">Ekstra · jashtë planit fillestar</Badge>}<p className="ml-8 mt-1 line-clamp-1 text-xs text-slate-500">{t.project_title||"Pa projekt"} · {({project:"Projekt",fast:"Fast",system:"Sistem"} as Record<string,string>)[t.source_type]||"Burim tjetër"}</p>{t.postponement_count>1&&<p className="ml-8 text-[10px] text-violet-600">Shtyrë {t.postponement_count} herë</p>}</div>{t.is_bllok&&<Badge variant="outline" className="h-5 border-blue-200 bg-blue-50 text-[9px] text-[#2563EB]">BLL</Badge>}</div></TableCell><TableCell className="whitespace-normal"><PlanDue t={t} day={day}/></TableCell><TableCell className="whitespace-normal"><Badge variant="outline" className={cn("whitespace-normal rounded-md text-left text-[11px]",outcomeStyles[t.classification]||"bg-slate-50")}>{labelOutcome(t.classification)}</Badge><DecisionEvidence task={t} timezone={data?.timezone||TZ} canReview={user?.role!=="STAFF"} onReview={()=>setAdjustmentTask(t)}/>{!((t.classification==="IN_PROGRESS"&&t.current_status==="IN_PROGRESS")||(["REALIZED_AS_PLANNED","COMPLETED_LATE","COMPLETED_EARLY","ADDITIONAL_COMPLETED"].includes(t.classification)&&t.current_status==="DONE")||(t.classification==="NO_PROGRESS"&&t.current_status==="TODO"))&&<p className="mt-1 text-[10px] text-slate-500">Statusi aktual: {statuses[t.current_status]||"Status i përditësuar"}</p>}</TableCell><TableCell><b>{t.progress_today?`+${t.progress_today}%`:t.completed_delta?`+${t.completed_delta}`:"—"}</b></TableCell><TableCell><RealizationTaskQuantity quantity={t.quantity}/></TableCell><TableCell className="whitespace-normal"><Explanation t={t}/></TableCell><TableCell className="text-xs text-slate-500">{t.last_change?last(t.last_change):"—"}</TableCell><TableCell><Button size="icon" variant="ghost" title="Historia" aria-label="Historia" onClick={()=>setTimelineTask(t)}><History className="h-4 w-4"/></Button></TableCell></TableRow>)}</TableBody></Table>{!tasks.length&&<div className="p-10 text-center text-sm text-slate-500"><CalendarDays className="mx-auto mb-2 h-6 w-6"/><p>{filters?"Nuk ka rezultate për filtrat e zgjedhur.":"Nuk ka aktivitet për këtë ditë."}</p>{filters&&<Button variant="ghost" size="sm" onClick={clear}>Pastro filtrat</Button>}</div>}</CardContent></Card>}
   <Timeline task={timelineTask} open={Boolean(timelineTask)} onOpenChange={o=>{if(!o)setTimelineTask(null)}} timezone={data?.timezone||TZ}/><Dialog open={Boolean(adjustmentTask)} onOpenChange={o=>{if(!o&&!savingAdjustment){setAdjustmentTask(null);setAdjustmentReason("");setAdjustmentComment("")}}}><DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-xl"><DialogHeader><DialogTitle>SHQYRTO SHTYRJEN</DialogTitle><DialogDescription>Kontrollo ndryshimin dhe evidencën e stafit para vendimit.</DialogDescription></DialogHeader><div className="space-y-4">{selected?<div className="grid grid-cols-[90px_1fr] gap-2 text-sm"><span className="text-slate-500">Punonjësi</span><b>{selected.user_name}</b><span className="text-slate-500">Detyra</span><div>{adjustmentTask?<MarkedTaskBlock content={adjustmentTask.title} ordinal={1}/>:null}</div></div>:null}<div className="rounded-xl border border-violet-200 bg-violet-50 p-4"><p className="text-[10px] font-semibold uppercase tracking-wide text-violet-700">Ndryshimi i afatit</p><div className="mt-2 flex flex-wrap items-center gap-2 text-lg font-bold">{deadlineChain.map((value,index)=><React.Fragment key={`${value}-${index}`}><span>{value.split("-").reverse().join(".")}</span>{index<deadlineChain.length-1?<span className="text-violet-400">→</span>:null}</React.Fragment>)}</div>{postponementEvents.length>1?<p className="mt-1 text-xs text-violet-700">Shtyrë {postponementEvents.length} herë</p>:null}</div><div className="grid gap-3 sm:grid-cols-2"><div className="rounded-lg border p-3"><p className="text-[10px] font-semibold uppercase text-slate-500">Arsyeja e stafit</p><p className="mt-1 text-sm">{adjustmentTask?dailyRlzReasonLabel(adjustmentTask.reason_code)||"Kërkon sqarim":"—"}</p></div><div className="rounded-lg border p-3"><p className="text-[10px] font-semibold uppercase text-slate-500">Komenti i stafit</p><p className="mt-1 text-sm">{adjustmentTask?.comment?`“${adjustmentTask.comment}”`:"Kërkon sqarim"}</p></div></div><div><Label className="mb-2 block text-xs uppercase">Vendimi</Label><div className="grid grid-cols-2 gap-2"><Button type="button" variant="outline" className={cn("h-10",adjustmentDecision==="APPROVED"&&"border-emerald-400 bg-emerald-50 text-emerald-800 hover:bg-emerald-100")} onClick={()=>setAdjustmentDecision("APPROVED")}>APROVO</Button><Button type="button" variant="outline" className={cn("h-10",adjustmentDecision==="REJECTED"&&"border-rose-400 bg-rose-50 text-rose-800 hover:bg-rose-100")} onClick={()=>setAdjustmentDecision("REJECTED")}>REFUZO</Button></div></div><div className="space-y-1.5"><Label htmlFor="adjustment-reason">Arsyeja e vendimit *</Label><Textarea id="adjustment-reason" rows={2} value={adjustmentReason} onChange={e=>setAdjustmentReason(e.target.value)} placeholder="Shkruaj arsyen e vendimit"/></div><div className="space-y-1.5"><Label htmlFor="adjustment-comment">Koment i menaxherit (opsional)</Label><Textarea id="adjustment-comment" rows={2} value={adjustmentComment} onChange={e=>setAdjustmentComment(e.target.value)} placeholder="Shto një koment për stafin"/></div></div><DialogFooter><Button variant="outline" onClick={()=>setAdjustmentTask(null)} disabled={savingAdjustment}>Anulo</Button><Button className="bg-blue-600 hover:bg-blue-700" onClick={()=>void decide()} disabled={!adjustmentReason.trim()||savingAdjustment}>{savingAdjustment?"Duke ruajtur…":"Ruaj vendimin"}</Button></DialogFooter></DialogContent></Dialog>
-  {selected&&selectedResult?<DailyChecklist result={selectedResult} canEdit={user?.role!=="STAFF"} onSaved={()=>load(true)}/>:null}
+  {selected&&selectedResult?<DailyChecklist key={selectedResult.id} result={selectedResult} canEdit={user?.role==="ADMIN"||user?.role==="MANAGER"} onSaved={()=>load(true)}/>:null}
   {selected&&periodId?<RealizationManagerReview key={`${periodId}:${selected.user_id}`} periodId={periodId} userId={selected.user_id} onSaved={()=>setReviewVersion(value=>value+1)}/>:null}
  </div>
 }

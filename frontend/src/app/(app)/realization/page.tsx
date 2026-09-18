@@ -28,6 +28,7 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -48,6 +49,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
+import { manualChecklistBooleanKeys, checklistAnswerLabel } from "@/lib/realization-checklist"
 import type {
   Department,
   Meeting,
@@ -60,12 +62,10 @@ import type {
   RealizationWeeklyResponse,
 } from "@/lib/types"
 
-const MANUAL_BOOLEAN_KEYS = new Set([
-  "requested_extra_tasks", "helped_colleague", "extra_engagement", "gave_proposal",
-  "affected_other_plan", "repeated_after_clarification",
-])
+const MANUAL_BOOLEAN_KEYS = manualChecklistBooleanKeys
 
 const AUTO_VALUE_LABELS: Record<string, string> = {
+  missed_meeting_evidence: "Evidenca për takime të humbura",
   answer: "Përgjigjja",
   planned: "Planifikuar",
   completed: "Kryer",
@@ -433,10 +433,11 @@ function QuestionRow({
   editable?: boolean
 }) {
   const manual = question.source_status.startsWith("MANUAL")
-  const explicitlyAnswered = question.source_status === "MANUAL_ANSWERED"
+  const explicitlyAnswered = ["MANUAL_ANSWERED", "MANUAL_DAILY_ANSWERED"].includes(question.source_status)
+  const dailySummary = question.daily_summary
   const finalValue = explicitlyAnswered ? question.final_value : (question.final_value ?? question.auto_value)
   const needsConfirmation = manual
-    ? question.source_status !== "MANUAL_ANSWERED"
+    ? !explicitlyAnswered
     : ["AUTO_NEEDS_CONFIRMATION", "MISSING_EVIDENCE"].includes(question.source_status)
   const visibleValue = needsConfirmation && finalValue == null
     ? "Për konfirmim nga menaxheri"
@@ -447,7 +448,7 @@ function QuestionRow({
         <p className="text-sm font-medium text-slate-900">{question.label}</p>
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           <Badge variant={needsConfirmation ? "destructive" : "secondary"} className="text-[10px]">
-            {manual ? (needsConfirmation ? "MANUAL — Pa plotësuar" : "MANUAL — Plotësuar") : "AUTO FAKT"}
+            {dailySummary && question.source_status !== "MANUAL_ANSWERED" ? dailySummary.complete ? "NGA DITORI" : "NGA DITORI · Jo e plotë" : manual ? (needsConfirmation ? "MANUAL — Pa plotësuar" : "MANUAL — Plotësuar") : "AUTO FAKT"}
           </Badge>
           {question.evidence_ids?.length ? (
             <span className="text-[11px] text-slate-500">
@@ -458,31 +459,35 @@ function QuestionRow({
       </div>
       <div>
         {manual && editable && draft && onDraft && onSave ? (
-          <div className="space-y-2">
-            {MANUAL_BOOLEAN_KEYS.has(question.key) ? (
-              <Select value={draft.value} onValueChange={(value) => onDraft({ ...draft, value })}>
-                <SelectTrigger className="w-full"><SelectValue placeholder="Po / Jo / N/A" /></SelectTrigger>
-                <SelectContent><SelectItem value="YES">Po</SelectItem><SelectItem value="NO">Jo</SelectItem><SelectItem value="NA">Nuk aplikohet / Nuk dihet</SelectItem></SelectContent>
-              </Select>
-            ) : (
-              <Textarea rows={3} value={draft.value} onChange={(event) => onDraft({ ...draft, value: event.target.value })} placeholder="Argumentimi i menaxherit" />
-            )}
-            <Input value={draft.comment} onChange={(event) => onDraft({ ...draft, comment: event.target.value })} placeholder="Koment i shkurtër (opsional)" />
-            {question.evidence_ids?.length ? <div className="flex flex-wrap gap-1">{question.evidence_ids.map((id) => {
-              const selected = draft.evidenceIds.includes(id)
-              return <button type="button" key={id} onClick={() => onDraft({ ...draft, evidenceIds: selected ? draft.evidenceIds.filter((value) => value !== id) : [...draft.evidenceIds, id] })} className={cn("rounded border px-2 py-1 text-[10px]", selected ? "border-emerald-400 bg-emerald-50 text-emerald-800" : "border-slate-200 text-slate-500")}>{selected ? "✓ " : ""}{id.slice(0, 8)}</button>
-            })}</div> : null}
-            <Button size="sm" variant="outline" onClick={onSave} disabled={saving || !draft.value}>
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck2 className="h-3.5 w-3.5" />} Ruaj përgjigjen
+          <div className="flex items-center justify-between gap-3 rounded-md border bg-white px-3 py-2">
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+              <Checkbox
+                checked={draft.value === "YES"}
+                disabled={saving}
+                onCheckedChange={(checked) => onDraft({ ...draft, value: checked ? "YES" : "NO" })}
+              />
+              {draft.value === "YES" ? "Po" : "Jo"}
+            </label>
+            <Button size="sm" variant="outline" onClick={onSave} disabled={saving}>
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck2 className="h-3.5 w-3.5" />} {dailySummary ? "Konfirmo / ndrysho për javën" : "Ruaj përgjigjen"}
             </Button>
           </div>
         ) : (
-          <p className={cn("text-sm leading-6", needsConfirmation && finalValue == null ? "font-medium text-amber-700" : "text-slate-700")}>{visibleValue}</p>
+          <p className={cn("text-sm leading-6 whitespace-pre-line", needsConfirmation && finalValue == null ? "font-medium text-amber-700" : "text-slate-700")}>{visibleValue}</p>
         )}
         {manual ? <div className="mt-2 rounded-lg bg-slate-50 p-2 text-xs text-slate-600"><span className="font-semibold">AUTO FACTS:</span> {displayValue(question.auto_value)}</div> : null}
         {question.manager_comment ? <p className="mt-1 text-xs text-slate-600">Koment: “{question.manager_comment}”</p> : null}
         {question.explanation ? (
           <p className="mt-1 text-xs leading-5 text-slate-500">{question.explanation}</p>
+        ) : null}
+        {dailySummary ? (
+          <details className="mt-3 rounded-lg border border-blue-100 bg-blue-50/40 p-3" open={!dailySummary.complete}>
+            <summary className="cursor-pointer text-xs font-semibold text-blue-900">{MANUAL_BOOLEAN_KEYS.has(question.key) ? `Statistikat javore · Po: ${dailySummary.yes_days} ditë · Jo: ${dailySummary.no_days} ditë · Pa plotësuar: ${dailySummary.missing_dates.length} ditë` : `Përgjigjet ditore: ${dailySummary.answered_days}/${dailySummary.expected_days} ditë · Komentet e ditëve`}</summary>
+            <div className="mt-2 space-y-2">
+              {dailySummary.history.map(answer => <div key={answer.id} className="border-t border-blue-100 pt-2 text-xs"><b>{answer.date.split("-").reverse().join(".")}</b> · {checklistAnswerLabel(question.key, answer.value)}{answer.comment ? <p className="mt-1 text-slate-600">{answer.comment}</p> : null}</div>)}
+              {dailySummary.missing_dates.length ? <p className="font-medium text-amber-800">Pa përgjigje: {dailySummary.missing_dates.map(day => day.split("-").reverse().join(".")).join(", ")}. Plotëso ditorin ose konfirmo përgjigjen javore.</p> : null}
+            </div>
+          </details>
         ) : null}
       </div>
     </div>
@@ -543,7 +548,9 @@ function WeeklyRealizationView() {
     const questions = selected?.facts_json.questions || []
     queueMicrotask(() => setManualDrafts(Object.fromEntries(questions.filter((question) => question.source_status.startsWith("MANUAL")).map((question) => {
         const value = question.final_value
-        const display = value === true ? "YES" : value === false ? "NO" : question.source_status === "MANUAL_ANSWERED" ? "NA" : typeof value === "string" ? value : ""
+        const display = MANUAL_BOOLEAN_KEYS.has(question.key)
+          ? value === true ? "YES" : "NO"
+          : typeof value === "string" ? value : ""
         return [question.key, { value: display, comment: question.manager_comment || "", evidenceIds: question.linked_evidence_ids || [] }]
       }))))
   }, [selected])
@@ -572,6 +579,18 @@ function WeeklyRealizationView() {
         let payload = (await response.json()) as RealizationWeeklyResponse
 
         const currentWeek = mondayOf(new Date())
+        const canPrepareCurrentWeek = (
+          weekStart === currentWeek
+          && user?.role !== "STAFF"
+        )
+        if (canPrepareCurrentWeek) {
+          const prepareResponse = await apiFetch(`/realization/weekly/prepare?${params}`, {
+            method: "POST",
+          })
+          if (!prepareResponse.ok) throw new Error(await errorMessage(prepareResponse))
+          payload = (await prepareResponse.json()) as RealizationWeeklyResponse
+        }
+
         const canRefreshLive = (
           weekStart === currentWeek
           && payload.has_planned_snapshot
@@ -712,10 +731,8 @@ function WeeklyRealizationView() {
   const saveManualAnswer = async (question: RealizationQuestion) => {
     if (!selected || !data) return
     const draft = manualDrafts[question.key]
-    if (!draft?.value) return
-    const value = MANUAL_BOOLEAN_KEYS.has(question.key)
-      ? draft.value === "YES" ? true : draft.value === "NO" ? false : null
-      : draft.value.trim()
+    if (!draft) return
+    const value = draft.value === "YES"
     await run(
       `question-${question.key}`,
       `/realization/periods/${data.period.id}/results/${selected.id}/questions/${question.key}`,
@@ -724,8 +741,9 @@ function WeeklyRealizationView() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           value,
-          comment: draft.comment.trim() || null,
-          evidence_ids: draft.evidenceIds,
+          clear: false,
+          comment: null,
+          evidence_ids: [],
         }),
       }
     )
@@ -742,7 +760,7 @@ function WeeklyRealizationView() {
     if (!selected || !data) return
     const completeness = selected.facts_json.manual_question_completeness
     if (!completeness?.complete) {
-      toast.error(`${completeness?.answered || 0} / ${completeness?.required || 8} pyetje manuale të plotësuara`)
+      toast.error(`${completeness?.answered || 0} / ${completeness?.required || 9} pyetje manuale të plotësuara`)
       return
     }
     const changed = reviewLevel !== selected.suggested_level
@@ -1228,7 +1246,7 @@ function WeeklyRealizationView() {
           Përmbledhja është e pjesshme: {failedDepartmentCount} departamente nuk u ngarkuan. Rifresko për të provuar përsëri.
         </p>
       ) : null}
-      <WeeklyRealizationTable reports={loading ? [] : reports} personId={personFilter} loading={loading} onReviewSaved={() => setReviewVersion((value) => value + 1)} onSelect={(report, person) => {
+      <WeeklyRealizationTable reports={loading ? [] : reports} personId={personFilter} loading={loading} onReviewSaved={() => { setReviewVersion((value) => value + 1); void loadReport() }} onSelect={(report, person) => {
         setData(report)
         setSelectedId(person.id)
         setDetailsOpen(true)
@@ -1479,7 +1497,7 @@ function WeeklyRealizationView() {
                   <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
                     <div>
                       <h2 className="font-semibold text-slate-900">Pyetjet dhe argumentimi</h2>
-                      <p className="mt-1 text-xs text-slate-500">Pyetjet për detyrat dhe disiplinën përgjigjen nga sistemi. Menaxheri plotëson vetëm pyetjet që kërkojnë gjykim njerëzor.</p>
+                      <p className="mt-1 text-xs text-slate-500">Inputet javore mblidhen nga përgjigjet ditore, me datat dhe komentet. Përgjegjësi i kontrollon dhe mund t’i konfirmojë ose ndryshojë në fund të javës. Detyrat, vonesat dhe mungesat llogariten nga sistemi.</p>
                     </div>
                     <Badge variant="outline">
                       {selectedChecklistQuestions.filter((question) => question.source_status.startsWith("AUTO")).length} automatike · {manualCompleteness?.answered || 0} inpute të plotësuara · {(manualCompleteness?.required || 0) - (manualCompleteness?.answered || 0)} pa plotësuar · {verifiedEvidence.length} evidenca të verifikuara
@@ -1501,7 +1519,7 @@ function WeeklyRealizationView() {
                               onDraft={(draft) => setManualDrafts((current) => ({ ...current, [question.key]: draft }))}
                               onSave={() => void saveManualAnswer(question)}
                               saving={action === `question-${question.key}`}
-                              editable={user.role !== "STAFF" && data?.period.status !== "LOCKED"}
+                              editable={user.role !== "STAFF" && data?.period.status !== "LOCKED" && selected.period_id === data?.period.id}
                             />)}
                           </div>
                         </div>
@@ -1643,7 +1661,7 @@ function WeeklyRealizationView() {
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader><DialogTitle>Rishikimi menaxherial — {selected?.user_name}</DialogTitle><DialogDescription>Konfirmo përgjigjet që nuk mund të provohen automatikisht. Çdo ndryshim nga sugjerimi kërkon arsye.</DialogDescription></DialogHeader>
           <div className="space-y-5">
-            <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-lg border bg-muted/30 p-3 text-sm"><p className="text-xs text-muted-foreground">Policy</p><p className="mt-1 text-xl font-semibold">{selected?.suggested_level || "—"}</p></div><div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm"><p className="text-xs text-indigo-700">AI</p><p className="mt-1 text-xl font-semibold text-indigo-950">{selected?.ai_suggested_level || "—"}</p>{selected?.ai_analysis_stale ? <p className="text-xs text-amber-700">Kërkon rigjenerim</p> : null}</div><div className="rounded-lg border p-3 text-sm"><p className="text-xs text-muted-foreground">Inputet e përgjegjësit</p><p className="mt-1 font-semibold">{manualCompleteness?.answered || 0} / {manualCompleteness?.required || 8}</p></div></div>
+<div className="grid gap-3 sm:grid-cols-3"><div className="rounded-lg border bg-muted/30 p-3 text-sm"><p className="text-xs text-muted-foreground">Policy</p><p className="mt-1 text-xl font-semibold">{selected?.suggested_level || "—"}</p></div><div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm"><p className="text-xs text-indigo-700">AI</p><p className="mt-1 text-xl font-semibold text-indigo-950">{selected?.ai_suggested_level || "—"}</p>{selected?.ai_analysis_stale ? <p className="text-xs text-amber-700">Kërkon rigjenerim</p> : null}</div><div className="rounded-lg border p-3 text-sm"><p className="text-xs text-muted-foreground">Inputet e përgjegjësit</p><p className="mt-1 font-semibold">{manualCompleteness?.answered || 0} / {manualCompleteness?.required || 9}</p></div></div>
             <div className="space-y-1.5"><Label>Vlerësimi final</Label><Select value={reviewLevel} onValueChange={(value) => setReviewLevel(value as RealizationLevel)}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{(["A+", "A", "B", "C", "M", "D", "E"] as RealizationLevel[]).map((level) => <SelectItem key={level} value={level}>{level} · {LEVEL_SYMBOL[level]}</SelectItem>)}</SelectContent></Select>{selected?.facts_json.decision?.hard_cap_level && selected.ai_suggested_level && LEVEL_RANK[selected.ai_suggested_level] < LEVEL_RANK[selected.facts_json.decision.hard_cap_level] ? <p className="text-xs font-medium text-red-700">AI propozon {selected.ai_suggested_level}, por policy vendos kufi {selected.facts_json.decision.hard_cap_level}. Një tejkalim kërkon arsye eksplicite.</p> : null}</div>
             <div className="space-y-1.5"><Label>Komenti i menaxherit</Label><Textarea value={managerComment} onChange={(event) => setManagerComment(event.target.value)} rows={3} placeholder="Përmbledhje e shkurtër dhe faktike..." /></div>
             <div className="space-y-1.5"><Label>Arsyeja e ndryshimit {reviewLevel !== selected?.suggested_level ? "(e detyrueshme)" : "(opsionale)"}</Label><Textarea value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} rows={2} placeholder="Cila evidencë justifikon ndryshimin?" /></div>

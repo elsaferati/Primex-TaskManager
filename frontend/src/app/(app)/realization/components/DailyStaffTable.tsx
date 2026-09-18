@@ -6,16 +6,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { RealizationReviewCells } from "@/components/realization-review-cells"
 import { RealizationPlanCount } from "@/components/realization-plan-count"
-import type { DailyRealizationPerson, Department } from "@/lib/types"
+import type { DailyRealizationPerson, Department, RealizationPersonResult } from "@/lib/types"
 import { realizationDepartmentTag } from "@/lib/department-name"
 import { RealizationQuantityDelta } from "@/components/realization-quantity"
 import { EXTRA_NO_PROGRESS_EXPLANATION, type ExtraTaskState } from "@/lib/realization-extras"
 
-export function DailyStaffTable({ people, filterPeople, departments, departmentId, personFilter, onDepartmentFilter, onPersonFilter, periodIds, sort, onSort, onSelect, onSelectExtra, onSelectDeadline, reviewVersion }: {
+export function DailyStaffTable({ people, filterPeople, departments, departmentId, personFilter, onDepartmentFilter, onPersonFilter, periodIds, results, sort, onSort, onSelect, onSelectExtra, onSelectDeadline, reviewVersion, onReviewSaved, onPrepareResult }: {
   people: DailyRealizationPerson[]; departments: Department[]; periodIds: Record<string, string>
+  results: Record<string, RealizationPersonResult>
   filterPeople: DailyRealizationPerson[]; departmentId: string; personFilter: string
   onDepartmentFilter: (value: string) => void; onPersonFilter: (value: string) => void
   sort: string; onSort: (value: string) => void; onSelect: (userId: string) => void; reviewVersion: number
+  onReviewSaved: () => void
+  onPrepareResult: (departmentId: string, userId: string) => Promise<void>
   onSelectExtra: (userId: string, state: ExtraTaskState | "all") => void
   onSelectDeadline: (userId: string, state: "all" | "completed" | "not-completed") => void
 }) {
@@ -87,7 +90,7 @@ export function DailyStaffTable({ people, filterPeople, departments, departmentI
             <TableCell className="bg-emerald-50 text-center font-semibold tabular-nums text-emerald-800"><button type="button" className="hover:underline" title="Shfaq deadline-t e kryera" onClick={() => onSelectDeadline(person.user_id, "completed")}>{person.metrics.deadlines_completed_count}</button></TableCell>
             <TableCell className="bg-rose-50 text-center font-semibold tabular-nums text-rose-700"><button type="button" className="hover:underline" title={`Shfaq deadline-t e pakryera${person.metrics.deadlines_postponed_count ? `; ${person.metrics.deadlines_postponed_count} të shtyra` : ""}`} onClick={() => onSelectDeadline(person.user_id, "not-completed")}>{Math.max(0, person.metrics.deadlines_today_count - person.metrics.deadlines_completed_count)}</button></TableCell>
             <TableCell className="text-center font-semibold tabular-nums">{person.metrics.raw_plan_realization == null ? "—" : `${Math.min(100, person.metrics.raw_plan_realization)}%`}</TableCell>
-            <RealizationReviewCells periodId={periodIds[person.department_id] || ""} userId={person.user_id} userName={person.user_name} refreshKey={reviewVersion} />
+            <RealizationReviewCells periodId={periodIds[person.department_id] || ""} userId={person.user_id} userName={person.user_name} result={results[`${person.department_id}:${person.user_id}`]} scope="daily" refreshKey={reviewVersion} onSaved={onReviewSaved} onPrepareResult={() => onPrepareResult(person.department_id, person.user_id)} />
           </TableRow>)}
           {!people.length && <TableRow><TableCell colSpan={21} className="text-center text-slate-500">Nuk ka aktivitet për këtë ditë.</TableCell></TableRow>}
         </TableBody>

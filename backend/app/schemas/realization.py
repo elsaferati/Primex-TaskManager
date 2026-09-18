@@ -362,6 +362,7 @@ class RealizationReviewRequest(RealizationFinalDecision):
 
 class RealizationQuestionAnswerCreate(RealizationSchema):
     value: bool | str | None
+    clear: bool = False
     comment: str | None = Field(default=None, max_length=4000)
     evidence_ids: list[uuid.UUID] = Field(default_factory=list)
 

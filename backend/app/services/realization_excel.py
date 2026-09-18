@@ -243,6 +243,10 @@ def build_realization_workbook(
             "AUTO_NEEDS_CONFIRMATION": "Kërkon konfirmim",
             "MISSING_EVIDENCE": "Kërkon evidencë",
             "MANAGER_CONFIRMED": "Konfirmuar nga menaxheri",
+            "MANUAL_ANSWERED": "Përgjigjja e përgjegjësit",
+            "MANUAL_DAILY_ANSWERED": "Përmbledhur nga përgjigjet ditore",
+            "MANUAL_DAILY_PARTIAL": "Përmbledhje ditore e paplotë",
+            "MANUAL_UNANSWERED": "Pa përgjigje manuale",
         }
         long_answer_keys = {
             "plan_completed",
@@ -286,16 +290,18 @@ def build_realization_workbook(
                         question.get("source_status") or "AUTO_NEEDS_CONFIRMATION"
                     )
                     answer = question.get("final_value")
-                    if answer is None:
+                    if answer is None and not source_status.startswith("MANUAL"):
                         answer = question.get("auto_value")
                     needs_confirmation = (
+                        source_status in {"MANUAL_UNANSWERED", "MANUAL_DAILY_PARTIAL"}
+                        or
                         source_status in {"AUTO_NEEDS_CONFIRMATION", "MISSING_EVIDENCE"}
                         and answer is None
                     )
                     answer_cell = ws.cell(
                         current_row,
                         col,
-                        "PËR KONFIRMIM" if needs_confirmation else _value(answer),
+                        (f"PËR KONFIRMIM: {_value(answer)}" if answer is not None else "PËR KONFIRMIM") if needs_confirmation else "Nuk aplikohet / Nuk dihet" if source_status.startswith("MANUAL") and answer is None else _value(answer),
                     )
                     answer_cell.fill = PatternFill(
                         "solid", fgColor=AMBER if needs_confirmation else WHITE
@@ -306,10 +312,23 @@ def build_realization_workbook(
                     note_parts = [
                         source_labels.get(source_status, source_status.replace("_", " ").title()),
                         explanation,
+                        question.get("manager_comment") or "",
                         f"{len(evidence)} evidencë/a — detajet në fletën Evidenca"
                         if evidence
                         else "",
                     ]
+                    summary = question.get("daily_summary") or {}
+                    if summary:
+                        note_parts.append(f"Përgjigje ditore: {summary['answered_days']}/{summary['expected_days']} ditë")
+                        if question.get("answer_type") == "boolean":
+                            note_parts.append(
+                                f"Po: {summary.get('yes_days', 0)} ditë; "
+                                f"Jo: {summary.get('no_days', 0)} ditë; "
+                                f"Pa plotësuar: {len(summary.get('missing_dates') or [])} ditë"
+                            )
+                        note_parts.extend(f"{item['date']}: {_value(item['value'])}" + (f" — {item['comment']}" if item.get("comment") else "") for item in summary.get("history") or [])
+                        if summary.get("missing_dates"):
+                            note_parts.append("Pa përgjigje: " + ", ".join(summary["missing_dates"]))
                     ws.cell(
                         current_row,
                         col + 1,

@@ -42,7 +42,6 @@ class TestRealizationExcel(unittest.TestCase):
             "in_progress_tasks",
             "new_tasks_added",
             "approved_postponement",
-            "respected_meetings",
             "closed_tasks",
             "frequent_delays",
             "unexpected_absences",
@@ -50,6 +49,7 @@ class TestRealizationExcel(unittest.TestCase):
             self.assertTrue(by_key[key]["source_status"].startswith("AUTO"), key)
         # Managerial judgment remains manual even when supporting evidence is absent.
         for key in (
+            "respected_meetings",
             "helped_colleague",
             "requested_extra_tasks",
             "gave_proposal",
@@ -59,8 +59,8 @@ class TestRealizationExcel(unittest.TestCase):
         ):
             self.assertEqual(by_key[key]["source_status"], "MANUAL_UNANSWERED", key)
         self.assertFalse(by_key["helped_colleague"]["auto_value"])
-        self.assertTrue(by_key["respected_meetings"]["auto_value"])
-        self.assertEqual(by_key["respected_meetings"]["source_status"], "AUTO")
+        self.assertEqual(by_key["respected_meetings"]["auto_value"]["missed_meeting_evidence"], 0)
+        self.assertEqual(by_key["respected_meetings"]["source_status"], "MANUAL_UNANSWERED")
 
     def test_daily_questions_use_the_selected_days_counts(self) -> None:
         questions = build_live_questions(
@@ -121,7 +121,22 @@ class TestRealizationExcel(unittest.TestCase):
                                         "source_status": "AUTO",
                                         "evidence_ids": ["task-1"],
                                         "explanation": "",
-                                    }
+                                    },
+                                    {
+                                        "key": "respected_meetings",
+                                        "label": "A i ka respektuar takimet?",
+                                        "auto_value": {"missed_meeting_evidence": 0},
+                                        "final_value": None,
+                                        "source_status": "MANUAL_DAILY_ANSWERED",
+                                        "evidence_ids": [],
+                                        "explanation": "",
+                                        "daily_summary": {
+                                            "answered_days": 1,
+                                            "expected_days": 1,
+                                            "missing_dates": [],
+                                            "history": [{"date": "2026-08-03", "value": None, "comment": "Nuk kishte takim"}],
+                                        },
+                                    },
                                 ],
                                 "tasks": [
                                     {
@@ -160,6 +175,8 @@ class TestRealizationExcel(unittest.TestCase):
             str(cell.value or "") for row in development.iter_rows() for cell in row
         ).lower()
         self.assertIn("40", development_values)
+        self.assertIn("nuk aplikohet / nuk dihet", development_values)
+        self.assertIn("nuk kishte takim", development_values)
         self.assertIn("totali i javës", development_values)
         self.assertIn("nënshkrimet", development_values)
 

@@ -1049,6 +1049,21 @@ export interface RealizationQuestion {
   explanation: string
   manager_comment?: string | null
   linked_evidence_ids?: string[]
+  daily_summary?: RealizationDailyQuestionSummary
+}
+
+export interface RealizationDailyQuestionSummary {
+  value: boolean | string | null
+  comment?: string | null
+  source: "DAILY_AGGREGATE"
+  answered_days: number
+  expected_days: number
+  missing_dates: string[]
+  complete: boolean
+  yes_days: number
+  no_days: number
+  na_days: number
+  history: Array<RealizationManualAnswer & { date: string; question_key: string; period_id: string; result_id: string }>
 }
 
 export interface RealizationManualAnswer {
@@ -1097,6 +1112,11 @@ export interface RealizationPersonResult {
     weekly_completed_tasks?: RealizationTaskFact[]
     weekly_additional_count?: number
     weekly_fast_task_count?: number
+    weekly_in_progress_count?: number
+    weekly_no_progress_count?: number
+    weekly_pending_count?: number
+    weekly_snapshot_days?: number
+    question_scope?: "DAILY" | "WEEKLY"
     report_mode?: "LIVE_DAILY" | "FINAL_WEEKLY"
     pulse?: RealizationPulseDecision
     projected_weekly_pulse?: RealizationPulseDecision
