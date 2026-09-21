@@ -14,6 +14,11 @@ from app.models.tomorrow_print_report_settings import TomorrowPrintReportSetting
 from app.models.user import User
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import report_timezone
+from app.services.one_h_print_report_snapshot import (
+    get_one_h_print_snapshot,
+    save_one_h_print_snapshot,
+    serialize_one_h_print_snapshot,
+)
 from app.services.tomorrow_print_report import (
     REQUIRED_SHTYPI_RECIPIENTS,
     build_tomorrow_print_report,
@@ -121,6 +126,37 @@ async def preview(
 ) -> dict:
     delivery_date = report_date or datetime.now(report_timezone()).date()
     return await build_tomorrow_print_report(delivery_date, db=db)
+
+
+@router.get("/snapshot")
+async def get_snapshot(
+    report_date: date | None = None,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    delivery_date = report_date or datetime.now(report_timezone()).date()
+    row = await get_one_h_print_snapshot(db, "TOMORROW", delivery_date)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Generated report not found")
+    return await serialize_one_h_print_snapshot(db, row)
+
+
+@router.post("/generate")
+async def generate_snapshot(
+    report_date: date | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    delivery_date = report_date or datetime.now(report_timezone()).date()
+    report = await build_tomorrow_print_report(delivery_date, db=db)
+    row = await save_one_h_print_snapshot(
+        db,
+        report_kind="TOMORROW",
+        report_date=delivery_date,
+        report=report,
+        user=user,
+    )
+    return await serialize_one_h_print_snapshot(db, row)
 
 
 @router.post("/send")

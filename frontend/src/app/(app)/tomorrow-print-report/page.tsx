@@ -1,8 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useVisibleRefresh } from "@/lib/use-visible-refresh"
-import { Eye, RefreshCw, Save, Send, Settings } from "lucide-react"
+import { RefreshCw, Save, Send, Settings } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -29,7 +28,15 @@ type Delivery = {
   sent_at: string | null
   last_error?: string | null
 }
-type Preview = { subject: string; target_date: string; html: string }
+type Preview = {
+  subject: string
+  target_date: string
+  html: string
+  snapshot_id: string
+  report_date: string
+  generated_at: string | null
+  generated_by: string | null
+}
 type TaskMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
 type TaskMarkerFilter = "all" | "with" | "none" | TaskMarker
 
@@ -93,10 +100,12 @@ export function PrintReportPage({
   const [markerFilter, setMarkerFilter] = React.useState<TaskMarkerFilter>("all")
   const [history, setHistory] = React.useState<Delivery[]>([])
   const [loading, setLoading] = React.useState(true)
+  const [snapshotLoading, setSnapshotLoading] = React.useState(true)
   const [saving, setSaving] = React.useState(false)
   const [sending, setSending] = React.useState(false)
-  const [generatingAction, setGeneratingAction] = React.useState<"preview" | "generate" | null>(null)
+  const [generatingAction, setGeneratingAction] = React.useState<"generate" | null>(null)
   const previewFrameRef = React.useRef<HTMLIFrameElement | null>(null)
+  const markerModalCleanupRef = React.useRef<(() => void) | null>(null)
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
 
   const applyReportIntroVisibility = React.useCallback(() => {
@@ -177,6 +186,28 @@ export function PrintReportPage({
 
   React.useEffect(() => { void load() }, [load])
 
+  const loadSnapshot = React.useCallback(async () => {
+    if (authLoading || !user?.id) return
+    setSnapshotLoading(true)
+    try {
+      const response = await apiFetch(`${API}/snapshot`, { cache: "no-store" })
+      if (response.status === 404) {
+        setPreview(null)
+        return
+      }
+      if (!response.ok) throw new Error(await response.text())
+      setPreview(await response.json())
+    } catch (error) {
+      toast.error("Saved report could not be loaded", { description: String(error) })
+    } finally {
+      setSnapshotLoading(false)
+    }
+  }, [API, apiFetch, authLoading, user?.id])
+
+  React.useEffect(() => { void loadSnapshot() }, [loadSnapshot])
+
+  React.useEffect(() => () => markerModalCleanupRef.current?.(), [])
+
   const updateRecipients = (kind: keyof Recipients, value: string) => {
     setRecipientInputs((current) => ({ ...current, [kind]: value }))
     setSettings((current) => current ? { ...current, recipients: { ...current.recipients, [kind]: parseRecipients(value) } } : current)
@@ -209,25 +240,20 @@ export function PrintReportPage({
     }
   }
 
-  const generateReport = async (forPreview = false) => {
-    setGeneratingAction(forPreview ? "preview" : "generate")
+  const generateReport = async () => {
+    if (preview && !window.confirm("Regenerate this saved report with the latest data?")) return
+    setGeneratingAction("generate")
     try {
-      const response = await apiFetch(`${API}/preview?generated_at=${Date.now()}`, { cache: "no-store" })
+      const response = await apiFetch(`${API}/generate`, { method: "POST" })
       if (!response?.ok) throw new Error(await response?.text())
       setPreview(await response.json())
-      toast.success(forPreview ? "Email preview ready" : `${reportName} generated`)
+      toast.success(preview ? `${reportName} regenerated` : `${reportName} generated`)
     } catch (error) {
       toast.error("Report could not be generated", { description: String(error) })
     } finally {
       setGeneratingAction(null)
     }
   }
-
-  useVisibleRefresh(async () => {
-    if (previewFrameRef.current?.contentDocument?.querySelector("select[data-task-marker-control]:disabled")) return
-    const response = await apiFetch(`${API}/preview?generated_at=${Date.now()}`, { cache: "no-store" })
-    if (response.ok) setPreview(await response.json())
-  }, Boolean(preview) && !saving && !sending && !authLoading)
 
   const applyPreviewMarkerFilter = React.useCallback(() => {
     const document = previewFrameRef.current?.contentDocument
@@ -267,25 +293,31 @@ export function PrintReportPage({
     if (!document) return
 
     const openMarkerCommentModal = (initialValue: string) => new Promise<string | null>((resolve) => {
-      const overlay = document.createElement("div")
-      overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:20px;background:transparent;font-family:Arial,sans-serif"
-      const panel = document.createElement("div")
-      panel.style.cssText = "width:min(460px,calc(100vw - 40px));border:1px solid #94A3B8;border-radius:14px;background:#FFF;padding:20px;box-shadow:0 10px 28px rgba(15,23,42,.16);color:#0F172A"
-      const title = document.createElement("div")
+      markerModalCleanupRef.current?.()
+      // The report lives in an auto-height iframe. A fixed modal inside that
+      // iframe is centered against the entire report, often several screens
+      // away. Mount it in the host document so it always stays in the user's
+      // current viewport and cannot affect the iframe resize observer.
+      const hostDocument = window.document
+      const overlay = hostDocument.createElement("div")
+      overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(15,23,42,.18);font-family:Arial,sans-serif"
+      const panel = hostDocument.createElement("div")
+      panel.style.cssText = "box-sizing:border-box;width:min(460px,calc(100vw - 40px));max-height:calc(100vh - 40px);overflow:auto;border:1px solid #94A3B8;border-radius:14px;background:#FFF;padding:20px;box-shadow:0 18px 50px rgba(15,23,42,.28);color:#0F172A"
+      const title = hostDocument.createElement("div")
       title.textContent = "Symbol comment"
       title.style.cssText = "margin-bottom:5px;font-size:18px;font-weight:800"
-      const description = document.createElement("div")
+      const description = hostDocument.createElement("div")
       description.textContent = "Add an optional comment for this symbol."
       description.style.cssText = "margin-bottom:14px;color:#64748B;font-size:13px"
-      const textarea = document.createElement("textarea")
+      const textarea = hostDocument.createElement("textarea")
       textarea.value = initialValue
       textarea.maxLength = 1000
       textarea.placeholder = "Write an optional comment..."
       textarea.style.cssText = "box-sizing:border-box;width:100%;min-height:110px;resize:vertical;border:1px solid #CBD5E1;border-radius:8px;padding:10px 12px;font:14px/1.45 Arial,sans-serif;color:#0F172A;outline:none"
-      const actions = document.createElement("div")
+      const actions = hostDocument.createElement("div")
       actions.style.cssText = "display:flex;justify-content:flex-end;gap:8px;margin-top:16px"
       const makeButton = (label: string, primary = false) => {
-        const button = document.createElement("button")
+        const button = hostDocument.createElement("button")
         button.type = "button"
         button.textContent = label
         button.style.cssText = `height:36px;border-radius:8px;padding:0 16px;border:1px solid ${primary ? "#2563EB" : "#CBD5E1"};background:${primary ? "#2563EB" : "#FFF"};color:${primary ? "#FFF" : "#334155"};font-size:13px;font-weight:700;cursor:pointer`
@@ -295,17 +327,33 @@ export function PrintReportPage({
       copyButton.style.display = initialValue ? "inline-block" : "none"
       const cancelButton = makeButton("Cancel")
       const saveButton = makeButton("Save", true)
-      const finish = (value: string | null) => { overlay.remove(); resolve(value) }
-      copyButton.addEventListener("click", () => void document.defaultView?.navigator.clipboard.writeText(textarea.value))
+      const previousBodyOverflow = hostDocument.body.style.overflow
+      let finished = false
+      const handleKeyDown = (event: KeyboardEvent) => {
+        if (event.key === "Escape") finish(null)
+      }
+      const finish = (value: string | null) => {
+        if (finished) return
+        finished = true
+        hostDocument.removeEventListener("keydown", handleKeyDown)
+        hostDocument.body.style.overflow = previousBodyOverflow
+        overlay.remove()
+        markerModalCleanupRef.current = null
+        resolve(value)
+      }
+      copyButton.addEventListener("click", () => void window.navigator.clipboard.writeText(textarea.value))
       cancelButton.addEventListener("click", () => finish(null))
       saveButton.addEventListener("click", () => finish(textarea.value))
       overlay.addEventListener("click", (event) => { if (event.target === overlay) finish(null) })
-      textarea.addEventListener("keydown", (event) => { if (event.key === "Escape") finish(null) })
+      panel.addEventListener("click", (event) => event.stopPropagation())
       actions.append(copyButton, cancelButton, saveButton)
       panel.append(title, description, textarea, actions)
       overlay.appendChild(panel)
-      document.body.appendChild(overlay)
-      textarea.focus()
+      hostDocument.body.appendChild(overlay)
+      hostDocument.body.style.overflow = "hidden"
+      hostDocument.addEventListener("keydown", handleKeyDown)
+      markerModalCleanupRef.current = () => finish(null)
+      window.requestAnimationFrame(() => textarea.focus())
     })
 
     document.querySelectorAll<HTMLElement>("td[data-task-id]").forEach((cell) => {
@@ -367,19 +415,20 @@ export function PrintReportPage({
       resizeMarkerSelect(select.value, cell.dataset.taskMarkerByGa === "true")
 
       select.addEventListener("change", async () => {
+        if (select.disabled) return
         const previousValue = cell.dataset.taskMarker || ""
         const nextValue = select.value
         const previousComment = cell.dataset.taskMarkerComment || ""
-        const nextComment = nextValue
-          ? await openMarkerCommentModal(nextValue === previousValue ? previousComment : "")
-          : ""
-        if (nextValue && nextComment === null) {
-          select.value = previousValue
-          resizeMarkerSelect(previousValue, cell.dataset.taskMarkerByGa === "true")
-          return
-        }
         select.disabled = true
         try {
+          const nextComment = nextValue
+            ? await openMarkerCommentModal(nextValue === previousValue ? previousComment : "")
+            : ""
+          if (nextValue && nextComment === null) {
+            select.value = previousValue
+            resizeMarkerSelect(previousValue, cell.dataset.taskMarkerByGa === "true")
+            return
+          }
           const response = await apiFetch(`/tasks/${taskId}/one-h-marker`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
@@ -502,8 +551,11 @@ export function PrintReportPage({
           {reportIntroExpanded ? "−" : "+"}
         </Button>
         <div>
-          <h2 className="font-semibold">Generated email</h2>
+          <h2 className="font-semibold">Saved generated report</h2>
           <p className="text-sm text-muted-foreground">{preview.subject}</p>
+          <p className="text-xs text-muted-foreground">
+            Generated {formatDateTime(preview.generated_at)}{preview.generated_by ? ` by ${preview.generated_by}` : ""}
+          </p>
         </div>
       </div>
       <iframe
@@ -528,10 +580,10 @@ export function PrintReportPage({
           <Button
             variant="outline"
             onClick={() => void generateReport()}
-            disabled={!user || generatingAction !== null}
+            disabled={!user || generatingAction !== null || snapshotLoading}
           >
             <RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} />
-            {generatingAction === "generate" ? "Generating..." : "Generate"}
+            {generatingAction === "generate" ? "Generating..." : preview ? "Regenerate" : "Generate"}
           </Button>
         </div>
         {generatedPreview}
@@ -548,8 +600,7 @@ export function PrintReportPage({
         </div>
         <div className="flex flex-wrap gap-2">
           {preview ? markerFilterControl : null}
-          <Button variant="outline" onClick={() => void generateReport(true)} disabled={!user || generatingAction !== null}>{generatingAction === "preview" ? <RefreshCw className="animate-spin" /> : <Eye />} {generatingAction === "preview" ? "Generating..." : "Preview email"}</Button>
-          <Button variant="outline" onClick={() => void generateReport()} disabled={!user || generatingAction !== null}><RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} /> {generatingAction === "generate" ? "Generating..." : "Generate"}</Button>
+          <Button variant="outline" onClick={() => void generateReport()} disabled={!user || generatingAction !== null || snapshotLoading}><RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} /> {generatingAction === "generate" ? "Generating..." : preview ? "Regenerate" : "Generate"}</Button>
           {canManage ? <Button onClick={() => void sendNow()} disabled={sending}><Send /> {sending ? "Sending..." : "Send now"}</Button> : null}
         </div>
       </div>
@@ -583,6 +634,12 @@ export function PrintReportPage({
       ) : canManage ? <div className="rounded-lg border bg-white p-8 text-sm text-muted-foreground">{loading ? "Loading settings..." : "No settings available."}</div> : null}
 
       {generatedPreview}
+
+      {!snapshotLoading && !preview ? (
+        <div className="rounded-lg border bg-white p-8 text-center text-sm text-muted-foreground">
+          No saved report for this date. Select Generate to create it.
+        </div>
+      ) : null}
 
       {canManage ? <div className="rounded-lg border bg-white p-4">
         <div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Delivery history</h2><p className="text-sm text-muted-foreground">Last 50 attempts</p></div><Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}><RefreshCw className={loading ? "animate-spin" : ""} /> Refresh</Button></div>

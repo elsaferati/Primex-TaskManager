@@ -190,7 +190,6 @@ def test_symbol_views_refresh_when_the_user_returns_to_them():
     paths = (
         "frontend/src/app/(app)/common/page.tsx",
         "frontend/src/app/(app)/ga-ka-notes/page.tsx",
-        "frontend/src/app/(app)/tomorrow-print-report/page.tsx",
         "frontend/src/app/(app)/departments/development/department-kanban.tsx",
         "frontend/src/app/(app)/departments/graphic-design/department-kanban.tsx",
         "frontend/src/app/(app)/departments/project-content-manager/department-kanban.tsx",
@@ -199,6 +198,11 @@ def test_symbol_views_refresh_when_the_user_returns_to_them():
     for relative_path in paths:
         source = (ROOT / relative_path).read_text(encoding="utf-8")
         assert "useVisibleRefresh" in source, relative_path
+
+    saved_report = (ROOT / "frontend/src/app/(app)/tomorrow-print-report/page.tsx").read_text(encoding="utf-8")
+    assert "useVisibleRefresh" not in saved_report
+    assert "`${API}/snapshot`" in saved_report
+    assert "`${API}/generate`" in saved_report
 
 
 def test_weekly_planner_uses_saved_daily_symbols_in_live_snapshot_and_print_views():
