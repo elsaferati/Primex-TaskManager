@@ -126,7 +126,7 @@ TASK_LINE_STATUS = re.compile(r"^\[([A-Z_]+)\]\s*")
 MEETING_HIGHLIGHT_MARKER = "[[mt:non_daily_weekly]]"
 MEETING_HIGHLIGHT_PATTERN = re.compile(r"\s*\[\[\s*mt\s*:\s*non_daily_weekly\s*\]\]", re.I)
 MEETING_TONE_PATTERN = re.compile(
-    r"\s*\[\[\s*mc\s*:\s*(meeting-(?:violet|blue|teal|yellow|brown|orange|red))\s*\]\]",
+    r"\s*\[\[\s*mc\s*:\s*(meeting-(?:manual|violet|blue|teal|yellow|brown|orange|red))\s*\]\]",
     re.I,
 )
 TASK_TONE_PATTERN = re.compile(r"\s*\[\[\s*pt\s*:\s*(deadline|eight_am)\s*\]\]", re.I)
@@ -1905,6 +1905,9 @@ def _meeting_title_with_highlight(
     linked_external: Meeting | None = None,
 ) -> str:
     title = _clean_task_title(meeting.title)
+    origin = _meeting_origin_label(meeting, linked_external=linked_external)
+    if origin:
+        title = f"[{origin}] {title}"
     tone = (
         meeting_report_tone(linked_external, meeting_type="external")
         if linked_external is not None
@@ -1915,6 +1918,62 @@ def _meeting_title_with_highlight(
     if recurrence not in {"daily", "weekly"}:
         return f"{title} {MEETING_HIGHLIGHT_MARKER}"
     return title
+
+
+def _source_values(source: Any, *names: str) -> list[Any]:
+    values: list[Any] = []
+    for name in names:
+        if isinstance(source, dict) and name in source:
+            values.append(source[name])
+        elif hasattr(source, name):
+            values.append(getattr(source, name))
+    return values
+
+
+def _meeting_origin_label(
+    source: Any,
+    *,
+    meeting_type: str | None = None,
+    linked_external: Any | None = None,
+) -> str:
+    source_types = _source_values(source, "meeting_type", "meetingType")
+    resolved_type = str(
+        meeting_type or next((value for value in source_types if value), None) or "external"
+    ).strip().lower()
+    linked = any(
+        bool(value)
+        for value in _source_values(
+            source,
+            "paired_external_meeting_id",
+            "pairedExternalMeetingId",
+            "pre_external_meeting_id",
+            "preExternalMeetingId",
+        )
+    )
+    if resolved_type == "internal" and linked_external is None and not linked:
+        return "MANUAL"
+
+    calendar_source = linked_external or source
+    imported = any(
+        bool(value)
+        for value in _source_values(
+            calendar_source,
+            "calendar_imported",
+            "calendarImported",
+            "microsoft_event_id",
+            "microsoftEventId",
+        )
+    )
+    if resolved_type == "internal" and linked_external is None:
+        imported = imported or any(
+            bool(value)
+            for value in _source_values(
+                source,
+                "linked_external_calendar_imported",
+                "linkedExternalCalendarImported",
+            )
+        )
+    return "CAL" if imported else ""
 
 
 def _split_meeting_highlight_marker(value: str) -> tuple[str, bool]:
@@ -2282,6 +2341,9 @@ def _common_meeting_lines(
         if _item_date(item) != day:
             continue
         title = _clean_task_title(str(item.get("title") or item.get("task_title") or "Meeting"))
+        origin = _meeting_origin_label(item, meeting_type=meeting_type)
+        if origin:
+            title = f"[{origin}] {title}"
         title = f"{title} [[mc:{meeting_report_tone(item, meeting_type=meeting_type)}]]"
         recurrence = str(item.get("recurrence_type") or item.get("recurrenceType") or "").strip().lower()
         if recurrence not in {"daily", "weekly"}:

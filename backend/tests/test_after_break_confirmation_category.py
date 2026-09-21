@@ -601,11 +601,11 @@ class UnheldMeetingRowsTests(unittest.TestCase):
         )
 
         body = "\n".join(lines)
-        self.assertIn("Internal before external [[mc:meeting-brown]]", body)
-        self.assertIn("Manual internal [[mc:meeting-blue]]", body)
+        self.assertIn("[CAL] Internal before external [[mc:meeting-brown]]", body)
+        self.assertIn("[MANUAL] Manual internal [[mc:meeting-manual]]", body)
         html = _render_ascii_table_html(lines)
         self.assertIn('bgcolor="#C9A98A"', html)
-        self.assertIn('bgcolor="#DCECFF"', html)
+        self.assertIn('bgcolor="#FFF4CC"', html)
 
 
 if __name__ == "__main__":

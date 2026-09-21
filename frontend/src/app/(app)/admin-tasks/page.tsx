@@ -9193,6 +9193,7 @@ export default function AdminTasksPage() {
           outline-offset: -1px;
           background: transparent;
         }
+        .admin-week-table .ga-time-entry.outlook-manual { background: #fff4cc; border-color: #d6b44c; }
         .admin-week-table .ga-time-entry.outlook-violet { background: #e5e7fb; border-color: #7167d9; }
         .admin-week-table .ga-time-entry.outlook-blue { background: #dcecff; border-color: #5b9fe8; }
         .admin-week-table .ga-time-entry.outlook-teal { background: #cceff1; border-color: #35abb4; }

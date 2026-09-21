@@ -1,4 +1,5 @@
 export type MeetingTone =
+  | "outlook-manual"
   | "outlook-violet"
   | "outlook-blue"
   | "outlook-teal"
@@ -76,12 +77,14 @@ export const meetingLegendTone = ({
 
 export const internalMeetingLegendTone = (meeting: InternalMeetingToneInput): MeetingTone => {
   const isLinked = !isManualInternalMeeting(meeting)
+  if (!isLinked) return "outlook-manual"
+
   return meetingLegendTone({
     categories: meeting.linkedExternalCalendarCategories ?? meeting.linked_external_calendar_categories,
     recurrenceType: isLinked
       ? meeting.linkedExternalRecurrenceType ?? meeting.linked_external_recurrence_type
       : meeting.recurrenceType ?? meeting.recurrence_type,
-    meetingType: isLinked ? "external" : "internal",
+    meetingType: "external",
     calendarImported: Boolean(
       meeting.linkedExternalCalendarImported ?? meeting.linked_external_calendar_imported
     ),

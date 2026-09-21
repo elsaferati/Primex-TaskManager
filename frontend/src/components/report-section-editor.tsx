@@ -181,14 +181,31 @@ function splitLeadingTaskMarker(value: string) {
 
 function renderPreviewTableCell(value: string, header: string) {
   if (normalizeHeader(header) !== "TITLE") return value || "-"
-  const marked = splitLeadingTaskMarker(value)
-  if (!marked) return value || "-"
+  const originMatch = value.match(/^\s*\[(MANUAL|CAL)\]\s*/i)
+  const origin = originMatch?.[1]?.toUpperCase() || ""
+  const text = originMatch ? value.slice(originMatch[0].length) : value
+  const marked = splitLeadingTaskMarker(text)
   return (
     <>
-      <strong className="mr-1 inline-block text-sm font-black leading-none text-red-600 [text-shadow:0_0_0_currentColor]">
-        {marked.marker}
-      </strong>
-      {marked.text}
+      {origin ? (
+        <strong
+          className={`mr-1.5 inline-flex rounded-full px-1.5 py-0.5 text-[9px] font-bold leading-none ${
+            origin === "CAL"
+              ? "bg-teal-600 text-white"
+              : "border border-[#D6B44C] bg-[#FFF4CC] text-amber-900"
+          }`}
+        >
+          {origin}
+        </strong>
+      ) : null}
+      {marked ? (
+        <>
+          <strong className="mr-1 inline-block text-sm font-black leading-none text-red-600 [text-shadow:0_0_0_currentColor]">
+            {marked.marker}
+          </strong>
+          {marked.text}
+        </>
+      ) : text || "-"}
     </>
   )
 }
@@ -440,10 +457,10 @@ function splitMeetingHighlightMarker(value: string) {
 }
 
 function splitMeetingToneMarker(value: string) {
-  const match = value.match(/\s*\[\[\s*mc\s*:\s*(meeting-(?:violet|blue|teal|yellow|brown|orange|red))\s*\]\]/i)
+  const match = value.match(/\s*\[\[\s*mc\s*:\s*(meeting-(?:manual|violet|blue|teal|yellow|brown|orange|red))\s*\]\]/i)
   return {
     text: value
-      .replace(/\s*\[\[\s*mc\s*:\s*meeting-(?:violet|blue|teal|yellow|brown|orange|red)\s*\]\]/gi, "")
+      .replace(/\s*\[\[\s*mc\s*:\s*meeting-(?:manual|violet|blue|teal|yellow|brown|orange|red)\s*\]\]/gi, "")
       .replace(/\s+/g, " ")
       .trim(),
     tone: match?.[1]?.toLowerCase() || "",
@@ -454,6 +471,7 @@ function meetingRowTone(headers: string[], cells: string[]) {
   const titleIndex = headers.findIndex((header) => normalizeHeader(header) === "TITLE")
   const tone = titleIndex >= 0 ? splitMeetingToneMarker(cells[titleIndex] || "").tone : ""
   const tones: Record<string, string> = {
+    "meeting-manual": "!bg-[#FFF4CC]",
     "meeting-violet": "!bg-[#E5E7FB]",
     "meeting-blue": "!bg-[#DCECFF]",
     "meeting-teal": "!bg-[#CCEFF1]",

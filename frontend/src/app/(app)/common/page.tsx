@@ -9997,6 +9997,7 @@ export default function CommonViewPage() {
           background: #ffffff;
           box-shadow: 0 6px 14px rgba(15, 23, 42, 0.04);
         }
+        .outlook-manual { background: #fff4cc !important; border-color: #d6b44c !important; }
         .outlook-violet { background: #e5e7fb !important; border-color: #7167d9 !important; }
         .outlook-blue { background: #dcecff !important; border-color: #5b9fe8 !important; }
         .outlook-teal { background: #cceff1 !important; border-color: #35abb4 !important; }
@@ -11136,7 +11137,7 @@ export default function CommonViewPage() {
           font-weight: 900;
         }
         .week-table-entry.manual-internal-meeting {
-          box-shadow: inset 0 0 0 2px #1d4ed8;
+          box-shadow: inset 0 0 0 2px #d6b44c;
         }
         .week-table-entry.one-time-meeting .week-table-avatar {
           border-color: #fca5a5;
@@ -11824,7 +11825,7 @@ export default function CommonViewPage() {
           font-weight: 900;
         }
         .swimlane-cell.manual-internal-meeting {
-          box-shadow: inset 0 0 0 2px #1d4ed8;
+          box-shadow: inset 0 0 0 2px #d6b44c;
         }
         .swimlane-accent.bz { border-left: 4px solid var(--bz-accent); }
         .swimlane-accent.r1 { border-left: 0; }
