@@ -37,6 +37,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
 from app.services.one_h_slots import effective_slot_date
+from app.services.meeting_occurrence import meeting_display_dates, meeting_occurs_on_date
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.system_task_schedule import matches_template_date
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
@@ -292,67 +293,11 @@ def _get_task_dates(task: Task, single_day_only: bool, range_end: date | None = 
 
 
 def _meeting_occurs_on_date(meeting: Meeting, day: date) -> bool:
-    if meeting.recurrence_type == "weekly":
-        if not meeting.recurrence_days_of_week:
-            return False
-        return day.weekday() in meeting.recurrence_days_of_week
-    if meeting.recurrence_type == "monthly":
-        if not meeting.recurrence_days_of_month:
-            return False
-        return day.day in meeting.recurrence_days_of_month
-    if meeting.recurrence_type == "yearly":
-        month = meeting.starts_at.month if meeting.starts_at else None
-        day_value = meeting.recurrence_days_of_month[0] if meeting.recurrence_days_of_month else None
-        if month is None or day_value is None:
-            return False
-        return day.month == month and day.day == day_value
-    return False
+    return meeting_occurs_on_date(meeting, day, local_timezone=_tirane_tz())
 
 
 def _meeting_display_dates(meeting: Meeting) -> list[date]:
-    """Return the Common View dates occupied by a one-time calendar TAK EXT.
-
-    Microsoft calendar event ends are exclusive. Subtracting one microsecond
-    keeps an all-day Monday-through-Thursday event (ending Friday at 00:00)
-    off Friday while still including the final day of a timed multi-day event.
-    PrimeFlow-generated TAK INT meetings intentionally remain single-date.
-    """
-    date_source = meeting.starts_at or meeting.created_at
-    local_start = _as_tirane_dt(date_source)
-    if local_start is None:
-        return []
-
-    start_day = local_start.date()
-    if meeting.meeting_type != "external" or meeting.ends_at is None:
-        return [start_day]
-
-    local_end = _as_tirane_dt(meeting.ends_at)
-    if local_end is None or local_end <= local_start:
-        return [start_day]
-
-    duration = meeting.ends_at - meeting.starts_at if meeting.starts_at else None
-    midnight_whole_days = bool(
-        duration
-        and duration.total_seconds() % (24 * 60 * 60) == 0
-        and meeting.starts_at.hour == 0
-        and meeting.starts_at.minute == 0
-        and meeting.starts_at.second == 0
-        and meeting.ends_at.hour == 0
-        and meeting.ends_at.minute == 0
-        and meeting.ends_at.second == 0
-    )
-    end_day = (
-        (meeting.ends_at.date() - timedelta(days=1))
-        if midnight_whole_days
-        else (local_end - timedelta(microseconds=1)).date()
-    )
-    if end_day <= start_day:
-        return [start_day]
-
-    return [
-        start_day + timedelta(days=offset)
-        for offset in range((end_day - start_day).days + 1)
-    ]
+    return meeting_display_dates(meeting, local_timezone=_tirane_tz())
 
 
 def _max_timestamp_scalar(column, filters: list[Any] | None = None):

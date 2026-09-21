@@ -28,6 +28,7 @@ from app.models.user import User
 from app.services.common_leave import parse_common_view_annual_leave
 from app.services.daily_report_logic import business_days_between, planned_range_for_daily_report
 from app.services.daily_rlz_compliance import REASON_LABELS
+from app.services.meeting_occurrence import meeting_occurs_on_date
 from app.services.meeting_palette import MEETING_TONE_COLORS, meeting_report_tone
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.personal_task_owner import personal_task_owner
@@ -467,16 +468,7 @@ def _completed_tasks_for_report_day(tasks: list[Task], report_day: date) -> list
 
 
 def _meeting_occurs_on_date(meeting: Meeting, day: date) -> bool:
-    recurrence = (meeting.recurrence_type or "").lower()
-    if recurrence == "weekly":
-        return bool(meeting.recurrence_days_of_week and day.weekday() in meeting.recurrence_days_of_week)
-    if recurrence == "monthly":
-        return bool(meeting.recurrence_days_of_month and day.day in meeting.recurrence_days_of_month)
-    if recurrence == "yearly":
-        month = meeting.starts_at.month if meeting.starts_at else None
-        day_value = meeting.recurrence_days_of_month[0] if meeting.recurrence_days_of_month else None
-        return bool(month and day_value and day.month == month and day.day == day_value)
-    return _local_date(meeting.starts_at or meeting.created_at) == day
+    return meeting_occurs_on_date(meeting, day, local_timezone=report_timezone())
 
 
 def _is_open(task: Task) -> bool:

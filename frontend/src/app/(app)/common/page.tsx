@@ -221,6 +221,25 @@ const oneHDaySpecificQuestionLabel = (reportDay: Date) =>
       ? "E PREMTE - PYETJET E TE PREMTES"
       : "PYETJET SHTESE: 0"
 
+const oneHExtraQuestionNumber = (reportDay: Date, question: string, index: number) => {
+  const thursdayReportCodes: Record<string, "M1" | "M3"> = {
+    "Emails per missing info, per me vazhdu javen tjeter": "M1",
+    "Shikohen det qe mbesin vetem per neser (te premten)": "M3",
+    "Planifikimi javor short": "M1",
+  }
+  const fridayReportCodes: Record<string, "M1"> = {
+    "Barazimi i planifikimit javor - next week": "M1",
+    "Barazimi i realizimit javor - this week": "M1",
+    "Emails per missing info, per me vazhdu javen tjeter": "M1",
+  }
+  const reportCode = reportDay.getDay() === 4
+    ? thursdayReportCodes[question]
+    : reportDay.getDay() === 5
+      ? fridayReportCodes[question]
+      : undefined
+  return reportCode ? `${reportCode} - ${index + 1}.` : `${index + 1}.`
+}
+
 const getNextWorkingDay = (from: Date) => {
   const next = new Date(from.getFullYear(), from.getMonth(), from.getDate())
   next.setDate(next.getDate() + 1)
@@ -283,7 +302,7 @@ const oneHPrintChecklistsHtml = (reportDay: Date) =>
       ).join("")
       const extraContent = extraQuestions
         .map(({ question, description }, index) =>
-          `<div class="one-h-print-checklist-extra-item"><strong>${index + 1}. ${escapePrintHtml(question)}</strong>${
+          `<div class="one-h-print-checklist-extra-item"><strong>${oneHExtraQuestionNumber(reportDay, question, index)} ${escapePrintHtml(question)}</strong>${
             description ? ` <span class="one-h-print-checklist-description">(${escapePrintHtml(description)})</span>` : ""
           }</div>`
         )
@@ -310,7 +329,7 @@ function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
           {questions.some(({ isExtra }) => isExtra) ? <div className="one-h-print-checklist-items">
             {questions.filter(({ isExtra }) => isExtra).map(({ question, description }, index) => (
               <div key={question} className="one-h-print-checklist-extra-item">
-                <strong>{index + 1}. {question}</strong>
+                <strong>{oneHExtraQuestionNumber(reportDay, question, index)} {question}</strong>
                 {description ? <span className="one-h-print-checklist-description"> ({description})</span> : null}
               </div>
             ))}

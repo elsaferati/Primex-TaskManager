@@ -379,9 +379,9 @@ def test_thursday_checklists_add_week_closing_questions_in_html_and_excel() -> N
     assert "Emails per missing info, per me vazhdu javen tjeter" in checklists_html
     assert "Shikohen det qe mbesin vetem per neser (te premten)" in checklists_html
     assert checklists_html.count("E ENJTE- PYETJET E TE ENJTES") == 1
-    assert '<span data-extra-checklist-question="true" style="display:inline;"><strong>1. Planifikimi javor short</strong></span>' in checklists_html
-    assert '<span data-extra-checklist-question="true" style="display:inline;"><strong>1. Emails per missing info, per me vazhdu javen tjeter</strong></span>' in checklists_html
-    assert '<span data-extra-checklist-question="true" style="display:inline;"><strong>2. Shikohen det qe mbesin vetem per neser (te premten)</strong></span>' in checklists_html
+    assert '<span data-extra-checklist-question="true" style="display:inline;"><strong>M1 - 1. Planifikimi javor short</strong></span>' in checklists_html
+    assert '<span data-extra-checklist-question="true" style="display:inline;"><strong>M1 - 1. Emails per missing info, per me vazhdu javen tjeter</strong></span>' in checklists_html
+    assert '<span data-extra-checklist-question="true" style="display:inline;"><strong>M3 - 2. Shikohen det qe mbesin vetem per neser (te premten)</strong></span>' in checklists_html
     assert checklists_html.index("E ENJTE- PYETJET E TE ENJTES") < checklists_html.index("Emails per missing info")
     assert checklists_html.index("Shikohen det qe mbesin") < checklists_html.index("STAFF - HAPAT PER 1H")
     assert checklists_html.index("Planifikimi javor short") < checklists_html.index("PYETJET PER 1H - BORD")
@@ -394,6 +394,9 @@ def test_thursday_checklists_add_week_closing_questions_in_html_and_excel() -> N
     assert "Planifikimi javor short" in sheet["E4"].value
     assert "Emails per missing info, per me vazhdu javen tjeter" in sheet["A4"].value
     assert "Shikohen det qe mbesin vetem per neser (te premten)" in sheet["A4"].value
+    assert sheet["E4"].value.startswith("M1 - 1.")
+    assert sheet["A4"].value.startswith("M1 - 1.")
+    assert "M3 - 2." in sheet["A4"].value
     assert sheet["A5"].value == "STAFF - HAPAT PER 1H"
     assert sheet["E5"].value == "PYETJET PER 1H - BORD"
     assert sheet["A6"].value.startswith("1. Hap doc dhe det")
@@ -440,9 +443,9 @@ def test_friday_checklists_add_staff_questions_and_keep_board_unchanged() -> Non
     assert "Emails per missing info, per me vazhdu javen tjeter" in checklists_html
     assert "Planifikimi javor short" not in checklists_html
     assert checklists_html.count("E PREMTE - PYETJET E TE PREMTES") == 1
-    assert '<span data-extra-checklist-question="true" style="display:inline;"><strong>1. Barazimi i planifikimit javor - next week</strong></span>' in checklists_html
-    assert '<span data-extra-checklist-question="true" style="display:inline;"><strong>2. Barazimi i realizimit javor - this week</strong></span>' in checklists_html
-    assert '<span data-extra-checklist-question="true" style="display:inline;"><strong>3. Emails per missing info, per me vazhdu javen tjeter</strong></span>' in checklists_html
+    assert '<span data-extra-checklist-question="true" style="display:inline;"><strong>M1 - 1. Barazimi i planifikimit javor - next week</strong></span>' in checklists_html
+    assert '<span data-extra-checklist-question="true" style="display:inline;"><strong>M1 - 2. Barazimi i realizimit javor - this week</strong></span>' in checklists_html
+    assert '<span data-extra-checklist-question="true" style="display:inline;"><strong>M1 - 3. Emails per missing info, per me vazhdu javen tjeter</strong></span>' in checklists_html
     assert checklists_html.index("E PREMTE - PYETJET E TE PREMTES") < checklists_html.index("Barazimi i planifikimit")
     assert checklists_html.index("Emails per missing info") < checklists_html.index("STAFF - HAPAT PER 1H")
 
@@ -451,6 +454,9 @@ def test_friday_checklists_add_staff_questions_and_keep_board_unchanged() -> Non
     assert sheet["A3"].value == "E PREMTE - PYETJET E TE PREMTES"
     assert "Barazimi i planifikimit javor - next week" in sheet["A4"].value
     assert "Barazimi i realizimit javor - this week" in sheet["A4"].value
+    assert sheet["A4"].value.startswith("M1 - 1.")
+    assert "M1 - 2." in sheet["A4"].value
+    assert "M1 - 3." in sheet["A4"].value
     assert sheet["E4"].value is None
     assert sheet["A5"].value == "STAFF - HAPAT PER 1H"
     assert sheet["A6"].value.startswith("1. Hap doc dhe det")
