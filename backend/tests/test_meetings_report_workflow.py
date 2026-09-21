@@ -878,25 +878,53 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         )
 
         self.assertIn("[[mc:meeting-brown]]", lines[0])
-        self.assertIn("[[mc:meeting-blue]]", lines[1])
+        self.assertIn("[CAL] Internal before external", lines[0])
+        self.assertIn("[MANUAL] Manual internal [[mc:meeting-manual]]", lines[1])
+
+    def test_common_view_meetings_include_manual_and_calendar_origin_badges(self) -> None:
+        lines = _common_meeting_lines(
+            [
+                {
+                    "id": "manual",
+                    "title": "Manual internal",
+                    "date": "2026-08-11",
+                    "time": "08:10",
+                },
+                {
+                    "id": "calendar",
+                    "title": "Calendar internal",
+                    "date": "2026-08-11",
+                    "time": "08:30",
+                    "paired_external_meeting_id": None,
+                    "pairedExternalMeetingId": "external-id",
+                    "linked_external_calendar_imported": False,
+                    "linkedExternalCalendarImported": True,
+                },
+            ],
+            date(2026, 8, 11),
+            "internal",
+        )
+
+        self.assertIn("[MANUAL] Manual internal [[mc:meeting-manual]]", lines[0])
+        self.assertIn("[CAL] Calendar internal", lines[1])
         table_lines = _tomorrow_meeting_table("TAK INTERNE", lines)
         html = _render_ascii_table_html(table_lines)
-        self.assertIn('bgcolor="#C9A98A"', html)
-        self.assertIn('bgcolor="#DCECFF"', html)
+        self.assertIn('bgcolor="#FFD5DC"', html)
+        self.assertIn('bgcolor="#FFF4CC"', html)
 
         sections = [{"title": SECTION_TITLES[5], "body": "\n".join(table_lines)}]
         docx = render_section_report_docx("PrimeFlow M3", "M3", date(2026, 8, 10), sections)
         with ZipFile(BytesIO(docx)) as archive:
             document_xml = archive.read("word/document.xml").decode("utf-8").lower()
-        self.assertIn("c9a98a", document_xml)
-        self.assertIn("dcecff", document_xml)
+        self.assertIn("ffd5dc", document_xml)
+        self.assertIn("fff4cc", document_xml)
 
         from PIL import Image
 
         png = render_section_report_png("PrimeFlow M3", "M3", date(2026, 8, 10), sections)
         colors = set(Image.open(BytesIO(png)).convert("RGB").getdata())
-        self.assertIn((201, 169, 138), colors)
-        self.assertIn((220, 236, 255), colors)
+        self.assertIn((255, 213, 220), colors)
+        self.assertIn((255, 244, 204), colors)
 
     def test_many_assignees_display_as_all(self) -> None:
         assignee_ids = {uuid.uuid4() for _ in range(11)}

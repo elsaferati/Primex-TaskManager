@@ -1164,7 +1164,7 @@ def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
     assert report_html.count('data-meeting-row="true"') == 3
     assert report_html.count('rowspan="2"') == 2
     assert 'bgcolor="#DCECFF"' in report_html
-    assert report_html.count('bgcolor="#DCECFF"') >= 3
+    assert report_html.count('bgcolor="#FFF4CC"') >= 3
     assert 'data-manual-internal-meeting="true"' in report_html
     assert report_html.count('bgcolor="#C9A98A"') >= 4
     assert report_html.index("Today one-off") < report_html.index("Today early internal")
@@ -1223,7 +1223,7 @@ def test_calendar_linked_internal_meeting_inherits_external_tone_and_cal_badge()
 
     assert report_html.count('data-calendar-meeting="true"') == 2
     assert report_html.count('bgcolor="#CCEFF1"') == 6
-    assert report_html.count('bgcolor="#DCECFF"') == 3
+    assert report_html.count('bgcolor="#FFF4CC"') == 3
     assert report_html.count('data-meeting-users="true"') == 6
     assert report_html.count(">USER</th>") == 2
     assert "AK/DV" in report_html
@@ -1256,7 +1256,7 @@ def test_calendar_linked_internal_meeting_inherits_external_tone_and_cal_badge()
     assert sheet.cell(time_cells["10:30 CAL"].row, 4).font.color.rgb.endswith("64748B")
     assert time_cells["10:30 CAL"].border.top.style == "thick"
     assert time_cells["10:30 CAL"].border.top.color.rgb.endswith("111827")
-    assert time_cells["11:00 MANUAL"].fill.fgColor.rgb.endswith("DCECFF")
+    assert time_cells["11:00 MANUAL"].fill.fgColor.rgb.endswith("FFF4CC")
 
 
 def test_unavailable_meeting_users_are_red_only_when_the_status_covers_meeting_time() -> None:

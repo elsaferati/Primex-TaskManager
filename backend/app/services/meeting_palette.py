@@ -5,6 +5,7 @@ from typing import Any
 
 
 MEETING_TONE_COLORS: dict[str, str] = {
+    "meeting-manual": "#FFF4CC",
     "meeting-violet": "#E5E7FB",
     "meeting-blue": "#DCECFF",
     "meeting-teal": "#CCEFF1",
@@ -52,6 +53,10 @@ def meeting_report_tone(source: Any, *, meeting_type: str | None = None) -> str:
             "preExternalMeetingId",
         )
     )
+    if resolved_type == "internal" and not is_linked_internal:
+        # Internal meetings without an external link are created manually.
+        return "meeting-manual"
+
     category_values = (
         _values(source, "linked_external_calendar_categories", "linkedExternalCalendarCategories")
         if is_linked_internal
@@ -96,9 +101,6 @@ def meeting_report_tone(source: Any, *, meeting_type: str | None = None) -> str:
     )
     if imported:
         return "meeting-red"
-    if resolved_type == "internal":
-        # Manual internal meetings use the same blue tone as Common View.
-        return "meeting-blue"
     recurrence = str(
         (
             _first_non_empty(source, "linked_external_recurrence_type", "linkedExternalRecurrenceType")

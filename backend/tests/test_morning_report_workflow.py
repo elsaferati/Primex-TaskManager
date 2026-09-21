@@ -571,15 +571,15 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         ):
             body, _ = await _day_context_section(db, [], {}, [], {}, report_day)
 
-        self.assertIn("Internal before external [[mc:meeting-teal]]", body)
-        self.assertIn("Manual internal [[mc:meeting-blue]]", body)
+        self.assertIn("[CAL] Internal before external [[mc:meeting-teal]]", body)
+        self.assertIn("[MANUAL] Manual internal [[mc:meeting-manual]]", body)
         report_html = render_html(
             subject_for(report_day),
             report_day,
             [{"title": SECTION_TITLES[4], "body": body}],
         )
         self.assertIn('bgcolor="#CCEFF1"', report_html)
-        self.assertIn('bgcolor="#DCECFF"', report_html)
+        self.assertIn('bgcolor="#FFF4CC"', report_html)
 
     def test_email_html_is_mobile_safe_and_contains_m1_heading(self) -> None:
         subject = subject_for(date(2026, 8, 5))
