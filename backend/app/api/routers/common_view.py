@@ -70,7 +70,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "18"
+COMMON_VIEW_CACHE_VERSION = "19"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -307,6 +307,52 @@ def _meeting_occurs_on_date(meeting: Meeting, day: date) -> bool:
             return False
         return day.month == month and day.day == day_value
     return False
+
+
+def _meeting_display_dates(meeting: Meeting) -> list[date]:
+    """Return the Common View dates occupied by a one-time calendar TAK EXT.
+
+    Microsoft calendar event ends are exclusive. Subtracting one microsecond
+    keeps an all-day Monday-through-Thursday event (ending Friday at 00:00)
+    off Friday while still including the final day of a timed multi-day event.
+    PrimeFlow-generated TAK INT meetings intentionally remain single-date.
+    """
+    date_source = meeting.starts_at or meeting.created_at
+    local_start = _as_tirane_dt(date_source)
+    if local_start is None:
+        return []
+
+    start_day = local_start.date()
+    if meeting.meeting_type != "external" or meeting.ends_at is None:
+        return [start_day]
+
+    local_end = _as_tirane_dt(meeting.ends_at)
+    if local_end is None or local_end <= local_start:
+        return [start_day]
+
+    duration = meeting.ends_at - meeting.starts_at if meeting.starts_at else None
+    midnight_whole_days = bool(
+        duration
+        and duration.total_seconds() % (24 * 60 * 60) == 0
+        and meeting.starts_at.hour == 0
+        and meeting.starts_at.minute == 0
+        and meeting.starts_at.second == 0
+        and meeting.ends_at.hour == 0
+        and meeting.ends_at.minute == 0
+        and meeting.ends_at.second == 0
+    )
+    end_day = (
+        (meeting.ends_at.date() - timedelta(days=1))
+        if midnight_whole_days
+        else (local_end - timedelta(microseconds=1)).date()
+    )
+    if end_day <= start_day:
+        return [start_day]
+
+    return [
+        start_day + timedelta(days=offset)
+        for offset in range((end_day - start_day).days + 1)
+    ]
 
 
 def _max_timestamp_scalar(column, filters: list[Any] | None = None):
@@ -1291,35 +1337,31 @@ async def get_common_view(
                             }
                         )
             else:
-                date_source = meeting.starts_at or meeting.created_at
-                if date_source is None:
-                    continue
-                local_date_source = _as_tirane_dt(date_source) or date_source
-                day = local_date_source.date()
-                if not (week_start_date <= day <= week_end):
-                    continue
                 target = "external" if meeting.meeting_type == "external" else "internal"
-                items[target].append(
-                    {
-                        "id": f"meeting:{meeting.id}:{day.isoformat()}",
-                        "title": meeting.title or ("External meeting" if target == "external" else "Internal meeting"),
-                        "date": day.isoformat(),
-                        "time": _format_time(meeting.starts_at),
-                        "platform": meeting.platform or "TBD",
-                        "owner": owner_name,
-                        "assignees": [
-                            name for name, _ in participant_users_by_meeting.get(meeting.id, [])
-                        ],
-                        "assigneeUserIds": [
-                            user_id for _, user_id in participant_users_by_meeting.get(meeting.id, [])
-                        ],
-                        "department": department_name,
-                        "recurrence_type": meeting.recurrence_type or "none",
-                        "calendarImported": is_calendar_meeting,
-                        "calendarCategories": meeting.calendar_categories or [],
-                        **link_payload,
-                    }
-                )
+                for day in _meeting_display_dates(meeting):
+                    if not (week_start_date <= day <= week_end):
+                        continue
+                    items[target].append(
+                        {
+                            "id": f"meeting:{meeting.id}:{day.isoformat()}",
+                            "title": meeting.title or ("External meeting" if target == "external" else "Internal meeting"),
+                            "date": day.isoformat(),
+                            "time": _format_time(meeting.starts_at),
+                            "platform": meeting.platform or "TBD",
+                            "owner": owner_name,
+                            "assignees": [
+                                name for name, _ in participant_users_by_meeting.get(meeting.id, [])
+                            ],
+                            "assigneeUserIds": [
+                                user_id for _, user_id in participant_users_by_meeting.get(meeting.id, [])
+                            ],
+                            "department": department_name,
+                            "recurrence_type": meeting.recurrence_type or "none",
+                            "calendarImported": is_calendar_meeting,
+                            "calendarCategories": meeting.calendar_categories or [],
+                            **link_payload,
+                        }
+                    )
 
         included.append("meetings")
         _time_end("meetings", ts)
