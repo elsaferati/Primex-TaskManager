@@ -78,6 +78,20 @@ def microsoft_calendar_sync_window(now: datetime) -> tuple[datetime, datetime]:
     return current_monday.astimezone(timezone.utc), end_after_last_friday.astimezone(timezone.utc)
 
 
+def meeting_overlaps_sync_window(
+    starts_at: datetime | None,
+    ends_at: datetime | None,
+    window_start: datetime,
+    window_end: datetime,
+) -> bool:
+    """Return whether a meeting occupies any time inside the sync window."""
+    if starts_at is None:
+        return False
+    if ends_at is not None and ends_at > starts_at:
+        return starts_at < window_end and ends_at > window_start
+    return window_start <= starts_at < window_end
+
+
 async def get_shared_calendar_token(
     db: AsyncSession,
     *,
@@ -741,7 +755,7 @@ async def sync_external_calendar_events(
         for row in existing_rows:
             if not row.calendar_imported or not row.microsoft_event_id or row.calendar_sync_status == "cancelled":
                 continue
-            if row.starts_at is None or not (start <= row.starts_at < end):
+            if not meeting_overlaps_sync_window(row.starts_at, row.ends_at, start, end):
                 row.calendar_sync_status = "out_of_window"
                 row.calendar_last_synced_at = now
                 sync_calendar_internal_pair_status(
