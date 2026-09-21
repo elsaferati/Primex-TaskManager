@@ -346,13 +346,14 @@ def test_one_h_checklists_render_side_by_side_before_the_task_grid() -> None:
     assert "STAFF - HAPAT PER 1H" in checklists_html
     assert "Slotin paraprak/aktual" in checklists_html
     assert 'data-board-checklist-columns="true"' in checklists_html
-    assert "1. Done? / Strikes?" in checklists_html
-    assert "2. Notes te reja? Data? AM/PM? Kujt" in checklists_html
-    assert "3. BZ Notes" in checklists_html
+    assert "1. Notes te reja? Data? AM/PM? Kujt" in checklists_html
+    assert "2. Done? / Strikes?" in checklists_html
+    assert "3. BZ Det nga Stafi per GA" in checklists_html
+    assert "4. BZ Notes" in checklists_html
     assert "Secili i lexon vet para BZ me GA" in checklists_html
     assert "Share screen side by side DET/REZULTATIN" in checklists_html
     assert "4. BZ Det nga Stafi per GA" in checklists_html
-    assert "Komunikimi GA temas Det nga Stafi/ KA email" in checklists_html
+    assert "Komunikimi GA teams Det nga Stafi/ KA email" in checklists_html
     assert checklists_html.count('data-compact-checklist-row="true"') == 2
     assert checklists_html.index('data-board-checklist-section="follow-up"') < checklists_html.index('data-board-checklist-section="primary"')
     assert 'font-size:20px;font-weight:900' in checklists_html
@@ -363,8 +364,8 @@ def test_one_h_checklists_render_side_by_side_before_the_task_grid() -> None:
     assert sheet["A3"].value == "STAFF - HAPAT PER 1H"
     assert sheet["E3"].value == "PYETJET PER 1H - BORD"
     assert sheet["A4"].value.startswith("1. Hap doc dhe det / 2. Share screen")
-    assert "4. BZ Det nga Stafi per GA (Komunikimi GA temas Det nga Stafi/ KA email)" in sheet["A4"].value
-    assert sheet["E4"].value == "1. Done? / Strikes? / 2. Notes te reja? Data? AM/PM? Kujt / 3. BZ Notes (Secili i lexon vet para BZ me GA)"
+    assert "4. BZ Det nga Stafi per GA (Komunikimi GA teams Det nga Stafi/ KA email)" in sheet["A4"].value
+    assert sheet["E4"].value == "1. Notes te reja? Data? AM/PM? Kujt / 2. Done? / Strikes? / 3. BZ Det nga Stafi per GA (Komunikimi GA teams Det nga Stafi/ KA email) / 4. BZ Notes (Secili i lexon vet para BZ me GA)"
     assert sheet["E5"].value.startswith("1. Slotin paraprak/aktual / 2. A ke filluar")
     assert sheet["B6"].value == "LLOJI DHE SLOTI"
     assert sheet["C6"].value == "TASKS"
@@ -400,7 +401,7 @@ def test_thursday_checklists_add_week_closing_questions_in_html_and_excel() -> N
     assert sheet["A5"].value == "STAFF - HAPAT PER 1H"
     assert sheet["E5"].value == "PYETJET PER 1H - BORD"
     assert sheet["A6"].value.startswith("1. Hap doc dhe det")
-    assert sheet["E6"].value == "1. Done? / Strikes? / 2. Notes te reja? Data? AM/PM? Kujt / 3. BZ Notes (Secili i lexon vet para BZ me GA)"
+    assert sheet["E6"].value == "1. Notes te reja? Data? AM/PM? Kujt / 2. Done? / Strikes? / 3. BZ Det nga Stafi per GA (Komunikimi GA teams Det nga Stafi/ KA email) / 4. BZ Notes (Secili i lexon vet para BZ me GA)"
     assert sheet["E7"].value.startswith("1. Slotin paraprak/aktual")
     assert sheet["A3"].font.color.rgb == "00B91C1C"
     assert sheet["A4"].fill.fgColor.rgb == "00FFF7F7"

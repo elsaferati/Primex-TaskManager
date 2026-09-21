@@ -232,7 +232,7 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertEqual(reminders[-1].text, "BZ Det nga Stafi per GA")
         self.assertEqual(
             reminders[-1].guidance,
-            "Komunikimi GA temas Det nga Stafi/ KA email",
+            "Komunikimi GA teams Det nga Stafi/ KA email",
         )
 
     def test_1150_staff_reminders_add_pre_break_document_question_before_bz(self) -> None:
@@ -636,7 +636,7 @@ class PrimeFlowReportTests(unittest.TestCase):
             ReportReminderQuestion(text="Sqaro slotin paraprak pastaj aktual"),
             ReportReminderQuestion(
                 text="BZ Det nga Stafi per GA",
-                guidance="Komunikimi GA temas Det nga Stafi/ KA email",
+                guidance="Komunikimi GA teams Det nga Stafi/ KA email",
             ),
         ]
         document = build_report_document(data, date(2026, 8, 6), "11:00", reminders=reminders)
@@ -646,14 +646,15 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertLess(plain.index(REMINDER_SECTION_TITLE), plain.index("11:00 SLOTI 06.08.2026"))
         self.assertIn("1. Slotin paraprak/aktual", plain)
         self.assertIn("6. A arrihet RLZ javor?", plain)
-        self.assertIn("1. Done? / Strikes?", plain)
-        self.assertIn("2. Notes te reja? Data? AM/PM? Kujt", plain)
-        self.assertIn("3. BZ Notes", plain)
+        self.assertIn("1. Notes te reja? Data? AM/PM? Kujt", plain)
+        self.assertIn("2. Done? / Strikes?", plain)
+        self.assertIn("3. BZ Det nga Stafi per GA", plain)
+        self.assertIn("4. BZ Notes", plain)
         self.assertIn("Secili i lexon vet para BZ me GA", plain)
         self.assertIn("1. Hap doc dhe det", plain)
         self.assertIn("2. Share screen side by side DET/REZULTATIN", plain)
         self.assertIn("4. BZ Det nga Stafi per GA", plain)
-        self.assertIn("Komunikimi GA temas Det nga Stafi/ KA email", plain)
+        self.assertIn("Komunikimi GA teams Det nga Stafi/ KA email", plain)
         self.assertIn(REMINDER_SECTION_TITLE, html)
         self.assertIn('data-board-reminder-columns="true"', html)
         self.assertIn(BOARD_REMINDER_SECTION_TITLE, html)

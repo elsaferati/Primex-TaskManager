@@ -64,8 +64,9 @@ ONE_H_BOARD_PRIMARY_CHECKLIST = (
     ("A arrihet RLZ javor?", ""),
 )
 ONE_H_BOARD_FOLLOW_UP_CHECKLIST = (
-    ("Done? / Strikes?", ""),
     ("Notes te reja? Data? AM/PM? Kujt", ""),
+    ("Done? / Strikes?", ""),
+    ("BZ Det nga Stafi per GA", "Komunikimi GA teams Det nga Stafi/ KA email"),
     ("BZ Notes", "Secili i lexon vet para BZ me GA"),
 )
 ONE_H_BOARD_CHECKLIST = ONE_H_BOARD_PRIMARY_CHECKLIST + ONE_H_BOARD_FOLLOW_UP_CHECKLIST
@@ -73,7 +74,7 @@ ONE_H_STAFF_CHECKLIST = (
     ("Hap doc dhe det", ""),
     ("Share screen side by side DET/REZULTATIN", ""),
     ("Sqaro slotin paraprak pastaj aktual", ""),
-    ("BZ Det nga Stafi per GA", "Komunikimi GA temas Det nga Stafi/ KA email"),
+    ("BZ Det nga Stafi per GA", "Komunikimi GA teams Det nga Stafi/ KA email"),
 )
 THURSDAY_ONE_H_BOARD_CHECKLIST = (("Planifikimi javor short", ""),)
 THURSDAY_ONE_H_STAFF_CHECKLIST = (

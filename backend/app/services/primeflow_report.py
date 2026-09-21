@@ -148,8 +148,12 @@ def _board_reminder_questions(report_day: date | None = None) -> list[ReportRemi
         ReportReminderQuestion(text="A kryhet sot?"),
         ReportReminderQuestion(text="A kryhet kete jave?"),
         ReportReminderQuestion(text="A arrihet RLZ javor?"),
-        ReportReminderQuestion(text="Done? / Strikes?"),
         ReportReminderQuestion(text="Notes te reja? Data? AM/PM? Kujt"),
+        ReportReminderQuestion(text="Done? / Strikes?"),
+        ReportReminderQuestion(
+            text="BZ Det nga Stafi per GA",
+            guidance="Komunikimi GA teams Det nga Stafi/ KA email",
+        ),
         ReportReminderQuestion(text="BZ Notes", guidance="Secili i lexon vet para BZ me GA"),
     ]
     if report_day is not None and report_day.weekday() == 3:
@@ -174,7 +178,12 @@ def _split_board_regular_questions(
 ) -> tuple[list[tuple[int, ReportReminderQuestion]], list[tuple[int, ReportReminderQuestion]]]:
     """Return Board follow-up questions first and primary questions second."""
     regular = [question for question in questions if not question.is_extra]
-    follow_up_texts = {"Done? / Strikes?", "Notes te reja? Data? AM/PM? Kujt", "BZ Notes"}
+    follow_up_texts = {
+        "Notes te reja? Data? AM/PM? Kujt",
+        "Done? / Strikes?",
+        "BZ Det nga Stafi per GA",
+        "BZ Notes",
+    }
     follow_up = [question for question in regular if question.text in follow_up_texts]
     primary = [question for question in regular if question.text not in follow_up_texts]
     return list(enumerate(follow_up, 1)), list(enumerate(primary, 1))
