@@ -53,11 +53,11 @@ class TestRealizationExcel(unittest.TestCase):
             "helped_colleague",
             "requested_extra_tasks",
             "gave_proposal",
-            "extra_engagement",
             "affected_other_plan",
             "repeated_after_clarification",
         ):
             self.assertEqual(by_key[key]["source_status"], "MANUAL_UNANSWERED", key)
+        self.assertEqual(by_key["extra_engagement"]["source_status"], "AUTO")
         self.assertFalse(by_key["helped_colleague"]["auto_value"])
         self.assertEqual(by_key["respected_meetings"]["auto_value"]["missed_meeting_evidence"], 0)
         self.assertEqual(by_key["respected_meetings"]["source_status"], "MANUAL_UNANSWERED")
@@ -85,7 +85,14 @@ class TestRealizationExcel(unittest.TestCase):
         by_key = {question["key"]: question for question in questions}
         self.assertEqual(by_key["plan_completed"]["auto_value"]["planned"], 4)
         self.assertEqual(by_key["plan_completed"]["auto_value"]["completed"], 3)
-        self.assertEqual(by_key["new_tasks_added"]["auto_value"]["count"], 2)
+        self.assertEqual(by_key["new_tasks_added"]["auto_value"], {
+            "yes": True,
+            "total": 2,
+            "completed": 0,
+            "in_progress": 0,
+            "todo": 2,
+            "postponed": 0,
+        })
         self.assertEqual(by_key["frequent_delays"]["auto_value"]["attendance_tardiness"], 1)
         self.assertTrue(by_key["frequent_delays"]["auto_value"]["answer"])
         self.assertEqual(by_key["frequent_delays"]["auto_value"]["threshold"], 1)
@@ -127,15 +134,10 @@ class TestRealizationExcel(unittest.TestCase):
                                         "label": "A i ka respektuar takimet?",
                                         "auto_value": {"missed_meeting_evidence": 0},
                                         "final_value": None,
-                                        "source_status": "MANUAL_DAILY_ANSWERED",
+                                        "source_status": "MANUAL_ANSWERED",
                                         "evidence_ids": [],
                                         "explanation": "",
-                                        "daily_summary": {
-                                            "answered_days": 1,
-                                            "expected_days": 1,
-                                            "missing_dates": [],
-                                            "history": [{"date": "2026-08-03", "value": None, "comment": "Nuk kishte takim"}],
-                                        },
+                                        "manager_comment": "Nuk kishte takim",
                                     },
                                 ],
                                 "tasks": [

@@ -8,9 +8,12 @@ auditable `RealizationObservation` evidence for that weekly `period_id`; it is
 separate from every Daily review and the two dimensions never overwrite each other.
 
 The responsible manager can choose **Mirë**, **Shumë mirë**, **Kërkon veprim**,
-or **Keq**, and each requires a non-empty comment. The rating is stored as
-`review_rating` in observation evidence; the first two map to `POSITIVE`, and the
-last two map to `NEGATIVE`. Existing marker-only reviews remain readable.
+or **Keq**. The rating is stored as `review_rating` in observation evidence; the
+first two map to `POSITIVE`, and the last two map to `NEGATIVE`. A rating is never
+implied: a manager may save a comment or checklist answers alone, in which case
+`review_rating` is stored as `null` and the review reads back as **Pa vlerësim**.
+Legacy reviews written before `review_rating` existed (the key is absent from
+evidence) still derive a compatible rating from their marker.
 No row means **Pa vërejtje**;
 the system does not create a neutral/default observation. Edits supersede/void the
 previous active observation so manager, timestamp, comment, and history remain
@@ -24,47 +27,43 @@ their own department, STAFF cannot write reviews, and ADMIN retains broad access
 ## Daily and weekly evaluation checklist
 
 The reference evaluation checklist is represented as 17 explicit questions in
-both Daily and Weekly Realization. Eight answers come from system evidence:
+both Daily and Weekly Realization. Nine answers come from system evidence:
 
 - completion of the plan;
 - tasks with no progress;
 - tasks still in progress;
-- newly added tasks;
+- newly added tasks, split into completed, in progress, to do, and postponed;
+- extra-task realization: total, completed, in progress, and without progress;
 - approved or unresolved postponements;
 - closed tasks;
 - attendance tardiness;
 - unexpected absences.
 
-The remaining nine are manager inputs because they require human judgment:
+The remaining eight are manager inputs because they require human judgment:
 respecting meeting times,
-requested extra tasks, helped a colleague, extra engagement, gave a proposal,
-the week's/day's positive contribution, problems caused, impact on another
+requested extra tasks, helped a colleague, gave a proposal,
+the week's positive contribution, problems caused, impact on another
 person's plan, and repetition after clarification. Boolean inputs accept Yes,
-No, or Not applicable. Daily dropdown choices use question-specific wording,
-including respected/not respected meeting times. The two contribution/problem
-questions have dropdown categories and a free-text explanation; the manager can
-edit the final weekly narratives. Every saved answer
-is append-only and belongs to that person's `result_id` and its DAILY or WEEKLY
-`period_id`, so a daily answer never overwrites a weekly answer or another date.
+No. The manager can edit the final weekly narratives.
 
-Daily Realization shows the checklist after selecting a person. Automatic facts
-include the selected day's task counts and attendance evidence. Managers can fill
-the nine inputs there; staff can read the resulting checklist. Weekly
-Realization aggregates the latest daily answer per question, person, and date.
-A single negative meeting answer makes the weekly meeting answer negative;
-the other boolean questions use any positive occurrence. N/A is excluded from
-boolean voting and remains explicit in the dated history. Narrative choices
-and comments are retained by date. Missing working-day answers are shown as
-partial, never assumed to be "No" or "OK"; full-day Common View leave is excluded.
-Future days are not expected until their date. A complete daily rollup satisfies
-weekly completeness without re-entering answers. An explicit weekly manager
-answer overrides the rollup while preserving the daily history. Weekly approval
-stores the rollup, and locked weekly reports retain that stored evidence. Daily
-edits mark the related unlocked weekly AI analysis as stale. The rollup is also
-included in the AI input with its manual provenance and missing dates; it does
-not itself change task percentages, payroll, or deterministic policy grades.
-Ambiguous postponements or absences are marked as automatic facts that still need
-manager confirmation rather than being silently treated as resolved.
+These eight inputs are **weekly**: one question has exactly one answer per person
+per week. The manager may record or correct that answer — its tick and its
+comment — from whichever day they have open, and every view reads back the same
+answer. Storage reflects this: a save issued against a DAILY `period_id` resolves
+to the WEEKLY period covering that day and lands on that person's weekly
+`result_id`, creating the weekly period or result when they do not exist yet.
+Answers stay append-only, so each correction supersedes the previous one without
+erasing it, and a locked week rejects edits made from any of its days. Saving
+also marks both the day's and the week's AI analysis as stale.
+
+Daily Realization shows the same checklist after selecting a person. Automatic
+facts still describe the selected day's task counts, extra-task status, and
+attendance evidence; only the eight manual inputs are weekly. Managers fill them
+in from either view, staff can read the result, and weekly completeness simply
+requires all eight answers to be present. Ambiguous postponements or absences are
+marked as automatic facts that still need manager confirmation rather than being
+silently treated as resolved. The manual judgment does not change task
+percentages, payroll, or deterministic policy grades.
 
 The weekly page displays a compact table with filtered totals followed by a row
 per employee. Managers and administrators can filter all departments or one
@@ -74,6 +73,15 @@ all completed work, including extras, against the baseline planned count, capped
 open do not add completion credit. Snapshot task facts and daily timeline entries
 are deduplicated by task identity. Totals sum employee obligations, so shared
 assignments contribute once per employee; they are not unique department tasks.
+
+The Daily staff table uses compact grouped cells instead of one column for every
+counter. `Plan` is always the immutable initial plan. `Realizimi` combines total
+completed, in progress, postponed, and no-progress counts. `Ekstra` shows
+completed/total plus its open states; completed extras still contribute to total
+completed work and realization while never increasing the initial-plan number.
+Quantity and deadline cells use completed/total with the remaining difference.
+The manager comment is edited in the evaluation modal and only a short saved
+preview remains in the table.
 Automatic A+–E grading and verification requirements remain separate.
 
 ## Extra task counts and estimated progress
@@ -81,8 +89,24 @@ Automatic A+–E grading and verification requirements remain separate.
 Daily and weekly tables distinguish **Ekstra gjithsej** (all report obligations
 outside the initial plan, at any outcome) from **Ekstra të kryera** (the completed
 subset). Daily extras can include newly added, reassigned, or carried-over tasks
-absent from the day's baseline. Extra completions include early and late work
+absent from the day's baseline when they have execution evidence for that day.
+Old overdue backlog and tasks created while planning a future day are excluded.
+Extra completions include early and late work
 outside that baseline. Weekly extras are deduplicated across the week.
+
+Weekly extras are decided by **when the task was created**, not by the weekly plan
+snapshot: a task created on or after Monday is extra, one that predates the week is
+plan. The snapshot cannot decide it, because a plan saved mid-week already contains
+the work added during that week, which used to collapse the extra count to near zero.
+Creation dates are read from the database, and the weekly page warns when the plan
+snapshot was captured after Monday.
+
+An extra that was added, never started, and then pushed to a later date is left out
+of `weekly_additional_count` and reported separately as
+`weekly_additional_deferred_count`, shown next to the extra count as `+N shtyrë`.
+It was never this week's work, so it belongs to the week it actually gets done. An
+extra that was pushed but had progress still counts, as does one left untouched
+without being pushed.
 **Kryer gjithsej** already includes completed extras; do not add them again.
 **Plan** displays the baseline count plus all extras, for example `5+2` when two
 extra obligations exist, even if only one is completed. The realization denominator
@@ -237,9 +261,9 @@ and still use the connected PrimeFlow account's normal permissions.
 - The **Vlerësimi** table cell opens one combined person modal. It contains the
   qualitative rating (including **Shumë mirë**), the manager summary, automatic
   facts as read-only context, and the manual checklist answers.
-- Categorical checklist answers support multi-select. Boolean questions keep a
-  single `Po / Jo / Nuk aplikohet` choice. Daily rollups and dated history are
-  visible in the modal before a weekly override is saved.
+- Manual checklist rows are compact boolean inputs: unchecked means `Jo`, and
+  managers tick only the answers that are `Po`. Daily rollups and dated history
+  are visible in the modal before a weekly override is saved.
 - MANAGER: review results and verify observations in their department.
 - ADMIN: same access across departments, plus approve and lock.
 - Override requires a reason.

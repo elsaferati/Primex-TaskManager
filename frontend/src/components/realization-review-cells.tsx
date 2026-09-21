@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
-import { dailyChecklistLabels, manualChecklistBooleanKeys } from "@/lib/realization-checklist"
+import { manualChecklistBooleanKeys, weeklyChecklistLabels } from "@/lib/realization-checklist"
 import type { RealizationManagerReviewResponse, RealizationManagerReviewRating, RealizationPersonResult, RealizationQuestion } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -20,7 +20,8 @@ type QuestionDraft = { values: string[]; comment: string; touched: boolean }
 
 const FACT_LABELS: Record<string, string> = {
   answer: "Përgjigjja", planned: "Planifikuar", completed: "Kryer", remaining: "Mbetur",
-  count: "Numri", approved: "Aprovuar", unapproved: "Pa aprovim", closed: "Mbyllur",
+  count: "Numri", total: "Gjithsej", in_progress: "Në progres", no_progress: "Pa progres", todo: "To do", postponed: "Shtyrë",
+  approved: "Aprovuar", unapproved: "Pa aprovim", closed: "Mbyllur",
   all_closed: "Të gjitha të mbyllura", attendance_tardiness: "Vonesa",
   missed_meeting_evidence: "Evidenca për takime të humbura",
 }
@@ -38,7 +39,6 @@ function automaticValue(value: unknown): string {
 function savedQuestionValues(question: RealizationQuestion): string[] {
   const value = question.final_value
   if (manualChecklistBooleanKeys.has(question.key)) {
-    if (question.source_status === "MANUAL_DAILY_PARTIAL") return []
     if (value === true) return ["YES"]
     if (value === false) return ["NO"]
     return []
@@ -47,25 +47,26 @@ function savedQuestionValues(question: RealizationQuestion): string[] {
   return value.split(" • ").map((item) => item.trim()).filter(Boolean)
 }
 
-function ManualQuestion({ question, label, draft, disabled, onChange }: {
-  question: RealizationQuestion; label: string; draft: QuestionDraft; disabled: boolean; onChange: (next: QuestionDraft) => void
+function ManualQuestion({ label, draft, disabled, onChange, onSaveComment }: {
+  label: string; draft: QuestionDraft; disabled: boolean; onChange: (next: QuestionDraft) => void; onSaveComment: () => void
 }) {
-  const summary = question.daily_summary
   const checked = draft.values.includes("YES")
-  return <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-slate-200 px-3 py-2 last:border-b-0">
-    <div className="min-w-0">
-      <p className="text-sm font-medium text-slate-800">{label}</p>
-      {summary ? <p className="mt-0.5 text-[10px] text-slate-500">Java: Po {summary.yes_days} · Jo {summary.no_days} · Pa përgjigje {summary.missing_dates.length}</p> : null}
+  return <div className="border-b border-slate-200 px-3 py-2 last:border-b-0">
+    <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-slate-800">{label}</p>
+      </div>
+      <button type="button" role="checkbox" aria-checked={checked} aria-label={`${label}: ${checked ? "Po" : "Jo"}`} disabled={disabled} onClick={() => onChange({ ...draft, values: checked ? ["NO"] : ["YES"], touched: true })} className={cn("flex h-7 min-w-16 items-center justify-center gap-1.5 rounded-md border px-2 text-xs font-semibold", checked ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-300 bg-white text-slate-500", disabled && "cursor-not-allowed opacity-60")}>
+        <span className={cn("flex h-4 w-4 items-center justify-center rounded border", checked ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-300 bg-white")}>{checked ? <Check className="h-3 w-3" /> : null}</span>
+        {checked ? "Po" : "Jo"}
+      </button>
     </div>
-    <button type="button" role="checkbox" aria-checked={checked} aria-label={`${label}: ${checked ? "Po" : "Jo"}`} disabled={disabled} onClick={() => onChange({ ...draft, values: checked ? ["NO"] : ["YES"], touched: true })} className={cn("flex h-7 min-w-16 items-center justify-center gap-1.5 rounded-md border px-2 text-xs font-semibold", checked ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-300 bg-white text-slate-500", disabled && "cursor-not-allowed opacity-60")}>
-      <span className={cn("flex h-4 w-4 items-center justify-center rounded border", checked ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-300 bg-white")}>{checked ? <Check className="h-3 w-3" /> : null}</span>
-      {checked ? "Po" : "Jo"}
-    </button>
+    {checked ? <div className="mt-2 flex flex-col items-stretch gap-1"><Textarea aria-label={`Komenti për ${label}`} aria-required="true" required className="min-h-8 resize-y bg-slate-50 px-2 py-1.5 text-xs" rows={1} maxLength={1000} value={draft.comment} disabled={disabled} onChange={(event) => onChange({ ...draft, comment: event.target.value, touched: true })} placeholder="Shto koment për këtë përgjigje… (i detyrueshëm)" /><Button type="button" size="sm" variant="outline" className="h-7 self-end px-3 text-xs" disabled={disabled || !draft.comment.trim()} onClick={onSaveComment}>Ruaj komentin</Button></div> : null}
   </div>
 }
 
-export function RealizationReviewCells({ periodId, userId, userName, result, scope = "weekly", locked = false, onSaved, onPrepareResult, refreshKey }: {
-  periodId: string; userId: string; userName: string; result?: RealizationPersonResult; scope?: "daily" | "weekly"; locked?: boolean; onSaved?: () => void; onPrepareResult?: () => Promise<void>; refreshKey?: unknown
+export function RealizationReviewCells({ periodId, userId, userName, result, scope = "weekly", locked = false, compactTable = false, onSaved, onPrepareResult, refreshKey }: {
+  periodId: string; userId: string; userName: string; result?: RealizationPersonResult; scope?: "daily" | "weekly"; locked?: boolean; compactTable?: boolean; onSaved?: () => void; onPrepareResult?: () => Promise<void>; refreshKey?: unknown
 }) {
   const { apiFetch } = useAuth()
   const [data, setData] = React.useState<RealizationManagerReviewResponse | null>(null)
@@ -76,13 +77,27 @@ export function RealizationReviewCells({ periodId, userId, userName, result, sco
   const [saving, setSaving] = React.useState(false)
   const [preparing, setPreparing] = React.useState(false)
   const [failed, setFailed] = React.useState(false)
+  // The API answers for the week that contains periodId, so its period_id is
+  // the weekly one and cannot be compared against periodId directly.
+  const [loadedFor, setLoadedFor] = React.useState("")
+  const draftsRef = React.useRef(drafts)
+  const generatedQuestionLines = React.useRef<string[]>([])
+  draftsRef.current = drafts
   const endpoint = `/realization/periods/${periodId}/users/${userId}/manager-review`
   const manualQuestions = React.useMemo(() => (result?.facts_json.questions || []).filter((question) => question.source_status.startsWith("MANUAL")), [result])
-  const automaticQuestions = React.useMemo(() => (result?.facts_json.questions || []).filter((question) => question.source_status.startsWith("AUTO")), [result])
+  const automaticQuestions = React.useMemo(() => (result?.facts_json.questions || []).filter((question) => question.source_status.startsWith("AUTO") && question.key !== "extra_engagement"), [result])
   const weeklySnapshotDays = scope === "weekly" ? Number(result?.facts_json.weekly_snapshot_days || 0) : 0
-  const initializeDrafts = React.useCallback(() => setDrafts(Object.fromEntries(manualQuestions.map((question) => [question.key, {
-    values: savedQuestionValues(question), comment: question.source_status === "MANUAL_ANSWERED" ? question.manager_comment || "" : "", touched: false,
-  }]))), [manualQuestions])
+  const questionLabel = React.useCallback((question: RealizationQuestion) => weeklyChecklistLabels[question.key] || question.label, [])
+  const initializeDrafts = React.useCallback(() => {
+    const nextDrafts = Object.fromEntries(manualQuestions.map((question) => [question.key, {
+      values: savedQuestionValues(question), comment: question.source_status === "MANUAL_ANSWERED" ? question.manager_comment || "" : "", touched: false,
+    }]))
+    generatedQuestionLines.current = manualQuestions.flatMap((question) => {
+      const text = nextDrafts[question.key]?.comment.trim()
+      return text ? [`- ${questionLabel(question)}: ${text}`] : []
+    })
+    setDrafts(nextDrafts)
+  }, [manualQuestions, questionLabel])
   const load = React.useCallback(async () => {
     if (!periodId) return
     try {
@@ -90,18 +105,47 @@ export function RealizationReviewCells({ periodId, userId, userName, result, sco
       if (!response.ok) throw new Error()
       const payload = await response.json() as RealizationManagerReviewResponse
       setData(payload)
-      setRating(payload.realization?.rating ?? (payload.realization ? payload.realization.marker === "POSITIVE" ? "GOOD" : "ACTION_REQUIRED" : ""))
+      setLoadedFor(periodId)
+      setRating(payload.realization?.rating ?? "")
       setComment(payload.realization?.comment ?? "")
       setFailed(false)
     } catch { setFailed(true) }
   }, [apiFetch, endpoint, periodId])
   React.useEffect(() => { queueMicrotask(() => void load()) }, [load, refreshKey])
-  React.useEffect(() => { queueMicrotask(initializeDrafts) }, [initializeDrafts])
-  const canEdit = Boolean(data?.can_edit && data.period_id === periodId && data.user_id === userId && !locked && periodId)
-  const savedRating = data?.realization?.rating ?? (data?.realization ? data.realization.marker === "POSITIVE" ? "GOOD" : "ACTION_REQUIRED" : "")
+  React.useEffect(() => {
+    if (open && Object.keys(draftsRef.current).length > 0) return
+    queueMicrotask(initializeDrafts)
+  }, [initializeDrafts, open])
+  const canEdit = Boolean(data?.can_edit && loadedFor === periodId && data.user_id === userId && !locked && periodId)
+  const savedRating = data?.realization?.rating ?? ""
   const savedComment = data?.realization?.comment ?? ""
   const reviewDirty = rating !== savedRating || comment !== savedComment
+  const questionsDirty = Object.values(drafts).some((draft) => draft.touched)
+  const missingQuestionComments = manualQuestions.some((question) => {
+    const draft = drafts[question.key]
+    return draft?.values.includes("YES") && !draft.comment.trim()
+  })
+  const hasUnsavedChanges = reviewDirty || questionsDirty
   const ratingLabel = savedRating ? RATINGS[savedRating] : failed ? "Gabim ngarkimi" : data ? "Pa vlerësim" : "Duke ngarkuar…"
+
+  const syncQuestionComment = (nextDrafts: Record<string, QuestionDraft>) => {
+    const previousLines = generatedQuestionLines.current
+    const nextLines = manualQuestions.flatMap((question) => {
+      const text = nextDrafts[question.key]?.comment.trim()
+      return text ? [`- ${questionLabel(question)}: ${text}`] : []
+    })
+    setComment((current) => {
+      const remaining = current.split("\n").filter((line) => !previousLines.includes(line.trim()))
+      const base = remaining.join("\n").trim()
+      return [...(base ? [base] : []), ...nextLines].join("\n")
+    })
+    generatedQuestionLines.current = nextLines
+  }
+  const updateQuestionDraft = (key: string, next: QuestionDraft) => {
+    const nextDrafts = { ...drafts, [key]: next }
+    setDrafts(nextDrafts)
+    syncQuestionComment(nextDrafts)
+  }
 
   const openReview = async () => {
     initializeDrafts()
@@ -118,7 +162,15 @@ export function RealizationReviewCells({ periodId, userId, userName, result, sco
   }
 
   const save = async ({ closeDialog = true, saveQuestions = true }: { closeDialog?: boolean; saveQuestions?: boolean } = {}) => {
-    if (!rating || !comment.trim()) return toast.error("Zgjidh vlerësimin dhe shkruaj komentin")
+    if (!hasUnsavedChanges) return
+    const missingQuestion = manualQuestions.find((question) => {
+      const draft = drafts[question.key]
+      return draft?.values.includes("YES") && !draft.comment.trim()
+    })
+    if (missingQuestion) {
+      toast.error(`Shto koment për: ${questionLabel(missingQuestion)}`)
+      return
+    }
     setSaving(true)
     try {
       if (saveQuestions) {
@@ -126,11 +178,12 @@ export function RealizationReviewCells({ periodId, userId, userName, result, sco
           const draft = drafts[question.key] || { values: [], comment: "", touched: false }
           if (scope !== "daily" && !draft.touched) continue
           const value = draft.values.includes("YES")
-          const response = await apiFetch(`/realization/periods/${periodId}/results/${result!.id}/questions/${question.key}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value, clear: false, comment: null, evidence_ids: [] }) })
+          const response = await apiFetch(`/realization/periods/${periodId}/results/${result!.id}/questions/${question.key}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value, clear: false, comment: draft.comment.trim() || null, evidence_ids: [] }) })
           if (!response.ok) throw new Error(`Nuk u ruajt përgjigjja: ${question.label}`)
         }
       }
-      const response = await apiFetch(`${endpoint}/REALIZATION`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rating, marker: ["GOOD", "VERY_GOOD"].includes(rating) ? "POSITIVE" : "NEGATIVE", comment: comment.trim() }) })
+      const marker = rating ? (["GOOD", "VERY_GOOD"].includes(rating) ? "POSITIVE" : "NEGATIVE") : data?.realization?.marker || "POSITIVE"
+      const response = await apiFetch(`${endpoint}/REALIZATION`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rating: rating || null, marker, comment: comment.trim() || null }) })
       if (!response.ok) {
         const payload = await response.json().catch(() => ({})) as { detail?: string }
         throw new Error(typeof payload.detail === "string" ? payload.detail : "Vlerësimi nuk u ruajt")
@@ -138,28 +191,44 @@ export function RealizationReviewCells({ periodId, userId, userName, result, sco
       const payload = await response.json() as RealizationManagerReviewResponse
       setData(payload)
       setComment(payload.realization?.comment ?? comment.trim())
-      if (closeDialog) setOpen(false)
-      onSaved?.()
+      setDrafts((current) => Object.fromEntries(Object.entries(current).map(([key, draft]) => [key, { ...draft, touched: false }])))
+      if (closeDialog) {
+        setOpen(false)
+        onSaved?.()
+      }
       toast.success(saveQuestions ? "Vlerësimi dhe përgjigjet u ruajtën" : "Komenti i përgjegjësit u ruajt")
     } catch (error) { toast.error(error instanceof Error ? error.message : "Vlerësimi nuk u ruajt") }
     finally { setSaving(false) }
   }
 
   return <>
-    <td className="p-1.5" onClick={(event) => event.stopPropagation()}><Button type="button" variant="outline" size="sm" className="h-8 w-full min-w-32 justify-between px-2 text-xs" onClick={() => void openReview()} disabled={failed}>{ratingLabel}<ChevronRight className="h-3.5 w-3.5" /></Button></td>
-    <td className="p-1.5" onClick={(event) => event.stopPropagation()}>
-      <div className="flex min-w-64 items-start gap-1.5">
-        <Textarea aria-label={`Komenti i përgjegjësit për ${userName}`} className="min-h-14 min-w-52 resize-y bg-white text-xs" rows={2} maxLength={4000} value={comment} disabled={!canEdit || saving} onChange={(event) => setComment(event.target.value)} placeholder="Shkruaj komentin e përgjegjësit…" />
-        {canEdit && reviewDirty ? <Button type="button" size="sm" className="h-8 shrink-0 px-2" disabled={saving || !rating || !comment.trim()} title={!rating ? "Zgjidh fillimisht vlerësimin" : "Ruaj komentin"} onClick={() => void save({ closeDialog: false, saveQuestions: false })}>{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Ruaj"}</Button> : null}
+    {compactTable ? <td className="p-1" onClick={(event) => event.stopPropagation()}>
+      <Button type="button" variant="outline" size="sm" className="h-8 w-full min-w-32 justify-between px-2 text-[13px]" onClick={() => void openReview()} disabled={failed}>{ratingLabel}<ChevronRight className="h-3.5 w-3.5" /></Button>
+      <p className={cn("mt-0.5 line-clamp-1 text-[11px]", savedComment ? "text-slate-500" : "text-slate-400")}>{savedComment || "Pa koment"}</p>
+    </td> : <><td className="p-1" onClick={(event) => event.stopPropagation()}><Button type="button" variant="outline" size="sm" className="h-8 w-full min-w-32 justify-between px-2 text-[13px]" onClick={() => void openReview()} disabled={failed}>{ratingLabel}<ChevronRight className="h-3.5 w-3.5" /></Button></td>
+    <td className="p-1" onClick={(event) => event.stopPropagation()}>
+      <div className="flex min-w-64 flex-col items-stretch gap-1">
+        <Textarea aria-label={`Komenti i përgjegjësit për ${userName}`} className="min-h-20 w-full resize-y bg-white px-2 py-1.5 text-[13px] leading-5" rows={3} maxLength={4000} value={comment} disabled={!canEdit || saving} onChange={(event) => setComment(event.target.value)} placeholder="Shkruaj komentin e përgjegjësit…" />
+        {canEdit && reviewDirty ? <Button type="button" size="sm" className="h-8 self-end px-3" disabled={saving} title="Ruaj komentin" onClick={() => void save({ closeDialog: false, saveQuestions: false })}>{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Ruaj komentin"}</Button> : null}
       </div>
-      {comment !== savedComment && !rating ? <p className="mt-1 text-[10px] text-amber-700">Zgjidh vlerësimin para ruajtjes.</p> : data?.realization ? <p className="mt-1 text-[10px] text-slate-400">{data.realization.created_by_name} · {new Date(data.realization.created_at).toLocaleDateString("sq-AL")}</p> : null}
-    </td>
+    </td></>}
     <Dialog open={open} onOpenChange={(next) => { if (!saving) setOpen(next) }}><DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
-      <DialogHeader><DialogTitle>Vlerësimi {scope === "daily" ? "ditor" : "javor"} — {userName}</DialogTitle><DialogDescription>{scope === "daily" ? "Zgjidh vlerësimin dhe pikat që vlejnë sot. Përgjigjet ruhen në ditor dhe mblidhen automatikisht në javë." : "Zgjidh vlerësimin dhe pikat që vlejnë për këtë person. Përgjigjet ditore shfaqen si bazë dhe mund të konfirmohen ose ndryshohen këtu."}</DialogDescription></DialogHeader>
+      <DialogHeader><DialogTitle>Vlerësimi javor — {userName}</DialogTitle><DialogDescription>Një përgjigje për të gjithë javën. Mund ta japësh ose ta ndryshosh nga cilado ditë — tikët, komentet dhe vlerësimi ruhen për javën.</DialogDescription></DialogHeader>
       <section className="rounded-lg border border-slate-200 bg-slate-50 p-3">
         <div className="flex flex-wrap items-center gap-2">
           <p className="mr-auto text-[11px] font-bold uppercase tracking-wide text-slate-600">Vlerësimi i përgjegjësit</p>
           <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              disabled={!canEdit || saving}
+              onClick={() => setRating("")}
+              className={cn(
+                "h-8 rounded-md border px-3 text-xs font-semibold",
+                rating === "" ? "border-slate-400 bg-slate-100 text-slate-700" : "border-slate-200 bg-white text-slate-500"
+              )}
+            >
+              Pa vlerësim
+            </button>
             {(Object.entries(RATINGS) as Array<[RealizationManagerReviewRating, string]>).map(([value, label]) => (
               <button
                 key={value}
@@ -177,14 +246,15 @@ export function RealizationReviewCells({ periodId, userId, userName, result, sco
           </div>
         </div>
         <Textarea
-          className="mt-2 min-h-14 resize-y bg-white text-xs"
-          rows={2}
+          className="mt-2 min-h-32 resize-y bg-white text-xs"
+          rows={5}
           value={comment}
           disabled={!canEdit || saving}
           onChange={(event) => setComment(event.target.value)}
           placeholder="Përmbledhja e vlerësimit të përgjegjësit…"
           maxLength={4000}
         />
+        {canEdit && hasUnsavedChanges ? <div className="mt-2 flex items-center justify-end gap-3"><p className="text-[11px] text-amber-700">{missingQuestionComments ? "Plotëso komentet për përgjigjet Po." : null}</p><Button type="button" size="sm" onClick={() => void save()} disabled={saving || preparing || missingQuestionComments || Boolean(onPrepareResult && !result)}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Ruaj vlerësimin</Button></div> : null}
       </section>
       {automaticQuestions.length ? (
         <details className="overflow-hidden rounded-xl border border-slate-200 bg-white">
@@ -211,7 +281,7 @@ export function RealizationReviewCells({ periodId, userId, userName, result, sco
           <div className="mb-2 flex items-center justify-between gap-3">
             <div>
               <p className="text-sm font-bold text-slate-800">Checklist-a</p>
-              <p className="text-xs text-slate-500">Pa tick = Jo. Vendos tick vetëm kur përgjigjja është Po.</p>
+              <p className="text-xs text-slate-500">Pa tick = Jo. Vendos tick vetëm kur përgjigjja është Po për këtë javë.</p>
             </div>
             <Badge variant="outline">{manualQuestions.length} pyetje</Badge>
           </div>
@@ -223,11 +293,11 @@ export function RealizationReviewCells({ periodId, userId, userName, result, sco
             {manualQuestions.map((question) => (
               <ManualQuestion
                 key={question.key}
-                question={question}
-                label={scope === "daily" ? dailyChecklistLabels[question.key] || question.label : question.label}
+                label={questionLabel(question)}
                 draft={drafts[question.key] || { values: [], comment: "", touched: false }}
                 disabled={!canEdit || saving}
-                onChange={(next) => setDrafts((current) => ({ ...current, [question.key]: next }))}
+                onChange={(next) => updateQuestionDraft(question.key, next)}
+                onSaveComment={() => void save({ closeDialog: false })}
               />
             ))}
           </div>
@@ -238,7 +308,7 @@ export function RealizationReviewCells({ periodId, userId, userName, result, sco
           {preparing ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : onPrepareResult ? <Button type="button" size="sm" variant="outline" onClick={() => void openReview()}>Provo përsëri</Button> : null}
         </div>
       )}
-      <DialogFooter><Button variant="outline" onClick={() => setOpen(false)} disabled={saving || preparing}>Mbyll</Button>{canEdit ? <Button onClick={() => void save()} disabled={saving || preparing || Boolean(onPrepareResult && !result) || !rating || !comment.trim()}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Ruaj vlerësimin</Button> : null}</DialogFooter>
+      <DialogFooter><Button variant="outline" onClick={() => setOpen(false)} disabled={saving || preparing}>Mbyll</Button></DialogFooter>
     </DialogContent></Dialog>
   </>
 }
