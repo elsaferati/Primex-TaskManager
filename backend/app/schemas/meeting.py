@@ -54,6 +54,7 @@ class MeetingCreate(BaseModel):
     create_internal_meeting: bool | None = None
     internal_starts_at: datetime | None = None
     paired_external_meeting_id: uuid.UUID | None = None
+    allow_one_h_conflict: bool = False
 
 
 class MeetingUpdate(BaseModel):

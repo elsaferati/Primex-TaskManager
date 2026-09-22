@@ -5,6 +5,7 @@ import unittest
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 
@@ -33,6 +34,7 @@ class _FakeDb:
         self.added: list[object] = []
         self.commit_count = 0
         self.valid_user_ids = valid_user_ids or []
+        self.pre_creation_execute_count = 0
 
     def add(self, value):
         self.added.append(value)
@@ -61,7 +63,10 @@ class _FakeDb:
     async def execute(self, _statement):
         meetings = [value for value in self.added if isinstance(value, Meeting)]
         if not meetings:
-            return _ListResult([SimpleNamespace(id=user_id) for user_id in self.valid_user_ids])
+            self.pre_creation_execute_count += 1
+            if self.pre_creation_execute_count == 1:
+                return _ListResult([SimpleNamespace(id=user_id) for user_id in self.valid_user_ids])
+            return _ListResult([])
         primary_meeting = meetings[0]
         participants = [
             value
@@ -86,8 +91,8 @@ class TestMeetingCreation(unittest.IsolatedAsyncioTestCase):
         department_id = uuid.uuid4()
         participant_id = uuid.uuid4()
         creator_id = uuid.uuid4()
-        external_starts_at = datetime(2026, 8, 25, 14, 0, tzinfo=timezone.utc)
-        internal_starts_at = datetime(2026, 8, 25, 12, 30, tzinfo=timezone.utc)
+        external_starts_at = datetime(2026, 8, 25, 13, 0, tzinfo=timezone.utc)
+        internal_starts_at = datetime(2026, 8, 25, 11, 30, tzinfo=timezone.utc)
         payload = MeetingCreate(
             title="Customer review",
             platform="Teams",
@@ -119,12 +124,37 @@ class TestMeetingCreation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.paired_internal_meeting.starts_at, internal_starts_at)
         self.assertEqual(result.paired_internal_meeting.participant_ids, [participant_id])
 
+    async def test_global_one_h_conflict_requires_explicit_override(self) -> None:
+        department_id = uuid.uuid4()
+        participant_id = uuid.uuid4()
+        local_start = datetime(2026, 9, 21, 10, 0, tzinfo=ZoneInfo("Europe/Tirane"))
+        user = SimpleNamespace(id=uuid.uuid4(), role=UserRole.ADMIN, department_id=None)
+        payload = MeetingCreate(
+            title="Team sync",
+            starts_at=local_start,
+            meeting_type="internal",
+            department_id=department_id,
+            participant_ids=[participant_id],
+        )
+        db = _FakeDb(valid_user_ids=[participant_id])
+
+        with self.assertRaises(HTTPException) as raised:
+            await create_meeting(payload=payload, db=db, user=user)
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.detail["code"], "one_h_conflict")
+
+        override_payload = payload.model_copy(update={"allow_one_h_conflict": True})
+        override_db = _FakeDb(valid_user_ids=[participant_id])
+        result = await create_meeting(payload=override_payload, db=override_db, user=user)
+        self.assertEqual(result.title, "Team sync")
+        self.assertEqual(override_db.commit_count, 1)
+
     async def test_internal_meeting_does_not_create_another_internal_meeting(self) -> None:
         department_id = uuid.uuid4()
         participant_id = uuid.uuid4()
         payload = MeetingCreate(
             title="Team sync",
-            starts_at=datetime(2026, 8, 25, 12, 30, tzinfo=timezone.utc),
+            starts_at=datetime(2026, 8, 25, 13, 0, tzinfo=timezone.utc),
             internal_starts_at=datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc),
             meeting_type="internal",
             department_id=department_id,
@@ -143,7 +173,7 @@ class TestMeetingCreation(unittest.IsolatedAsyncioTestCase):
     async def test_external_meeting_can_skip_internal_meeting(self) -> None:
         department_id = uuid.uuid4()
         participant_id = uuid.uuid4()
-        external_starts_at = datetime(2026, 8, 25, 14, 0, tzinfo=timezone.utc)
+        external_starts_at = datetime(2026, 8, 25, 13, 0, tzinfo=timezone.utc)
         payload = MeetingCreate(
             title="Customer review",
             starts_at=external_starts_at,

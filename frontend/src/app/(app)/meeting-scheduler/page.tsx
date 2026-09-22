@@ -54,7 +54,9 @@ type Validation = {
     title: string;
     starts_at: string;
     ends_at: string;
+    participant_ids?: string[];
   }>;
+  suggested_slot?: { starts_at: string; ends_at: string } | null;
 };
 type CalendarItem = {
   id: string;
@@ -102,6 +104,13 @@ const addDays = (value: Date, days: number) => {
 };
 const localDateTime = (date: string, time: string) =>
   new Date(`${date}T${time}:00`);
+const localDateTimeParts = (value: string) => {
+  const date = new Date(value);
+  return {
+    date: isoDate(date),
+    time: `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`,
+  };
+};
 const userLabel = (user: UserLookup) =>
   user.full_name || user.username || user.email;
 const validationFailure = (message: string): Validation => ({
@@ -224,6 +233,7 @@ export default function MeetingSchedulerPage() {
   const [loading, setLoading] = React.useState(true);
   const [validating, setValidating] = React.useState(false);
   const [validation, setValidation] = React.useState<Validation | null>(null);
+  const validationRequestRef = React.useRef(0);
 
   const [departmentId, setDepartmentId] = React.useState(
     user?.department_id || "",
@@ -352,7 +362,7 @@ export default function MeetingSchedulerPage() {
     standardId,
   ]);
 
-  const validate = async () => {
+  const validate = React.useCallback(async (notify = true) => {
     const missingFields = [
       !payload.department_id ? "departamentin" : "",
       !payload.participant_ids.length ? "të paktën një pjesëmarrës" : "",
@@ -360,9 +370,10 @@ export default function MeetingSchedulerPage() {
     if (missingFields.length) {
       const message = `Plotëso ${missingFields.join(", ")} para validimit.`;
       setValidation(validationFailure(message));
-      toast.error("Takimi nuk mund të validohet.", { description: message });
+      if (notify) toast.error("Takimi nuk mund të validohet.", { description: message });
       return null;
     }
+    const requestId = ++validationRequestRef.current;
     setValidating(true);
     try {
       const response = await apiFetch("/meeting-scheduler/validate", {
@@ -375,25 +386,41 @@ export default function MeetingSchedulerPage() {
           response,
           "Validimi dështoi për shkak të një gabimi të panjohur.",
         );
-        setValidation(validationFailure(message));
-        toast.error("Takimi nuk mund të validohet.", { description: message });
+        if (requestId === validationRequestRef.current) setValidation(validationFailure(message));
+        if (notify) toast.error("Takimi nuk mund të validohet.", { description: message });
         return null;
       }
       const result = (await response.json()) as Validation;
+      if (requestId !== validationRequestRef.current) return null;
       setValidation(result);
-      if (!result.can_create) {
+      if (notify && !result.can_create) {
         toast.error("Ka konflikt në këtë orar.", {
           description:
             result.errors.join(" ") ||
             "Kontrollo konfliktet e shfaqura te rezultati i validimit.",
         });
-      } else {
+      } else if (notify) {
         toast.success("Orari është i lirë për këtë takim.");
       }
       return result;
     } finally {
-      setValidating(false);
+      if (requestId === validationRequestRef.current) setValidating(false);
     }
+  }, [apiFetch, payload]);
+
+  React.useEffect(() => {
+    if (!payload.department_id || !payload.participant_ids.length) return;
+    const timeout = window.setTimeout(() => void validate(false), 450);
+    return () => window.clearTimeout(timeout);
+  }, [payload, validate]);
+
+  const oneHConflicts = validation?.conflicts.filter((conflict) => conflict.source === "one_h") || [];
+  const applySuggestedSlot = () => {
+    if (!validation?.suggested_slot) return;
+    const next = localDateTimeParts(validation.suggested_slot.starts_at);
+    setSelectedDate(next.date);
+    setSelectedTime(next.time);
+    setValidation(null);
   };
 
   const createStandard = async () => {
@@ -713,6 +740,7 @@ export default function MeetingSchedulerPage() {
                   type="time"
                   step={900}
                   value={selectedTime}
+                  className={oneHConflicts.length ? "border-red-500 bg-red-50 text-red-800 focus-visible:ring-red-500" : undefined}
                   onChange={(event) => {
                     setSelectedTime(event.target.value);
                     setValidation(null);
@@ -788,19 +816,30 @@ export default function MeetingSchedulerPage() {
                     • {message}
                   </div>
                 ))}
-                {uniqueConflicts(validation.conflicts).map((conflict, index) => (
+                {uniqueConflicts(validation.conflicts).filter((conflict) => conflict.source !== "one_h").map((conflict, index) => (
                   <div
                     key={`${conflict.source}-${conflict.starts_at}-${conflict.ends_at}-${index}`}
                     className="mt-1 text-xs"
                   >
-                    {conflict.source}: {conflict.title}
+                    {conflict.source === "one_h" ? "1H" : conflict.source}: {conflict.title}
+                    {conflict.participant_ids?.length
+                      ? ` — ${conflict.participant_ids.map((id) => {
+                          const participant = users.find((candidate) => candidate.id === id);
+                          return participant ? userLabel(participant) : id;
+                        }).join(", ")}`
+                      : ""}
                   </div>
                 ))}
+                {validation.suggested_slot ? (
+                  <Button className="mt-3" size="sm" variant="outline" onClick={applySuggestedSlot}>
+                    Përdor orarin e lirë {localDateTimeParts(validation.suggested_slot.starts_at).time}
+                  </Button>
+                ) : null}
               </div>
             )}
             <div className="flex justify-end">
               <Button
-                onClick={() => void validate()}
+                onClick={() => void validate(true)}
                 disabled={validating}
               >
                 {validating ? "Duke kontrolluar…" : "Kontrollo orarin"}

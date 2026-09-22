@@ -64,11 +64,17 @@ class MeetingScheduleConflict(BaseModel):
     participant_ids: list[uuid.UUID] = []
 
 
+class MeetingScheduleSuggestion(BaseModel):
+    starts_at: datetime
+    ends_at: datetime
+
+
 class MeetingScheduleValidationOut(BaseModel):
     can_create: bool
     errors: list[str] = []
     warnings: list[str] = []
     conflicts: list[MeetingScheduleConflict] = []
+    suggested_slot: MeetingScheduleSuggestion | None = None
     checked_at: datetime
 
 

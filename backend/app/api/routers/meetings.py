@@ -31,6 +31,7 @@ from app.services.meeting_system_tasks import (
     reconcile_external_meeting_system_tasks_for_meeting,
     reconcile_pim_image_test_task_for_meeting,
 )
+from app.services.meeting_scheduler import one_h_schedule_conflicts
 from app.services.microsoft_calendar_sync import (
     get_shared_calendar_token,
     is_common_view_visible_meeting,
@@ -313,6 +314,36 @@ async def create_meeting(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid user IDs: {list(invalid_ids)}"
+        )
+
+    one_h_conflicts = []
+    if payload.starts_at is not None:
+        default_duration = timedelta(minutes=30 if requested_meeting_type == "internal" else 60)
+        primary_end = payload.ends_at or payload.starts_at + default_duration
+        primary_conflicts, _ = await one_h_schedule_conflicts(
+            db,
+            participant_ids=set(participant_ids),
+            starts_at=payload.starts_at.astimezone(timezone.utc),
+            ends_at=primary_end.astimezone(timezone.utc),
+        )
+        one_h_conflicts.extend(primary_conflicts)
+    if requested_meeting_type == "external" and should_create_internal_meeting and payload.internal_starts_at is not None:
+        internal_start = payload.internal_starts_at.astimezone(timezone.utc)
+        internal_conflicts, _ = await one_h_schedule_conflicts(
+            db,
+            participant_ids=set(participant_ids),
+            starts_at=internal_start,
+            ends_at=internal_start + timedelta(minutes=30),
+        )
+        one_h_conflicts.extend(internal_conflicts)
+    if one_h_conflicts and not payload.allow_one_h_conflict:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "one_h_conflict",
+                "message": "Ky orar përputhet me 1H.",
+                "conflicts": [conflict.model_dump(mode="json") for conflict in one_h_conflicts],
+            },
         )
 
     meeting = Meeting(
