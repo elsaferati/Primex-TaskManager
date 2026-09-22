@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.meeting import Meeting, MeetingParticipant
@@ -70,6 +70,64 @@ async def replace_manual_participants(
             )
         )
     return unique_ids
+
+
+async def add_participants_to_linked_internal_meetings(
+    db: AsyncSession,
+    *,
+    external_meeting_id: uuid.UUID,
+    participant_ids: list[uuid.UUID],
+    actor_user_id: uuid.UUID,
+) -> list[uuid.UUID]:
+    """Add newly assigned TAK EXT users to its automatic TAK INT meetings.
+
+    This is deliberately additive: participant edits made directly on a linked
+    TAK INT remain intact, and removing a user from TAK EXT does not remove that
+    user from TAK INT.
+    """
+    unique_ids = list(dict.fromkeys(participant_ids))
+    if not unique_ids:
+        return []
+
+    linked_meeting_ids = list(
+        (
+            await db.execute(
+                select(Meeting.id).where(
+                    Meeting.meeting_type == "internal",
+                    or_(
+                        Meeting.paired_external_meeting_id == external_meeting_id,
+                        Meeting.pre_external_meeting_id == external_meeting_id,
+                    ),
+                )
+            )
+        ).scalars().all()
+    )
+    if not linked_meeting_ids:
+        return []
+
+    existing_rows = (
+        await db.execute(
+            select(MeetingParticipant.meeting_id, MeetingParticipant.user_id).where(
+                MeetingParticipant.meeting_id.in_(linked_meeting_ids),
+                MeetingParticipant.user_id.in_(unique_ids),
+                MeetingParticipant.assignment_source == MANUAL_ASSIGNMENT_SOURCE,
+            )
+        )
+    ).all()
+    existing = set(existing_rows)
+    for linked_meeting_id in linked_meeting_ids:
+        for participant_id in unique_ids:
+            if (linked_meeting_id, participant_id) in existing:
+                continue
+            db.add(
+                MeetingParticipant(
+                    meeting_id=linked_meeting_id,
+                    user_id=participant_id,
+                    assignment_source=MANUAL_ASSIGNMENT_SOURCE,
+                    assigned_by_user_id=actor_user_id,
+                )
+            )
+    return linked_meeting_ids
 
 
 def meeting_to_out(

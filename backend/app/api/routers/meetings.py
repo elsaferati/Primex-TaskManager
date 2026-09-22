@@ -41,6 +41,7 @@ from app.services.meeting_system_tasks import (
 from app.services.meeting_scheduler import one_h_schedule_conflicts
 from app.services.audit import add_audit_log
 from app.services.meeting_participants import (
+    add_participants_to_linked_internal_meetings,
     manual_participant_ids,
     meeting_to_out,
     replace_manual_participants,
@@ -285,6 +286,11 @@ async def create_meeting(
 
     # Every meeting must belong to at least one person's view.
     participant_ids = payload.participant_ids or []
+    if paired_external is not None:
+        external_participant_ids = (
+            await manual_participant_ids(db, [paired_external.id])
+        ).get(paired_external.id, [])
+        participant_ids = list(dict.fromkeys([*participant_ids, *external_participant_ids]))
     if not participant_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -431,6 +437,18 @@ async def update_meeting_reminder_settings(
         participant_ids=payload.participant_ids,
         actor_user_id=user.id,
     )
+    before_id_set = set(before_ids)
+    added_participant_ids = [
+        participant_id for participant_id in participant_ids if participant_id not in before_id_set
+    ]
+    linked_internal_ids: list[uuid.UUID] = []
+    if meeting.meeting_type == "external" and added_participant_ids:
+        linked_internal_ids = await add_participants_to_linked_internal_meetings(
+            db,
+            external_meeting_id=meeting.id,
+            participant_ids=added_participant_ids,
+            actor_user_id=user.id,
+        )
     meeting.reminder_minutes_before = payload.reminder_minutes_before
     add_audit_log(
         db=db,
@@ -442,6 +460,9 @@ async def update_meeting_reminder_settings(
         after={
             "participant_ids": [str(value) for value in participant_ids],
             "reminder_minutes_before": payload.reminder_minutes_before,
+            "participants_added_to_linked_internal_meeting_ids": [
+                str(value) for value in linked_internal_ids
+            ],
         },
     )
     await db.commit()
@@ -542,12 +563,29 @@ async def update_meeting(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Select at least one person for the meeting",
             )
-        await replace_manual_participants(
+        before_participant_ids = (
+            await manual_participant_ids(db, [meeting.id])
+        ).get(meeting.id, [])
+        updated_participant_ids = await replace_manual_participants(
             db,
             meeting_id=meeting.id,
             participant_ids=participant_ids,
             actor_user_id=user.id,
         )
+        if meeting.meeting_type == "external":
+            before_participant_id_set = set(before_participant_ids)
+            added_participant_ids = [
+                participant_id
+                for participant_id in updated_participant_ids
+                if participant_id not in before_participant_id_set
+            ]
+            if added_participant_ids:
+                await add_participants_to_linked_internal_meetings(
+                    db,
+                    external_meeting_id=meeting.id,
+                    participant_ids=added_participant_ids,
+                    actor_user_id=user.id,
+                )
 
     await db.flush()
     await reconcile_external_meeting_system_tasks_for_meeting(db, meeting)
