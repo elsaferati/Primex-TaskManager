@@ -150,7 +150,7 @@ PERSONAL_ROW_LABEL_STYLE = (
     "overflow-wrap:normal;word-break:normal"
 )
 PERSONAL_TIME_STYLE = "font-size:13px;line-height:1.2;font-weight:800;white-space:nowrap"
-TASK_TITLE_TEXT_STYLE = "font-size:13px"
+TASK_TITLE_TEXT_STYLE = "font-size:17px"
 DEADLINE_COLOR = "#DC2626"
 EIGHT_AM_BORDER_COLOR = "#DC2626"
 NON_ROUTINE_MEETING_BORDER_COLOR = "#2563EB"

@@ -5429,7 +5429,10 @@ export default function CommonViewPage() {
                 const markerComment = !isMeetingTable && (item as PrintTask).oneHMarkerComment
                   ? `<div class="print-marker-comment"><strong>KOMENT SIMBOLI:</strong> ${escapePrintHtml((item as PrintTask).oneHMarkerComment || "")}</div>`
                   : ""
-                const content = `${taskBadges}${chunkIndex * 6 + cellIndex + 1}. ${isMeetingTable ? escapePrintHtml(title) : commonPrintTitleHtml(title)}${markerComment}`
+                const taskNumber = chunkIndex * 6 + cellIndex + 1
+                const content = isMeetingTable
+                  ? `${taskNumber}. ${escapePrintHtml(title)}`
+                  : `${taskBadges}<span class="print-task-title">${taskNumber}. ${commonPrintTitleHtml(title)}</span>${markerComment}`
                 return `<td${isMeetingTable ? "" : ' class="print-task-cell"'}><div>${content}</div>${isMeetingTable ? "" : printTaskDatesHtml(item as PrintTask)}</td>`
               }).join("")
               const rowHeaders =
@@ -5476,6 +5479,7 @@ export default function CommonViewPage() {
   tbody th:nth-child(2) { padding-left: 2px; padding-right: 2px; }
   .print-slot-subtext { display: block; white-space: pre; overflow-wrap: normal !important; word-break: normal !important; font-size: 5.2px; font-weight: 400 !important; line-height: 1.05; }
   .print-task-cell { position:relative; padding-bottom:27px; }
+  .print-task-title { font-size:17px; line-height:1.25; }
   .print-task-dates { position:absolute; left:5px; right:5px; bottom:4px; display:flex; align-items:flex-end; justify-content:space-between; gap:4px; white-space:nowrap; }
   .print-task-date { display:inline-flex; box-sizing:border-box; height:18px; align-items:center; border:1px solid #93c5fd; border-radius:3px; background:#eff6ff; color:#1d4ed8; padding:1px 4px; font-weight:800; line-height:1; }
   .print-task-date.due { border:3px solid #b91c1c; padding:0 2px; }

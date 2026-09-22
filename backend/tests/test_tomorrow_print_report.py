@@ -300,7 +300,7 @@ def test_task_title_text_is_slightly_larger_without_changing_cell_layout() -> No
     )
 
     assert (
-        '<span data-task-title-text="true" style="font-size:13px">'
+        '<span data-task-title-text="true" style="font-size:17px">'
         '1. A task</span>'
     ) in report_html
     assert '<col width="2.5%"><col width="10.5%"><col width="14.5%" span="6">' in report_html
