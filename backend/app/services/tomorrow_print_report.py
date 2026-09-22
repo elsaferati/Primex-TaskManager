@@ -64,8 +64,9 @@ ONE_H_BOARD_PRIMARY_CHECKLIST = (
     ("A arrihet RLZ javor?", ""),
 )
 ONE_H_BOARD_FOLLOW_UP_CHECKLIST = (
-    ("Done? / Strikes?", ""),
     ("Notes te reja? Data? AM/PM? Kujt", ""),
+    ("Done? / Strikes?", ""),
+    ("BZ Det nga Stafi per GA", "Komunikimi GA teams Det nga Stafi/ KA email"),
     ("BZ Notes", "Secili i lexon vet para BZ me GA"),
 )
 ONE_H_BOARD_CHECKLIST = ONE_H_BOARD_PRIMARY_CHECKLIST + ONE_H_BOARD_FOLLOW_UP_CHECKLIST
@@ -73,7 +74,7 @@ ONE_H_STAFF_CHECKLIST = (
     ("Hap doc dhe det", ""),
     ("Share screen side by side DET/REZULTATIN", ""),
     ("Sqaro slotin paraprak pastaj aktual", ""),
-    ("BZ Det nga Stafi per GA", "Komunikimi GA temas Det nga Stafi/ KA email"),
+    ("BZ Det nga Stafi per GA", "Komunikimi GA teams Det nga Stafi/ KA email"),
 )
 THURSDAY_ONE_H_BOARD_CHECKLIST = (("Planifikimi javor short", ""),)
 THURSDAY_ONE_H_STAFF_CHECKLIST = (
@@ -85,6 +86,26 @@ FRIDAY_ONE_H_STAFF_CHECKLIST = (
     ("Barazimi i realizimit javor - this week", ""),
     ("Emails per missing info, per me vazhdu javen tjeter", ""),
 )
+THURSDAY_ONE_H_QUESTION_REPORT_CODES = {
+    "Emails per missing info, per me vazhdu javen tjeter": "M1",
+    "Shikohen det qe mbesin vetem per neser (te premten)": "M3",
+    "Planifikimi javor short": "M1",
+}
+FRIDAY_ONE_H_QUESTION_REPORT_CODES = {
+    "Barazimi i planifikimit javor - next week": "M1",
+    "Barazimi i realizimit javor - this week": "M1",
+    "Emails per missing info, per me vazhdu javen tjeter": "M1",
+}
+
+
+def _checklist_question_number(report_day: date | None, index: int, question: str) -> str:
+    report_codes = (
+        THURSDAY_ONE_H_QUESTION_REPORT_CODES if report_day is not None and report_day.weekday() == 3
+        else FRIDAY_ONE_H_QUESTION_REPORT_CODES if report_day is not None and report_day.weekday() == 4
+        else {}
+    )
+    report_code = report_codes.get(question)
+    return f"{report_code} - {index}." if report_code else f"{index}."
 
 
 def _one_h_checklists_for_day(
@@ -1074,7 +1095,7 @@ def _one_h_checklists_html(report_day: date | None = None) -> str:
         if extra:
             return ' <span style="font-weight:900;"> / </span> '.join(
                 '<span data-extra-checklist-question="true" style="display:inline;">'
-                f'<strong>{index}. {html.escape(question)}</strong>'
+                f'<strong>{html.escape(_checklist_question_number(report_day, index, question))} {html.escape(question)}</strong>'
                 + (f' <span style="color:#dc2626;font-weight:400;">({html.escape(description)})</span>' if description else "")
                 + '</span>'
                 for index, (question, description) in enumerate(questions, 1)
@@ -1778,7 +1799,7 @@ def _excel_table_attachment(
                     row_number,
                     start_column,
                     "\n".join(
-                        f"{index}. {question}" + (f" ({description})" if description else "")
+                        f"{_checklist_question_number(checklist_date, index, question)} {question}" + (f" ({description})" if description else "")
                         for index, (question, description) in enumerate(questions, 1)
                     ),
                 )
@@ -1816,7 +1837,7 @@ def _excel_table_attachment(
                 row_number + 1,
                 start_column,
                 " / ".join(
-                    f"{index}. {question}" + (f" ({description})" if description else "")
+                    f"{_checklist_question_number(checklist_date, index, question)} {question}" + (f" ({description})" if description else "")
                     for index, (question, description) in enumerate(questions, 1)
                 ),
             )
@@ -2568,7 +2589,7 @@ def _core_png_table_attachment(
     staff_extra = staff_questions[len(ONE_H_STAFF_CHECKLIST):]
     board_extra = board_questions[len(ONE_H_BOARD_CHECKLIST):]
     extra_lines = [
-        f"{index}. {question}" + (f" ({description})" if description else "")
+        f"{_checklist_question_number(checklist_date, index, question)} {question}" + (f" ({description})" if description else "")
         for questions in (staff_extra, board_extra)
         for index, (question, description) in enumerate(questions, 1)
     ]
@@ -3190,9 +3211,12 @@ async def _build_print_report(
         + "</div>"
     )
 
-    def plain_checklist_lines(questions: tuple[tuple[str, str], ...]) -> list[str]:
+    def plain_checklist_lines(
+        questions: tuple[tuple[str, str], ...], *, day_specific: bool = False
+    ) -> list[str]:
         return [
-            f"{index}. {question}" + (f" ({description})" if description else "")
+            f"{_checklist_question_number(checklist_date if day_specific else None, index, question)} {question}"
+            + (f" ({description})" if description else "")
             for index, (question, description) in enumerate(questions, 1)
         ]
 
@@ -3205,8 +3229,8 @@ async def _build_print_report(
         *(
             [
                 day_label,
-                *plain_checklist_lines(staff_extra),
-                *plain_checklist_lines(board_extra),
+                *plain_checklist_lines(staff_extra, day_specific=True),
+                *plain_checklist_lines(board_extra, day_specific=True),
                 "",
             ]
             if day_label else []

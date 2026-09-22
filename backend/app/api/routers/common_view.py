@@ -37,6 +37,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
 from app.services.one_h_slots import effective_slot_date
+from app.services.meeting_occurrence import meeting_display_dates, meeting_occurs_on_date
 from app.services.microsoft_calendar_sync import is_common_view_visible_meeting
 from app.services.system_task_schedule import matches_template_date
 from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
@@ -70,7 +71,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "18"
+COMMON_VIEW_CACHE_VERSION = "19"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -292,21 +293,11 @@ def _get_task_dates(task: Task, single_day_only: bool, range_end: date | None = 
 
 
 def _meeting_occurs_on_date(meeting: Meeting, day: date) -> bool:
-    if meeting.recurrence_type == "weekly":
-        if not meeting.recurrence_days_of_week:
-            return False
-        return day.weekday() in meeting.recurrence_days_of_week
-    if meeting.recurrence_type == "monthly":
-        if not meeting.recurrence_days_of_month:
-            return False
-        return day.day in meeting.recurrence_days_of_month
-    if meeting.recurrence_type == "yearly":
-        month = meeting.starts_at.month if meeting.starts_at else None
-        day_value = meeting.recurrence_days_of_month[0] if meeting.recurrence_days_of_month else None
-        if month is None or day_value is None:
-            return False
-        return day.month == month and day.day == day_value
-    return False
+    return meeting_occurs_on_date(meeting, day, local_timezone=_tirane_tz())
+
+
+def _meeting_display_dates(meeting: Meeting) -> list[date]:
+    return meeting_display_dates(meeting, local_timezone=_tirane_tz())
 
 
 def _max_timestamp_scalar(column, filters: list[Any] | None = None):
@@ -1291,35 +1282,31 @@ async def get_common_view(
                             }
                         )
             else:
-                date_source = meeting.starts_at or meeting.created_at
-                if date_source is None:
-                    continue
-                local_date_source = _as_tirane_dt(date_source) or date_source
-                day = local_date_source.date()
-                if not (week_start_date <= day <= week_end):
-                    continue
                 target = "external" if meeting.meeting_type == "external" else "internal"
-                items[target].append(
-                    {
-                        "id": f"meeting:{meeting.id}:{day.isoformat()}",
-                        "title": meeting.title or ("External meeting" if target == "external" else "Internal meeting"),
-                        "date": day.isoformat(),
-                        "time": _format_time(meeting.starts_at),
-                        "platform": meeting.platform or "TBD",
-                        "owner": owner_name,
-                        "assignees": [
-                            name for name, _ in participant_users_by_meeting.get(meeting.id, [])
-                        ],
-                        "assigneeUserIds": [
-                            user_id for _, user_id in participant_users_by_meeting.get(meeting.id, [])
-                        ],
-                        "department": department_name,
-                        "recurrence_type": meeting.recurrence_type or "none",
-                        "calendarImported": is_calendar_meeting,
-                        "calendarCategories": meeting.calendar_categories or [],
-                        **link_payload,
-                    }
-                )
+                for day in _meeting_display_dates(meeting):
+                    if not (week_start_date <= day <= week_end):
+                        continue
+                    items[target].append(
+                        {
+                            "id": f"meeting:{meeting.id}:{day.isoformat()}",
+                            "title": meeting.title or ("External meeting" if target == "external" else "Internal meeting"),
+                            "date": day.isoformat(),
+                            "time": _format_time(meeting.starts_at),
+                            "platform": meeting.platform or "TBD",
+                            "owner": owner_name,
+                            "assignees": [
+                                name for name, _ in participant_users_by_meeting.get(meeting.id, [])
+                            ],
+                            "assigneeUserIds": [
+                                user_id for _, user_id in participant_users_by_meeting.get(meeting.id, [])
+                            ],
+                            "department": department_name,
+                            "recurrence_type": meeting.recurrence_type or "none",
+                            "calendarImported": is_calendar_meeting,
+                            "calendarCategories": meeting.calendar_categories or [],
+                            **link_payload,
+                        }
+                    )
 
         included.append("meetings")
         _time_end("meetings", ts)

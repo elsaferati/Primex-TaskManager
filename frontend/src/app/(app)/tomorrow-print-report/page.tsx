@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { RefreshCw, Save, Send, Settings } from "lucide-react"
+import { Minus, Plus, RefreshCw, Save, Send, Settings } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -39,6 +39,7 @@ type Preview = {
 }
 type TaskMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
 type TaskMarkerFilter = "all" | "with" | "none" | TaskMarker
+type TaskDueDateFilter = "all" | "today"
 
 const taskMarkerOptions: Array<{ value: TaskMarker; label: string }> = [
   { value: "QUESTION", label: "?" },
@@ -96,8 +97,10 @@ export function PrintReportPage({
   const [settings, setSettings] = React.useState<SettingsState | null>(null)
   const [recipientInputs, setRecipientInputs] = React.useState({ to: "", cc: "", bcc: "" })
   const [preview, setPreview] = React.useState<Preview | null>(null)
+  const [automaticEmailExpanded, setAutomaticEmailExpanded] = React.useState(false)
   const [reportIntroExpanded, setReportIntroExpanded] = React.useState(false)
   const [markerFilter, setMarkerFilter] = React.useState<TaskMarkerFilter>("all")
+  const [dueDateFilter, setDueDateFilter] = React.useState<TaskDueDateFilter>("all")
   const [history, setHistory] = React.useState<Delivery[]>([])
   const [loading, setLoading] = React.useState(true)
   const [snapshotLoading, setSnapshotLoading] = React.useState(true)
@@ -270,12 +273,15 @@ export function PrintReportPage({
       taskCells.forEach((cell, index) => {
         const marker = cell.dataset.taskMarker || ""
         const isTaskCard = Boolean(cell.dataset.taskId)
-        const matches = markerFilter === "all" || (
+        const matchesMarker = markerFilter === "all" || (
           isTaskCard && (
             markerFilter === "with" ? Boolean(marker) :
             markerFilter === "none" ? !marker : marker === markerFilter
           )
         )
+        const dueToday = Boolean(dateCells[index]?.querySelector('[data-task-badge="due-date"][data-due-today="true"]'))
+        const matchesDueDate = dueDateFilter === "all" || (isTaskCard && dueToday)
+        const matches = matchesMarker && matchesDueDate
         cell.style.display = matches ? "" : "none"
         cell.dataset.taskMarkerFilterHidden = matches ? "false" : "true"
         if (dateCells[index]) dateCells[index].style.display = matches ? "" : "none"
@@ -286,7 +292,7 @@ export function PrintReportPage({
         if (content) content.style.visibility = ""
       })
     })
-  }, [markerFilter])
+  }, [dueDateFilter, markerFilter])
 
   const setupPreviewMarkerControls = React.useCallback(() => {
     const document = previewFrameRef.current?.contentDocument
@@ -535,6 +541,21 @@ export function PrintReportPage({
     </label>
   )
 
+  const dueDateFilterControl = (
+    <label className="flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-3 text-sm font-medium text-red-900">
+      Due date
+      <select
+        className="h-8 bg-transparent text-sm font-black text-red-900 outline-none"
+        value={dueDateFilter}
+        onChange={(event) => setDueDateFilter(event.target.value as TaskDueDateFilter)}
+        aria-label="Filter tasks by due date"
+      >
+        <option value="all">All</option>
+        <option value="today">SOT</option>
+      </select>
+    </label>
+  )
+
   const generatedPreview = preview ? (
     <div className="space-y-3 rounded-lg border bg-white p-4">
       <div className="flex items-center gap-3">
@@ -576,7 +597,7 @@ export function PrintReportPage({
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-center gap-2">
           {modeControl}
-          {preview ? markerFilterControl : null}
+          {preview ? <>{dueDateFilterControl}{markerFilterControl}</> : null}
           <Button
             variant="outline"
             onClick={() => void generateReport()}
@@ -593,13 +614,13 @@ export function PrintReportPage({
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="sticky top-0 z-40 -mx-4 flex flex-wrap items-start justify-between gap-4 border-b bg-background/95 px-4 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/90 print:static print:mx-0 print:border-0 print:bg-transparent print:p-0 print:shadow-none">
         <div>
           <h1 className="text-2xl font-semibold">{reportName}</h1>
           <p className="text-sm text-muted-foreground">{today ? "Today's Common View tasks and meetings, sent at 09:00 Monday-Friday." : "Next-working-day tasks and meetings, sent as an HTML email."}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {preview ? markerFilterControl : null}
+          {preview ? <>{dueDateFilterControl}{markerFilterControl}</> : null}
           <Button variant="outline" onClick={() => void generateReport()} disabled={!user || generatingAction !== null || snapshotLoading}><RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} /> {generatingAction === "generate" ? "Generating..." : preview ? "Regenerate" : "Generate"}</Button>
           {canManage ? <Button onClick={() => void sendNow()} disabled={sending}><Send /> {sending ? "Sending..." : "Send now"}</Button> : null}
         </div>
@@ -608,9 +629,23 @@ export function PrintReportPage({
       {canManage && settings ? (
         <div className="space-y-4 rounded-lg border bg-white p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2 font-semibold"><Settings size={16} /> Automatic email</div>
-              <div className="text-sm text-muted-foreground">{today ? "Each delivery contains that day's task rows, TAK INT, and TAK EXT meetings." : "Friday’s delivery contains Monday’s report."}</div>
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 shrink-0 p-0"
+                aria-expanded={automaticEmailExpanded}
+                aria-label={automaticEmailExpanded ? "Close automatic email settings" : "Open automatic email settings"}
+                title={automaticEmailExpanded ? "Close settings" : "Open settings"}
+                onClick={() => setAutomaticEmailExpanded((expanded) => !expanded)}
+              >
+                {automaticEmailExpanded ? <Minus /> : <Plus />}
+              </Button>
+              <div>
+                <div className="flex items-center gap-2 font-semibold"><Settings size={16} /> Automatic email</div>
+                <div className="text-sm text-muted-foreground">{today ? "Each delivery contains that day's task rows, TAK INT, and TAK EXT meetings." : "Friday’s delivery contains Monday’s report."}</div>
+              </div>
             </div>
             <button
               type="button"
@@ -619,17 +654,19 @@ export function PrintReportPage({
               className={settings.is_active ? "relative h-8 w-14 rounded-full bg-emerald-500 p-1" : "relative h-8 w-14 rounded-full bg-red-500 p-1"}
             ><span className={settings.is_active ? "absolute right-1 top-1 size-6 rounded-full bg-white shadow" : "absolute left-1 top-1 size-6 rounded-full bg-white shadow"} /></button>
           </div>
-          <div className="grid gap-3 md:grid-cols-[180px_220px_1fr]">
-            <div><Label>Send times</Label><Input type="time" value={settings.send_time} onChange={(event) => setSettings({ ...settings, send_time: event.target.value })} /><p className="mt-1 text-xs text-muted-foreground">{settings.send_time} and {secondSendTime(settings.send_time)}</p></div>
-            <div><Label>Timezone</Label><Input value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} /></div>
-            <div><Label>Days</Label><div className="flex flex-wrap gap-2">{days.map((label, day) => <Button key={label} type="button" variant={settings.weekdays.includes(day) ? "default" : "outline"} onClick={() => toggleDay(day)}>{label}</Button>)}</div></div>
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <div><Label>To</Label><Input value={recipientInputs.to} onChange={(event) => updateRecipients("to", event.target.value)} placeholder="email@example.com" /></div>
-            <div><Label>Cc</Label><Input value={recipientInputs.cc} onChange={(event) => updateRecipients("cc", event.target.value)} placeholder="Optional" /></div>
-            <div><Label>Bcc</Label><Input value={recipientInputs.bcc} onChange={(event) => updateRecipients("bcc", event.target.value)} placeholder="Optional" /></div>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-3"><span className="text-sm text-muted-foreground">Last run: {formatDateTime(settings.last_run_date)}</span><Button variant="outline" onClick={() => void saveSettings()} disabled={saving}><Save /> Save settings</Button></div>
+          {automaticEmailExpanded ? <>
+            <div className="grid gap-3 md:grid-cols-[180px_220px_1fr]">
+              <div><Label>Send times</Label><Input type="time" value={settings.send_time} onChange={(event) => setSettings({ ...settings, send_time: event.target.value })} /><p className="mt-1 text-xs text-muted-foreground">{settings.send_time} and {secondSendTime(settings.send_time)}</p></div>
+              <div><Label>Timezone</Label><Input value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} /></div>
+              <div><Label>Days</Label><div className="flex flex-wrap gap-2">{days.map((label, day) => <Button key={label} type="button" variant={settings.weekdays.includes(day) ? "default" : "outline"} onClick={() => toggleDay(day)}>{label}</Button>)}</div></div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div><Label>To</Label><Input value={recipientInputs.to} onChange={(event) => updateRecipients("to", event.target.value)} placeholder="email@example.com" /></div>
+              <div><Label>Cc</Label><Input value={recipientInputs.cc} onChange={(event) => updateRecipients("cc", event.target.value)} placeholder="Optional" /></div>
+              <div><Label>Bcc</Label><Input value={recipientInputs.bcc} onChange={(event) => updateRecipients("bcc", event.target.value)} placeholder="Optional" /></div>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3"><span className="text-sm text-muted-foreground">Last run: {formatDateTime(settings.last_run_date)}</span><Button variant="outline" onClick={() => void saveSettings()} disabled={saving}><Save /> Save settings</Button></div>
+          </> : null}
         </div>
       ) : canManage ? <div className="rounded-lg border bg-white p-8 text-sm text-muted-foreground">{loading ? "Loading settings..." : "No settings available."}</div> : null}
 

@@ -232,7 +232,7 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertEqual(reminders[-1].text, "BZ Det nga Stafi per GA")
         self.assertEqual(
             reminders[-1].guidance,
-            "Komunikimi GA temas Det nga Stafi/ KA email",
+            "Komunikimi GA teams Det nga Stafi/ KA email",
         )
 
     def test_1150_staff_reminders_add_pre_break_document_question_before_bz(self) -> None:
@@ -299,9 +299,9 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn("border:1px solid #dc2626", rendered_html)
         self.assertIn("color:#b91c1c", rendered_html)
         self.assertEqual(rendered_html.count("E ENJTE- PYETJET E TE ENJTES"), 1)
-        self.assertIn('<div style="display:block;white-space:normal;"><strong>1.</strong> Planifikimi javor short</div>', rendered_html)
-        self.assertIn('<div style="display:block;white-space:normal;"><strong>1.</strong> Emails per missing info, per me vazhdu javen tjeter</div>', rendered_html)
-        self.assertIn('<div style="display:block;white-space:normal;"><strong>2.</strong> Shikohen det qe mbesin vetem per neser (te premten)</div>', rendered_html)
+        self.assertIn('<div style="display:block;white-space:normal;"><strong>M1 - 1.</strong> Planifikimi javor short</div>', rendered_html)
+        self.assertIn('<div style="display:block;white-space:normal;"><strong>M1 - 1.</strong> Emails per missing info, per me vazhdu javen tjeter</div>', rendered_html)
+        self.assertIn('<div style="display:block;white-space:normal;"><strong>M3 - 2.</strong> Shikohen det qe mbesin vetem per neser (te premten)</div>', rendered_html)
         self.assertLess(
             rendered_html.index("Emails per missing info, per me vazhdu javen tjeter"),
             rendered_html.index("Hap doc dhe det"),
@@ -329,10 +329,10 @@ class PrimeFlowReportTests(unittest.TestCase):
             word_xml.index("Emails per missing info, per me vazhdu javen tjeter"),
             word_xml.index("Hap doc dhe det"),
         )
-        self.assertIn("1. Emails per missing info, per me vazhdu javen tjeter", word_xml)
-        self.assertIn("2. Shikohen det qe mbesin vetem per neser (te premten)", word_xml)
+        self.assertIn("M1 - 1. Emails per missing info, per me vazhdu javen tjeter", word_xml)
+        self.assertIn("M3 - 2. Shikohen det qe mbesin vetem per neser (te premten)", word_xml)
         plain = render_plain_text(document)
-        self.assertIn("1. Emails per missing info, per me vazhdu javen tjeter\n2. Shikohen det qe mbesin vetem per neser (te premten)", plain)
+        self.assertIn("M1 - 1. Emails per missing info, per me vazhdu javen tjeter\nM3 - 2. Shikohen det qe mbesin vetem per neser (te premten)", plain)
         self.assertGreater(len(render_png(document)), 1000)
 
     def test_friday_reports_add_week_balancing_staff_questions(self) -> None:
@@ -361,9 +361,13 @@ class PrimeFlowReportTests(unittest.TestCase):
         rendered_html = render_html(document)
         self.assertEqual(rendered_html.count('data-extra-reminder-card="true"'), 1)
         self.assertIn("E PREMTE - PYETJET E TE PREMTES", rendered_html)
-        self.assertIn('<div style="display:block;white-space:normal;"><strong>1.</strong> Barazimi i planifikimit javor - next week</div>', rendered_html)
-        self.assertIn('<div style="display:block;white-space:normal;"><strong>2.</strong> Barazimi i realizimit javor - this week</div>', rendered_html)
-        self.assertIn('<div style="display:block;white-space:normal;"><strong>3.</strong> Emails per missing info, per me vazhdu javen tjeter</div>', rendered_html)
+        self.assertIn('<div style="display:block;white-space:normal;"><strong>M1 - 1.</strong> Barazimi i planifikimit javor - next week</div>', rendered_html)
+        self.assertIn('<div style="display:block;white-space:normal;"><strong>M1 - 2.</strong> Barazimi i realizimit javor - this week</div>', rendered_html)
+        self.assertIn('<div style="display:block;white-space:normal;"><strong>M1 - 3.</strong> Emails per missing info, per me vazhdu javen tjeter</div>', rendered_html)
+        plain = render_plain_text(document)
+        self.assertIn("M1 - 1. Barazimi i planifikimit javor - next week", plain)
+        self.assertIn("M1 - 2. Barazimi i realizimit javor - this week", plain)
+        self.assertIn("M1 - 3. Emails per missing info, per me vazhdu javen tjeter", plain)
         self.assertLess(
             rendered_html.index("Barazimi i planifikimit javor - next week"),
             rendered_html.index("Hap doc dhe det"),
@@ -632,7 +636,7 @@ class PrimeFlowReportTests(unittest.TestCase):
             ReportReminderQuestion(text="Sqaro slotin paraprak pastaj aktual"),
             ReportReminderQuestion(
                 text="BZ Det nga Stafi per GA",
-                guidance="Komunikimi GA temas Det nga Stafi/ KA email",
+                guidance="Komunikimi GA teams Det nga Stafi/ KA email",
             ),
         ]
         document = build_report_document(data, date(2026, 8, 6), "11:00", reminders=reminders)
@@ -642,14 +646,15 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertLess(plain.index(REMINDER_SECTION_TITLE), plain.index("11:00 SLOTI 06.08.2026"))
         self.assertIn("1. Slotin paraprak/aktual", plain)
         self.assertIn("6. A arrihet RLZ javor?", plain)
-        self.assertIn("1. Done? / Strikes?", plain)
-        self.assertIn("2. Notes te reja? Data? AM/PM? Kujt", plain)
-        self.assertIn("3. BZ Notes", plain)
+        self.assertIn("1. Notes te reja? Data? AM/PM? Kujt", plain)
+        self.assertIn("2. Done? / Strikes?", plain)
+        self.assertIn("3. BZ Det nga Stafi per GA", plain)
+        self.assertIn("4. BZ Notes", plain)
         self.assertIn("Secili i lexon vet para BZ me GA", plain)
         self.assertIn("1. Hap doc dhe det", plain)
         self.assertIn("2. Share screen side by side DET/REZULTATIN", plain)
         self.assertIn("4. BZ Det nga Stafi per GA", plain)
-        self.assertIn("Komunikimi GA temas Det nga Stafi/ KA email", plain)
+        self.assertIn("Komunikimi GA teams Det nga Stafi/ KA email", plain)
         self.assertIn(REMINDER_SECTION_TITLE, html)
         self.assertIn('data-board-reminder-columns="true"', html)
         self.assertIn(BOARD_REMINDER_SECTION_TITLE, html)
@@ -695,6 +700,10 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn("Please discuss this PX note", html)
         self.assertIn(UNDISCUSSED_NOTES_SECTION_TITLE, word_xml)
         self.assertIn("Please discuss this PX note", word_xml)
+        first_task_section = document.sections[0].title
+        self.assertLess(plain.index(UNDISCUSSED_NOTES_SECTION_TITLE), plain.index(first_task_section))
+        self.assertLess(html.index(UNDISCUSSED_NOTES_SECTION_TITLE), html.index(first_task_section))
+        self.assertLess(word_xml.index(UNDISCUSSED_NOTES_SECTION_TITLE), word_xml.index(first_task_section))
         self.assertTrue(png.startswith(b"\x89PNG"))
 
     def test_truncation_blocks_report(self) -> None:

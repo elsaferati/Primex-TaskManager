@@ -148,8 +148,12 @@ def _board_reminder_questions(report_day: date | None = None) -> list[ReportRemi
         ReportReminderQuestion(text="A kryhet sot?"),
         ReportReminderQuestion(text="A kryhet kete jave?"),
         ReportReminderQuestion(text="A arrihet RLZ javor?"),
-        ReportReminderQuestion(text="Done? / Strikes?"),
         ReportReminderQuestion(text="Notes te reja? Data? AM/PM? Kujt"),
+        ReportReminderQuestion(text="Done? / Strikes?"),
+        ReportReminderQuestion(
+            text="BZ Det nga Stafi per GA",
+            guidance="Komunikimi GA teams Det nga Stafi/ KA email",
+        ),
         ReportReminderQuestion(text="BZ Notes", guidance="Secili i lexon vet para BZ me GA"),
     ]
     if report_day is not None and report_day.weekday() == 3:
@@ -174,7 +178,12 @@ def _split_board_regular_questions(
 ) -> tuple[list[tuple[int, ReportReminderQuestion]], list[tuple[int, ReportReminderQuestion]]]:
     """Return Board follow-up questions first and primary questions second."""
     regular = [question for question in questions if not question.is_extra]
-    follow_up_texts = {"Done? / Strikes?", "Notes te reja? Data? AM/PM? Kujt", "BZ Notes"}
+    follow_up_texts = {
+        "Notes te reja? Data? AM/PM? Kujt",
+        "Done? / Strikes?",
+        "BZ Det nga Stafi per GA",
+        "BZ Notes",
+    }
     follow_up = [question for question in regular if question.text in follow_up_texts]
     primary = [question for question in regular if question.text not in follow_up_texts]
     return list(enumerate(follow_up, 1)), list(enumerate(primary, 1))
@@ -186,6 +195,30 @@ def _day_specific_question_label(report_day: date | None) -> str:
     if report_day is not None and report_day.weekday() == 4:
         return "E PREMTE - PYETJET E TE PREMTES"
     return "PYETJET SHTESE: 0"
+
+
+THURSDAY_QUESTION_REPORT_CODES = {
+    "Emails per missing info, per me vazhdu javen tjeter": "M1",
+    "Shikohen det qe mbesin vetem per neser (te premten)": "M3",
+    "Planifikimi javor short": "M1",
+}
+FRIDAY_QUESTION_REPORT_CODES = {
+    "Barazimi i planifikimit javor - next week": "M1",
+    "Barazimi i realizimit javor - this week": "M1",
+    "Emails per missing info, per me vazhdu javen tjeter": "M1",
+}
+
+
+def _reminder_question_number(
+    index: int, question: ReportReminderQuestion, report_day: date | None
+) -> str:
+    report_codes = (
+        THURSDAY_QUESTION_REPORT_CODES if report_day is not None and report_day.weekday() == 3
+        else FRIDAY_QUESTION_REPORT_CODES if report_day is not None and report_day.weekday() == 4
+        else {}
+    )
+    report_code = report_codes.get(question.text)
+    return f"{report_code} - {index}." if report_code else f"{index}."
 
 
 class ReportDocument(BaseModel):
@@ -623,7 +656,7 @@ def render_plain_text(document: ReportDocument) -> str:
                 continue
             reminder_lines = [reminder_title]
             for index, question in extra_questions:
-                reminder_lines.append(f"{index}. {question.text}")
+                reminder_lines.append(f"{_reminder_question_number(index, question, document.report_date)} {question.text}")
                 if question.guidance:
                     reminder_lines.append(f"   {question.guidance}")
             blocks.append("\n".join(reminder_lines))
@@ -636,10 +669,16 @@ def render_plain_text(document: ReportDocument) -> str:
             if group_index:
                 reminder_lines.append("")
             for index, question in regular_questions:
-                reminder_lines.append(f"{index}. {question.text}")
+                reminder_lines.append(f"{_reminder_question_number(index, question, document.report_date)} {question.text}")
                 if question.guidance:
                     reminder_lines.append(f"   {question.guidance}")
         blocks.append("\n".join(reminder_lines))
+    if document.undiscussed_notes:
+        note_lines = [UNDISCUSSED_NOTES_SECTION_TITLE, "NR | NOTE | KUSH | DATA"]
+        for index, note in enumerate(document.undiscussed_notes, 1):
+            created = note.created_at.astimezone(report_timezone()).strftime("%d.%m %H:%M") if note.created_at else "-"
+            note_lines.append(f"{index} | {note.content} | {note.author} | {created}")
+        blocks.append("\n".join(note_lines))
     for section in document.sections:
         lines = [section.title]
         if not section.employees:
@@ -654,12 +693,6 @@ def render_plain_text(document: ReportDocument) -> str:
                 if task.description:
                     lines.append(task.description)
         blocks.append("\n".join(lines))
-    if document.undiscussed_notes:
-        note_lines = [UNDISCUSSED_NOTES_SECTION_TITLE, "NR | NOTE | KUSH | DATA"]
-        for index, note in enumerate(document.undiscussed_notes, 1):
-            created = note.created_at.astimezone(report_timezone()).strftime("%d.%m %H:%M") if note.created_at else "-"
-            note_lines.append(f"{index} | {note.content} | {note.author} | {created}")
-        blocks.append("\n".join(note_lines))
     return "\n\n".join(blocks)
 
 
@@ -836,7 +869,7 @@ def render_html(
                 item_tag = "div" if extra else "span"
                 item_style = "display:block;white-space:normal;" if extra else "white-space:normal;"
                 question_parts.append(
-                    f'<{item_tag} style="{item_style}"><strong>{index}.</strong> '
+                    f'<{item_tag} style="{item_style}"><strong>{html.escape(_reminder_question_number(index, question, document.report_date))}</strong> '
                     f'{html.escape(question.text)}{guidance}</{item_tag}>'
                 )
             data_attribute = ' data-extra-reminder-card="true"' if extra else ""
@@ -971,8 +1004,12 @@ def render_html(
     elif document.reminders:
         body_chunks.append(reminder_column(REMINDER_SECTION_TITLE, document.reminders, show_extra=False))
 
+    if document.undiscussed_notes:
+        body_chunks.append(section_title_block(UNDISCUSSED_NOTES_SECTION_TITLE))
+        body_chunks.append(undiscussed_notes_table(document.undiscussed_notes))
+
     for section_index, section in enumerate(document.sections):
-        if section_index:
+        if section_index or document.undiscussed_notes:
             body_chunks.append(section_separator())
         body_chunks.append(section_title_block(section.title))
         if section.title.startswith(BLOCKED_SECTION_TITLE_PREFIX):
@@ -1005,11 +1042,6 @@ def render_html(
                         detail_html,
                     )
                 )
-
-    if document.undiscussed_notes:
-        body_chunks.append(section_separator())
-        body_chunks.append(section_title_block(UNDISCUSSED_NOTES_SECTION_TITLE))
-        body_chunks.append(undiscussed_notes_table(document.undiscussed_notes))
 
     meta = (
         f"Generated {html.escape(document.generated_at.isoformat())} · {document.task_count} tasks"
@@ -1144,8 +1176,8 @@ def render_docx(document: ReportDocument) -> bytes:
             paragraph = card_cell.paragraphs[0] if question_position == 0 else card_cell.add_paragraph()
             add_marked_runs(
                 paragraph,
-                f"{index}. {question.text}",
-                f"{index}. {question.text}",
+                f"{_reminder_question_number(index, question, document.report_date)} {question.text}",
+                f"{_reminder_question_number(index, question, document.report_date)} {question.text}",
                 bold=True,
                 color="#b91c1c" if extra else "#050505",
             )
@@ -1188,6 +1220,26 @@ def render_docx(document: ReportDocument) -> bytes:
         regular_groups = _split_board_regular_questions(questions) if reminder_title == BOARD_REMINDER_SECTION_TITLE else (_partition_reminder_questions(questions)[1],)
         for regular_questions in regular_groups:
             add_reminder_card(regular_questions, extra=False)
+    if document.undiscussed_notes:
+        doc.add_paragraph()
+        notes_header = doc.add_table(rows=1, cols=1).cell(0, 0)
+        shade(notes_header, "#eef2ff")
+        notes_title = notes_header.paragraphs[0].add_run(UNDISCUSSED_NOTES_SECTION_TITLE)
+        notes_title.bold = True
+        notes_title.font.size = Pt(13)
+        table = doc.add_table(rows=1, cols=4)
+        table.style = "Table Grid"
+        for cell, label in zip(table.rows[0].cells, ("NR", "NOTE", "KUSH", "DATA")):
+            shade(cell, "#e2e8f0")
+            run = cell.paragraphs[0].add_run(label)
+            run.bold = True
+        for index, note in enumerate(document.undiscussed_notes, 1):
+            cells = table.add_row().cells
+            created = note.created_at.astimezone(report_timezone()).strftime("%d.%m %H:%M") if note.created_at else "-"
+            for cell, value in zip(cells, (str(index), note.content, note.author, created)):
+                cell.text = value
+                for run in cell.paragraphs[0].runs:
+                    run.font.size = Pt(9)
     for section in document.sections:
         doc.add_paragraph()
         section_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
@@ -1225,26 +1277,6 @@ def render_docx(document: ReportDocument) -> bytes:
                         description, task.description, task.marked_description, bold=False, color="#64748b"
                     )
                 doc.add_paragraph().paragraph_format.space_after = Pt(0)
-    if document.undiscussed_notes:
-        doc.add_paragraph()
-        notes_header = doc.add_table(rows=1, cols=1).cell(0, 0)
-        shade(notes_header, "#eef2ff")
-        notes_title = notes_header.paragraphs[0].add_run(UNDISCUSSED_NOTES_SECTION_TITLE)
-        notes_title.bold = True
-        notes_title.font.size = Pt(13)
-        table = doc.add_table(rows=1, cols=4)
-        table.style = "Table Grid"
-        for cell, label in zip(table.rows[0].cells, ("NR", "NOTE", "KUSH", "DATA")):
-            shade(cell, "#e2e8f0")
-            run = cell.paragraphs[0].add_run(label)
-            run.bold = True
-        for index, note in enumerate(document.undiscussed_notes, 1):
-            cells = table.add_row().cells
-            created = note.created_at.astimezone(report_timezone()).strftime("%d.%m %H:%M") if note.created_at else "-"
-            for cell, value in zip(cells, (str(index), note.content, note.author, created)):
-                cell.text = value
-                for run in cell.paragraphs[0].runs:
-                    run.font.size = Pt(9)
     doc.save(output)
     return output.getvalue()
 
@@ -1365,7 +1397,7 @@ def render_png(document: ReportDocument) -> bytes:
         for index, question in indexed_questions:
             card_lines.extend(
                 (line, True)
-                for line in (textwrap.wrap(f"{index}. {question.text}", 95) or [""])
+                for line in (textwrap.wrap(f"{_reminder_question_number(index, question, document.report_date)} {question.text}", 95) or [""])
             )
             card_lines.extend(
                 (line, False)
@@ -1422,6 +1454,40 @@ def render_png(document: ReportDocument) -> bytes:
         for regular_questions in regular_groups:
             draw_reminder_card(regular_questions, extra=False)
         y += 14
+
+    def draw_undiscussed_notes() -> None:
+        nonlocal y
+        if not document.undiscussed_notes:
+            return
+        draw.rectangle((margin, y, width - margin, y + 48), fill="#eef2ff")
+        draw.rectangle((margin, y, margin + 7, y + 48), fill="#2563eb")
+        draw.text((margin + 18, y + 11), UNDISCUSSED_NOTES_SECTION_TITLE, fill="#0f172a", font=bold)
+        y += 62
+        table_left, table_right = margin + 5, width - margin
+        columns = (table_left, table_left + 60, table_left + 900, table_left + 1080, table_right)
+        header_height = 34
+        draw.rectangle((table_left, y, table_right, y + header_height), fill="#e2e8f0", outline="#94a3b8", width=1)
+        for x in columns[1:-1]:
+            draw.line((x, y, x, y + header_height), fill="#94a3b8", width=1)
+        for label, x in zip(("NR", "NOTE", "KUSH", "DATA"), columns[:-1]):
+            draw.text((x + 7, y + 7), label, fill="#0f172a", font=bold)
+        y += header_height
+        for index, note in enumerate(document.undiscussed_notes, 1):
+            note_lines = textwrap.wrap(note.content, 68) or [""]
+            row_height = max(32, 26 * len(note_lines))
+            draw.rectangle((table_left, y, table_right, y + row_height), fill="#ffffff", outline="#cbd5e1", width=1)
+            for x in columns[1:-1]:
+                draw.line((x, y, x, y + row_height), fill="#cbd5e1", width=1)
+            draw.text((columns[0] + 7, y + 6), str(index), fill="#0f172a", font=font)
+            for line_index, line in enumerate(note_lines):
+                draw.text((columns[1] + 7, y + 6 + 25 * line_index), line, fill="#0f172a", font=font)
+            draw.text((columns[2] + 7, y + 6), note.author, fill="#0f172a", font=font)
+            created = note.created_at.astimezone(report_timezone()).strftime("%d.%m %H:%M") if note.created_at else "-"
+            draw.text((columns[3] + 7, y + 6), created, fill="#0f172a", font=font)
+            y += row_height
+        y += 14
+
+    draw_undiscussed_notes()
     for section in document.sections:
         draw.rectangle((margin, y, width - margin, y + 48), fill="#eef2ff")
         draw.rectangle((margin, y, margin + 7, y + 48), fill="#2563eb")
@@ -1461,34 +1527,6 @@ def render_png(document: ReportDocument) -> bytes:
                     draw_line_with_marks(margin + 25, line_y, line, task.marked_description, font, "#64748b")
                     line_y += 28
                 y += card_height + 12
-        y += 14
-    if document.undiscussed_notes:
-        draw.rectangle((margin, y, width - margin, y + 48), fill="#eef2ff")
-        draw.rectangle((margin, y, margin + 7, y + 48), fill="#2563eb")
-        draw.text((margin + 18, y + 11), UNDISCUSSED_NOTES_SECTION_TITLE, fill="#0f172a", font=bold)
-        y += 62
-        table_left, table_right = margin + 5, width - margin
-        columns = (table_left, table_left + 60, table_left + 900, table_left + 1080, table_right)
-        header_height = 34
-        draw.rectangle((table_left, y, table_right, y + header_height), fill="#e2e8f0", outline="#94a3b8", width=1)
-        for x in columns[1:-1]:
-            draw.line((x, y, x, y + header_height), fill="#94a3b8", width=1)
-        for label, x in zip(("NR", "NOTE", "KUSH", "DATA"), columns[:-1]):
-            draw.text((x + 7, y + 7), label, fill="#0f172a", font=bold)
-        y += header_height
-        for index, note in enumerate(document.undiscussed_notes, 1):
-            note_lines = textwrap.wrap(note.content, 68) or [""]
-            row_height = max(32, 26 * len(note_lines))
-            draw.rectangle((table_left, y, table_right, y + row_height), fill="#ffffff", outline="#cbd5e1", width=1)
-            for x in columns[1:-1]:
-                draw.line((x, y, x, y + row_height), fill="#cbd5e1", width=1)
-            draw.text((columns[0] + 7, y + 6), str(index), fill="#0f172a", font=font)
-            for line_index, line in enumerate(note_lines):
-                draw.text((columns[1] + 7, y + 6 + 25 * line_index), line, fill="#0f172a", font=font)
-            draw.text((columns[2] + 7, y + 6), note.author, fill="#0f172a", font=font)
-            created = note.created_at.astimezone(report_timezone()).strftime("%d.%m %H:%M") if note.created_at else "-"
-            draw.text((columns[3] + 7, y + 6), created, fill="#0f172a", font=font)
-            y += row_height
         y += 14
     image = image.crop((0, 0, width, y + margin))
     output = io.BytesIO()

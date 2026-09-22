@@ -12,6 +12,7 @@ from app.services.microsoft_calendar_sync import (
     is_annual_leave_event,
     is_annual_leave_title_or_categories,
     is_common_view_visible_meeting,
+    meeting_overlaps_sync_window,
     microsoft_calendar_sync_window,
     parse_graph_datetime,
 )
@@ -149,3 +150,27 @@ def test_calendar_sync_window_is_stable_during_the_same_week(monkeypatch) -> Non
         datetime(2026, 8, 31, 0, 0, tzinfo=timezone.utc),
         datetime(2026, 9, 19, 0, 0, tzinfo=timezone.utc),
     )
+
+
+def test_multi_day_event_that_started_before_monday_overlaps_sync_window() -> None:
+    window_start = datetime(2026, 9, 20, 22, 0, tzinfo=timezone.utc)
+    window_end = datetime(2026, 10, 9, 22, 0, tzinfo=timezone.utc)
+
+    assert meeting_overlaps_sync_window(
+        datetime(2026, 9, 19, 0, 0, tzinfo=timezone.utc),
+        datetime(2026, 9, 24, 22, 0, tzinfo=timezone.utc),
+        window_start,
+        window_end,
+    ) is True
+
+
+def test_event_ending_at_window_start_does_not_overlap() -> None:
+    window_start = datetime(2026, 9, 20, 22, 0, tzinfo=timezone.utc)
+    window_end = datetime(2026, 10, 9, 22, 0, tzinfo=timezone.utc)
+
+    assert meeting_overlaps_sync_window(
+        datetime(2026, 9, 18, 0, 0, tzinfo=timezone.utc),
+        window_start,
+        window_start,
+        window_end,
+    ) is False

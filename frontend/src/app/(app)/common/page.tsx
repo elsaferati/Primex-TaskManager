@@ -165,7 +165,7 @@ const ONE_H_PRINT_CHECKLISTS = [
       { question: "Hap doc dhe det", description: "", isExtra: false },
       { question: "Share screen side by side DET/REZULTATIN", description: "", isExtra: false },
       { question: "Sqaro slotin paraprak pastaj aktual", description: "", isExtra: false },
-      { question: "BZ Det nga Stafi per GA", description: "Komunikimi GA temas Det nga Stafi/ KA email", isExtra: false },
+      { question: "BZ Det nga Stafi per GA", description: "Komunikimi GA teams Det nga Stafi/ KA email", isExtra: false },
     ],
   },
   {
@@ -177,8 +177,9 @@ const ONE_H_PRINT_CHECKLISTS = [
       { question: "A kryhet sot?", description: "", isExtra: false },
       { question: "A kryhet kete jave?", description: "", isExtra: false },
       { question: "A arrihet RLZ javor?", description: "", isExtra: false },
-      { question: "Done? / Strikes?", description: "", isExtra: false },
       { question: "Notes te reja? Data? AM/PM? Kujt", description: "", isExtra: false },
+      { question: "Done? / Strikes?", description: "", isExtra: false },
+      { question: "BZ Det nga Stafi per GA", description: "Komunikimi GA teams Det nga Stafi/ KA email", isExtra: false },
       { question: "BZ Notes", description: "Secili i lexon vet para BZ me GA", isExtra: false },
     ],
   },
@@ -220,6 +221,25 @@ const oneHDaySpecificQuestionLabel = (reportDay: Date) =>
     : reportDay.getDay() === 5
       ? "E PREMTE - PYETJET E TE PREMTES"
       : "PYETJET SHTESE: 0"
+
+const oneHExtraQuestionNumber = (reportDay: Date, question: string, index: number) => {
+  const thursdayReportCodes: Record<string, "M1" | "M3"> = {
+    "Emails per missing info, per me vazhdu javen tjeter": "M1",
+    "Shikohen det qe mbesin vetem per neser (te premten)": "M3",
+    "Planifikimi javor short": "M1",
+  }
+  const fridayReportCodes: Record<string, "M1"> = {
+    "Barazimi i planifikimit javor - next week": "M1",
+    "Barazimi i realizimit javor - this week": "M1",
+    "Emails per missing info, per me vazhdu javen tjeter": "M1",
+  }
+  const reportCode = reportDay.getDay() === 4
+    ? thursdayReportCodes[question]
+    : reportDay.getDay() === 5
+      ? fridayReportCodes[question]
+      : undefined
+  return reportCode ? `${reportCode} - ${index + 1}.` : `${index + 1}.`
+}
 
 const getNextWorkingDay = (from: Date) => {
   const next = new Date(from.getFullYear(), from.getMonth(), from.getDate())
@@ -283,7 +303,7 @@ const oneHPrintChecklistsHtml = (reportDay: Date) =>
       ).join("")
       const extraContent = extraQuestions
         .map(({ question, description }, index) =>
-          `<div class="one-h-print-checklist-extra-item"><strong>${index + 1}. ${escapePrintHtml(question)}</strong>${
+          `<div class="one-h-print-checklist-extra-item"><strong>${oneHExtraQuestionNumber(reportDay, question, index)} ${escapePrintHtml(question)}</strong>${
             description ? ` <span class="one-h-print-checklist-description">(${escapePrintHtml(description)})</span>` : ""
           }</div>`
         )
@@ -310,7 +330,7 @@ function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
           {questions.some(({ isExtra }) => isExtra) ? <div className="one-h-print-checklist-items">
             {questions.filter(({ isExtra }) => isExtra).map(({ question, description }, index) => (
               <div key={question} className="one-h-print-checklist-extra-item">
-                <strong>{index + 1}. {question}</strong>
+                <strong>{oneHExtraQuestionNumber(reportDay, question, index)} {question}</strong>
                 {description ? <span className="one-h-print-checklist-description"> ({description})</span> : null}
               </div>
             ))}
@@ -486,6 +506,45 @@ type InternalItem = {
   linked_external_calendar_imported?: boolean
   linkedExternalRecurrenceType?: string | null
   linked_external_recurrence_type?: string | null
+}
+
+const expandExternalMeetingDates = (meeting: Meeting, start: Date | null): Date[] => {
+  if (!start) return []
+  if (
+    (meeting.recurrence_type && meeting.recurrence_type !== "none") ||
+    !meeting.ends_at
+  ) {
+    return [start]
+  }
+
+  const end = new Date(meeting.ends_at)
+  if (Number.isNaN(end.getTime()) || end.getTime() <= start.getTime()) return [start]
+
+  const durationMs = end.getTime() - start.getTime()
+  const dayMs = 24 * 60 * 60 * 1000
+  const midnightWholeDays =
+    durationMs % dayMs === 0 &&
+    start.getUTCHours() === 0 &&
+    start.getUTCMinutes() === 0 &&
+    start.getUTCSeconds() === 0 &&
+    end.getUTCHours() === 0 &&
+    end.getUTCMinutes() === 0 &&
+    end.getUTCSeconds() === 0
+  const inclusiveEnd = new Date(end)
+  if (midnightWholeDays) {
+    inclusiveEnd.setUTCDate(inclusiveEnd.getUTCDate() - 1)
+  } else {
+    inclusiveEnd.setTime(inclusiveEnd.getTime() - 1)
+  }
+
+  const dates: Date[] = []
+  const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 12)
+  const last = new Date(inclusiveEnd.getFullYear(), inclusiveEnd.getMonth(), inclusiveEnd.getDate(), 12)
+  while (cursor.getTime() <= last.getTime()) {
+    dates.push(new Date(cursor))
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return dates.length ? dates : [start]
 }
 
 const isCalendarAnnualLeave = (title?: string, categories?: string[]) =>
@@ -1652,15 +1711,19 @@ export default function CommonViewPage() {
       meeting: Meeting,
       meetingType: "external" | "internal",
       fallbackOwnerName?: string,
-      linkedExternalMeeting?: Meeting | null
+      linkedExternalMeeting?: Meeting | null,
+      displayDate?: Date
     ): ExternalItem | InternalItem | null => {
       const resolvedDate = resolveExternalMeetingDate(meeting)
       const createdAt = new Date(meeting.created_at)
       const validCreatedAt = Number.isNaN(createdAt.getTime()) ? null : createdAt
-      const dateSource = resolvedDate ?? validCreatedAt
+      const dateSource = displayDate ?? resolvedDate ?? validCreatedAt
       if (!dateSource) return null
       return {
-        id: `meeting:${meeting.id}`,
+        id:
+          meetingType === "external"
+            ? `meeting:${meeting.id}:${toISODate(dateSource)}`
+            : `meeting:${meeting.id}`,
         title: meeting.title || (meetingType === "external" ? "External meeting" : "Internal meeting"),
         date: toISODate(dateSource),
         time: resolvedDate ? formatTime(resolvedDate) : "TBD",
@@ -1851,7 +1914,7 @@ export default function CommonViewPage() {
       linkedExternalMeetings: Meeting[] = externalMeetings
     ) => {
       const meetingItems = meetings
-        .map((meeting) => {
+        .flatMap((meeting) => {
           const owner = meeting.created_by ? users.find((u) => u.id === meeting.created_by) : null
           const ownerName = owner?.full_name || owner?.username || "Unknown"
           const linkedExternalMeeting =
@@ -1863,13 +1926,27 @@ export default function CommonViewPage() {
                     (meeting.paired_external_meeting_id || meeting.pre_external_meeting_id)
                 ) || null
               : null
-          const item = mapMeetingToCommonItem(meeting, meetingType, ownerName, linkedExternalMeeting)
-          if (!item) return null
           const assignees = (meeting.participant_ids || [])
             .map((participantId) => users.find((candidate) => candidate.id === participantId))
             .map((participant) => participant?.full_name || participant?.username || participant?.email || "")
             .filter(Boolean)
-          return { ...item, assignees }
+          const resolvedDisplayDates =
+            meetingType === "external"
+              ? expandExternalMeetingDates(meeting, resolveExternalMeetingDate(meeting))
+              : [undefined]
+          const displayDates: Array<Date | undefined> = resolvedDisplayDates.length
+            ? resolvedDisplayDates
+            : [undefined]
+          return displayDates.map((displayDate) => {
+            const item = mapMeetingToCommonItem(
+              meeting,
+              meetingType,
+              ownerName,
+              linkedExternalMeeting,
+              displayDate
+            )
+            return item ? { ...item, assignees } : null
+          })
         })
         .filter((item) => item !== null)
 
@@ -4059,29 +4136,31 @@ export default function CommonViewPage() {
             const resolvedDate = resolveExternalMeetingDate(meeting)
             const createdAt = new Date(meeting.created_at)
             const validCreatedAt = Number.isNaN(createdAt.getTime()) ? null : createdAt
-            const dateSource = resolvedDate ?? validCreatedAt
-            if (!dateSource) continue
 
             const ownerUser = meeting.created_by
               ? loadedUsers.find((u) => u.id === meeting.created_by)
               : null
             const ownerName = ownerUser?.full_name || ownerUser?.username || "Unknown"
 
-            allData.external.push({
-              id: `meeting:${meeting.id}`,
-              title: meeting.title || "External meeting",
-              date: toISODate(dateSource),
-              time: resolvedDate ? formatTime(resolvedDate) : "TBD",
-              platform: meeting.platform?.trim() || "TBD",
-              owner: ownerName,
-              assignees: (meeting.participant_ids || [])
-                .map((participantId) => loadedUsers.find((candidate) => candidate.id === participantId))
-                .map((participant) => participant?.full_name || participant?.username || participant?.email || "")
-                .filter(Boolean),
-              recurrenceType: meeting.recurrence_type || "none",
-              calendarCategories: meeting.calendar_categories || [],
-              calendarImported: Boolean(meeting.calendar_imported || meeting.microsoft_event_id),
-            })
+            const displayDates = expandExternalMeetingDates(meeting, resolvedDate)
+            const dateSources = displayDates.length ? displayDates : validCreatedAt ? [validCreatedAt] : []
+            for (const dateSource of dateSources) {
+              allData.external.push({
+                id: `meeting:${meeting.id}:${toISODate(dateSource)}`,
+                title: meeting.title || "External meeting",
+                date: toISODate(dateSource),
+                time: resolvedDate ? formatTime(resolvedDate) : "TBD",
+                platform: meeting.platform?.trim() || "TBD",
+                owner: ownerName,
+                assignees: (meeting.participant_ids || [])
+                  .map((participantId) => loadedUsers.find((candidate) => candidate.id === participantId))
+                  .map((participant) => participant?.full_name || participant?.username || participant?.email || "")
+                  .filter(Boolean),
+                recurrenceType: meeting.recurrence_type || "none",
+                calendarCategories: meeting.calendar_categories || [],
+                calendarImported: Boolean(meeting.calendar_imported || meeting.microsoft_event_id),
+              })
+            }
           }
         }
 

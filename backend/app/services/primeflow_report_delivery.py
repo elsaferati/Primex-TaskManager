@@ -150,7 +150,7 @@ async def load_1h_reminder_questions(
     reminders.append(
         ReportReminderQuestion(
             text="BZ Det nga Stafi per GA",
-            guidance="Komunikimi GA temas Det nga Stafi/ KA email",
+            guidance="Komunikimi GA teams Det nga Stafi/ KA email",
         )
     )
     if report_day is not None and report_day.weekday() == 3:
