@@ -294,6 +294,20 @@ def test_html_table_keeps_grid_styles_inline_for_email_clients() -> None:
     assert '<style>' not in report_html
 
 
+def test_task_title_text_is_slightly_larger_without_changing_cell_layout() -> None:
+    report_html = _html_table(
+        [("1H 10:00", [{"title": "GA: A task", "finishPeriod": "AM"}], False)]
+    )
+
+    assert (
+        '<span data-task-title-text="true" style="font-size:13px">'
+        '1. A task</span>'
+    ) in report_html
+    assert '<col width="2.5%"><col width="10.5%"><col width="14.5%" span="6">' in report_html
+    assert 'border:1px solid #000;padding:5px;vertical-align:top;text-align:left' in report_html
+    assert 'vertical-align:bottom;height:25px' in report_html
+
+
 def test_task_grid_uses_light_dividers_inside_a_slot_and_bold_slot_labels() -> None:
     report_html = _html_table(
         [("BLL", [{"title": f"Task {index}"} for index in range(7)], False)]
