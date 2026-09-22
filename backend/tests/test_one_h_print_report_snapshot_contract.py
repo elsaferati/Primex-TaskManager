@@ -57,3 +57,13 @@ def test_symbol_comment_modal_uses_host_viewport_and_marker_change_is_guarded():
     assert 'max-height:calc(100vh - 40px)' in modal
     assert 'if (select.disabled) return' in change_handler
     assert change_handler.index("select.disabled = true") < change_handler.index("await openMarkerCommentModal")
+
+
+def test_saved_report_uses_compact_symbol_comment_control_in_the_preview():
+    source = (ROOT / "frontend/src/app/(app)/tomorrow-print-report/page.tsx").read_text(encoding="utf-8")
+
+    assert 'commentButton.dataset.taskMarkerCommentControl = "true"' in source
+    assert 'commentButton.textContent = "\\u{1F4AC}"' in source
+    assert 'if (commentBlock) commentBlock.style.display = "none"' in source
+    assert 'commentButton.addEventListener("click"' in source
+    assert 'markerControl.append(select, commentButton)' in source

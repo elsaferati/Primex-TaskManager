@@ -376,6 +376,10 @@ export function PrintReportPage({
       const existingBadge = cell.querySelector<HTMLElement>('[data-task-badge="one-h-marker"]')
       existingBadge?.remove()
 
+      const markerControl = document.createElement("span")
+      markerControl.dataset.taskMarkerControlWrapper = "true"
+      markerControl.style.cssText = "position:relative;display:inline-block;float:right;margin:0 0 3px 4px;vertical-align:top"
+
       const select = document.createElement("select")
       const resizeMarkerSelect = (marker: string, byGa: boolean) => {
         const label = taskMarkerOptions.find((option) => option.value === marker)?.label || "—"
@@ -388,11 +392,10 @@ export function PrintReportPage({
       select.title = cell.dataset.taskMarkerComment || "Task marker"
       select.style.cssText = [
         "display:inline-block",
-        "float:right",
         "height:22px",
         "min-width:46px",
         "max-width:64px",
-        "margin:0 0 3px 4px",
+        "margin:0",
         "padding:0 1px 0 3px",
         "border:1px solid #93C5FD",
         "border-radius:999px",
@@ -419,6 +422,38 @@ export function PrintReportPage({
       })
       select.value = cell.dataset.taskMarker || ""
       resizeMarkerSelect(select.value, cell.dataset.taskMarkerByGa === "true")
+
+      const commentBlock = cell.querySelector<HTMLElement>('[data-task-marker-comment="true"]')
+      if (commentBlock) commentBlock.style.display = "none"
+
+      const commentButton = document.createElement("button")
+      commentButton.type = "button"
+      commentButton.dataset.taskMarkerCommentControl = "true"
+      commentButton.textContent = "\u{1F4AC}"
+      commentButton.style.cssText = [
+        "position:absolute",
+        "right:-4px",
+        "top:-5px",
+        "z-index:2",
+        "display:flex",
+        "height:14px",
+        "width:14px",
+        "align-items:center",
+        "justify-content:center",
+        "padding:0",
+        "border:1px solid #93C5FD",
+        "border-radius:999px",
+        "background:#FFF",
+        "font:9px/1 Arial,sans-serif",
+        "cursor:pointer",
+        "box-shadow:0 1px 2px rgba(15,23,42,.16)",
+      ].join(";")
+      const updateCommentButton = (marker: string, comment: string) => {
+        commentButton.style.display = marker ? "flex" : "none"
+        commentButton.title = comment || "Add symbol comment"
+        commentButton.setAttribute("aria-label", comment ? "View symbol comment" : "Add symbol comment")
+      }
+      updateCommentButton(select.value, cell.dataset.taskMarkerComment || "")
 
       select.addEventListener("change", async () => {
         if (select.disabled) return
@@ -450,6 +485,7 @@ export function PrintReportPage({
           cell.dataset.taskMarkerComment = updated.one_h_marker_comment || ""
           select.title = updated.one_h_marker_comment || "Task marker"
           resizeMarkerSelect(nextValue, Boolean(updated.one_h_marker_by_ga))
+          updateCommentButton(nextValue, updated.one_h_marker_comment || "")
           taskMarkerOptions.forEach((option, index) => {
             const element = select.options[index + 1]
             if (element) {
@@ -469,37 +505,44 @@ export function PrintReportPage({
         }
       })
 
-      const periodBadge = cell.querySelector('[data-task-badge="finish-period"]')
-      if (periodBadge) periodBadge.insertAdjacentElement("afterend", select)
-      else content.prepend(select)
-
-      const commentBlock = cell.querySelector<HTMLElement>('[data-task-marker-comment="true"]')
-      if (commentBlock) {
-        commentBlock.title = cell.dataset.taskMarkerComment || commentBlock.textContent || ""
-        commentBlock.style.cursor = "pointer"
-        commentBlock.addEventListener("click", async () => {
-          const value = cell.dataset.taskMarkerComment || ""
-          if (!value) return
-          const nextComment = await openMarkerCommentModal(value)
-          if (nextComment === null || nextComment.trim() === value) return
-          try {
-            const response = await apiFetch(`/tasks/${taskId}/one-h-marker`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ one_h_marker: cell.dataset.taskMarker || null, one_h_marker_comment: nextComment.trim() || null }),
-            })
-            if (!response?.ok) throw new Error("Could not update symbol comment")
-            const updated = await response.json() as { one_h_marker_comment?: string | null }
-            const savedComment = updated.one_h_marker_comment || ""
-            cell.dataset.taskMarkerComment = savedComment
-            select.title = savedComment || "Task marker"
+      commentButton.addEventListener("click", async (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        const marker = cell.dataset.taskMarker || ""
+        if (!marker || select.disabled) return
+        const value = cell.dataset.taskMarkerComment || ""
+        const nextComment = await openMarkerCommentModal(value)
+        if (nextComment === null || nextComment.trim() === value.trim()) return
+        select.disabled = true
+        commentButton.disabled = true
+        try {
+          const response = await apiFetch(`/tasks/${taskId}/one-h-marker`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ one_h_marker: marker, one_h_marker_comment: nextComment.trim() || null }),
+          })
+          if (!response?.ok) throw new Error("Could not update symbol comment")
+          const updated = await response.json() as { one_h_marker_comment?: string | null }
+          const savedComment = updated.one_h_marker_comment || ""
+          cell.dataset.taskMarkerComment = savedComment
+          select.title = savedComment || "Task marker"
+          updateCommentButton(marker, savedComment)
+          if (commentBlock) {
             commentBlock.textContent = savedComment ? `KOMENT SIMBOLI: ${savedComment}` : ""
-            toast.success("Symbol comment updated")
-          } catch (error) {
-            toast.error("Symbol comment update failed", { description: String(error) })
           }
-        })
-      }
+          toast.success("Symbol comment updated")
+        } catch (error) {
+          toast.error("Symbol comment update failed", { description: String(error) })
+        } finally {
+          select.disabled = false
+          commentButton.disabled = false
+        }
+      })
+
+      markerControl.append(select, commentButton)
+      const periodBadge = cell.querySelector('[data-task-badge="finish-period"]')
+      if (periodBadge) periodBadge.insertAdjacentElement("afterend", markerControl)
+      else content.prepend(markerControl)
     })
     applyPreviewMarkerFilter()
   }, [apiFetch, applyPreviewMarkerFilter])

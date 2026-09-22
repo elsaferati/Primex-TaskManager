@@ -150,6 +150,7 @@ PERSONAL_ROW_LABEL_STYLE = (
     "overflow-wrap:normal;word-break:normal"
 )
 PERSONAL_TIME_STYLE = "font-size:13px;line-height:1.2;font-weight:800;white-space:nowrap"
+TASK_TITLE_TEXT_STYLE = "font-size:17px"
 DEADLINE_COLOR = "#DC2626"
 EIGHT_AM_BORDER_COLOR = "#DC2626"
 NON_ROUTINE_MEETING_BORDER_COLOR = "#2563EB"
@@ -1290,8 +1291,12 @@ def _html_table(
                             f'<strong>KOMENT SIMBOLI:</strong> {html.escape(marker_comment)}</div>'
                             if marker_comment else ""
                         )
+                        task_text_html = (
+                            f'<span data-task-title-text="true" style="{TASK_TITLE_TEXT_STYLE}">'
+                            f'{task_number}. {title_html}</span>'
+                        )
                         title_cells.append(
-                            f'<td{task_attr}{background} style="{title_style}">{badges}{task_number}. {title_html}{comment_html}</td>'
+                            f'<td{task_attr}{background} style="{title_style}">{badges}{task_text_html}{comment_html}</td>'
                         )
                     if chunk_index == len(chunks) - 1:
                         date_style = f"{date_style};{SLOT_END_DIVIDER_STYLE}"
