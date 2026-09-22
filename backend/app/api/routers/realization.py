@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -81,7 +82,7 @@ from app.services.daily_realization_approval import (
     latest_daily_close,
 )
 from app.services.daily_realization_baseline import ensure_daily_baseline
-from app.services.daily_realization_live import build_live_daily_realization
+from app.services.daily_realization_live import build_live_daily_realization, local_day
 from app.services.realization_access import (
     can_approve_realization,
     can_lock_realization,
@@ -93,6 +94,7 @@ from app.services.realization_calculator import (
     MANDATORY_MANUAL_QUESTION_KEYS,
     MANUAL_BOOLEAN_QUESTION_KEYS,
     MANUAL_TEXT_QUESTION_KEYS,
+    build_daily_questions_from_live,
     build_live_questions,
     calculate_weekly_period,
 )
@@ -102,7 +104,7 @@ from app.services.realization_ai import (
     mark_analysis_stale,
     record_analysis_state,
 )
-from app.services.realization_checklist import aggregate_daily_answers, apply_checklist_answers
+from app.services.realization_checklist import apply_checklist_answers
 from app.services.realization_daily import (
     _daily_classification,
     _local_date,
@@ -119,6 +121,8 @@ from app.services.realization_periods import (
     RealizationWorkflowError,
     ensure_daily_period,
     ensure_weekly_period,
+    ensure_weekly_scope_period,
+    find_weekly_scope_period,
     normalize_week_start,
     require_unlocked,
     transition_period,
@@ -182,52 +186,52 @@ def _answer_payload(row: RealizationQuestionAnswer, name: str | None = None) -> 
     }
 
 
-async def _daily_checklist_summaries(
-    db: AsyncSession, *, period: RealizationPeriod, user_ids: list[uuid.UUID],
-    common_leave: dict | None = None,
-) -> dict[uuid.UUID, dict[str, dict]]:
+async def _weekly_manual_answers(
+    db: AsyncSession, *, period: RealizationPeriod, user_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, dict[str, RealizationQuestionAnswer]]:
+    """Manual checklist answers are weekly, so daily views read the same rows."""
     if not user_ids:
         return {}
-    today = datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date()
-    last_day = min(today, period.end_date)
-    daily_rows = (await db.execute(
-        select(RealizationPersonResult, RealizationPeriod)
-        .join(RealizationPeriod, RealizationPeriod.id == RealizationPersonResult.period_id)
-        .where(
-            RealizationPeriod.period_type == "DAILY",
-            RealizationPeriod.department_id == period.department_id,
-            RealizationPeriod.start_date >= period.start_date,
-            RealizationPeriod.end_date <= last_day,
+    weekly_period = await find_weekly_scope_period(db, period=period)
+    if weekly_period is None:
+        return {}
+    weekly_results = (await db.execute(
+        select(RealizationPersonResult).where(
+            RealizationPersonResult.period_id == weekly_period.id,
             RealizationPersonResult.user_id.in_(user_ids),
         )
-    )).all()
-    answers = await _latest_question_answers(db, [row.id for row, _ in daily_rows])
-    records_by_user: dict[uuid.UUID, list[dict]] = {}
-    for result, daily_period in daily_rows:
-        for key, answer in answers.get(result.id, {}).items():
-            records_by_user.setdefault(result.user_id, []).append({
-                **_answer_payload(answer), "question_key": key,
-                "date": daily_period.start_date.isoformat(),
-                "period_id": str(daily_period.id), "result_id": str(result.id),
-            })
-    expected_dates = set()
-    current = period.start_date
-    while current <= last_day:
-        if _is_working_day(current):
-            expected_dates.add(current)
-        current += timedelta(days=1)
-    if common_leave is None:
-        _, common_leave = await load_active_users_and_common_leave(
-            db, department_id=period.department_id,
-            start_date=period.start_date, end_date=period.end_date,
+    )).scalars().all()
+    answers = await _latest_question_answers(db, [row.id for row in weekly_results])
+    return {row.user_id: answers.get(row.id, {}) for row in weekly_results}
+
+
+async def _weekly_answer_target(
+    db: AsyncSession,
+    *,
+    period: RealizationPeriod,
+    result: RealizationPersonResult,
+    actor_id: uuid.UUID,
+) -> tuple[RealizationPeriod, RealizationPersonResult]:
+    """Resolve where a checklist answer is stored: always the weekly result."""
+    weekly_period = await ensure_weekly_scope_period(db, period=period, created_by=actor_id)
+    if weekly_period.id == period.id:
+        return period, result
+    require_unlocked(weekly_period)
+    weekly_result = (await db.execute(
+        select(RealizationPersonResult).where(
+            RealizationPersonResult.period_id == weekly_period.id,
+            RealizationPersonResult.user_id == result.user_id,
         )
-    return {
-        user_id: aggregate_daily_answers(
-            records_by_user.get(user_id, []),
-            expected_dates=expected_dates - (common_leave[user_id].days if user_id in common_leave else set()),
+    )).scalar_one_or_none()
+    if weekly_result is None:
+        weekly_result = RealizationPersonResult(
+            period_id=weekly_period.id,
+            user_id=result.user_id,
+            department_id=result.department_id or weekly_period.department_id,
         )
-        for user_id in user_ids
-    }
+        db.add(weekly_result)
+        await db.flush()
+    return weekly_period, weekly_result
 
 
 def _can_capture_current_week_final(period: RealizationPeriod, *, today: date | None = None) -> bool:
@@ -411,6 +415,37 @@ def _merge_daily_report_timeline_evidence(
                 item.get("tasks") or [],
                 evidence_by_user_day.get((user_id, item["date"]), []),
             )
+
+
+def _task_uuid(task: dict) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(task.get("task_id")))
+    except (TypeError, ValueError):
+        return None
+
+
+async def _task_creation_days(
+    db: AsyncSession, tasks: Iterable[dict]
+) -> dict[uuid.UUID, date]:
+    task_ids = {task_id for task_id in map(_task_uuid, tasks) if task_id is not None}
+    if not task_ids:
+        return {}
+    rows = (
+        await db.execute(select(Task.id, Task.created_at).where(Task.id.in_(task_ids)))
+    ).all()
+    return {
+        row.id: created
+        for row in rows
+        if (created := local_day(row.created_at)) is not None
+    }
+
+
+def _apply_creation_days(tasks: Iterable[dict], created_days: dict[uuid.UUID, date]) -> None:
+    for task in tasks:
+        task_id = _task_uuid(task)
+        created = created_days.get(task_id) if task_id else None
+        if created is not None:
+            task["created_date"] = created.isoformat()
 
 
 def _timeline_task_belongs_on_day(
@@ -617,6 +652,52 @@ async def _weekly_response(
             if task_key:
                 daily_tasks_by_user.setdefault(daily_result.user_id, {})[task_key] = task
 
+    # A daily snapshot freezes only what was known the moment the day was
+    # calculated, so extras, deadlines and quantities registered afterwards
+    # never reach the week. Re-read every working day live so the week
+    # classifies exactly the obligations the daily view shows.
+    live_user_ids = {row.user_id for row in visible}
+    if live_user_ids and period.department_id is not None:
+        for current_day in sorted(working_days):
+            day_key = current_day.isoformat()
+            live_day = await build_live_daily_realization(
+                db, department_id=period.department_id, day=current_day
+            )
+            for person in live_day.get("people") or []:
+                try:
+                    person_id = uuid.UUID(str(person.get("user_id")))
+                except (TypeError, ValueError):
+                    continue
+                live_tasks = [dict(task) for task in person.get("tasks") or []]
+                if person_id not in live_user_ids or not live_tasks:
+                    continue
+                timeline = daily_by_user.setdefault(person_id, [])
+                item = next(
+                    (entry for entry in timeline if entry["date"] == day_key), None
+                )
+                if item is None:
+                    item = {
+                        "date": day_key,
+                        "has_snapshot": False,
+                        "daily_progress_percent": 0,
+                        "weekly_progress_percent": 0,
+                        "planned_count": 0,
+                        "completed_count": 0,
+                        "weekly_planned_count": 0,
+                        "weekly_completed_count": 0,
+                        "additional_count": 0,
+                        "attendance": [],
+                        "tasks": [],
+                    }
+                    timeline.append(item)
+                item["tasks"] = _dedupe_timeline_tasks(
+                    [*(item.get("tasks") or []), *live_tasks]
+                )
+                for task in live_tasks:
+                    task_key = str(task.get("task_id") or task.get("match_key") or "")
+                    if task_key:
+                        daily_tasks_by_user.setdefault(person_id, {})[task_key] = task
+
     close_events = (
         (
             await db.execute(
@@ -748,6 +829,7 @@ async def _weekly_response(
                 }
 
     planned_tasks_by_user_day: dict[uuid.UUID, dict[str, list[dict]]] = {}
+    planned_snapshot: WeeklyPlannerSnapshot | None = None
     if period.planned_snapshot_id is not None:
         planned_snapshot = await db.get(WeeklyPlannerSnapshot, period.planned_snapshot_id)
         if planned_snapshot is not None:
@@ -925,15 +1007,21 @@ async def _weekly_response(
                         for task in actual_tasks
                         if str(task.get("task_id") or task.get("match_key") or "") not in planned_keys
                     )
-                    merged_keys = {
-                        str(task.get("task_id") or task.get("match_key") or "")
-                        for task in merged_tasks
+                    merged_index_by_key = {
+                        str(task.get("task_id") or task.get("match_key") or ""): index
+                        for index, task in enumerate(merged_tasks)
                     }
-                    merged_tasks.extend(
-                        task
-                        for task in scheduled_system_tasks
-                        if str(task.get("task_id") or task.get("match_key") or "") not in merged_keys
-                    )
+                    for system_task in scheduled_system_tasks:
+                        task_key = str(
+                            system_task.get("task_id") or system_task.get("match_key") or ""
+                        )
+                        index = merged_index_by_key.get(task_key)
+                        if index is None:
+                            merged_tasks.append(system_task)
+                            continue
+                        # Live facts describe the execution, the schedule fact
+                        # carries the planner attribution. Keep both.
+                        merged_tasks[index] = {**system_task, **merged_tasks[index]}
                     item["tasks"] = _dedupe_timeline_tasks(merged_tasks)
             current_day += timedelta(days=1)
         timeline.sort(key=lambda item: item["date"])
@@ -1144,14 +1232,29 @@ async def _weekly_response(
                     if daily_comment is not None
                     else task_comment_map.get((task_uuid, row.user_id)) if task_uuid else None
                 )
-    answers_by_result = await _latest_question_answers(db, [row.id for row in visible if row.period_id == period.id])
-    daily_summaries = await _daily_checklist_summaries(
-        db, period=period, user_ids=[row.user_id for row in visible], common_leave=common_leave,
-    ) if period.status != RealizationPeriodStatus.LOCKED.value else {}
+    # The weekly plan snapshot is sometimes captured mid-week and by then it
+    # already contains the week's new work, so it cannot tell plan from extra.
+    # The task's own creation date can, and it comes from the database rather
+    # than from whatever a snapshot happened to freeze.
+    weekly_tasks = [
+        *(
+            task
+            for timeline in daily_by_user.values()
+            for timeline_item in timeline
+            for task in timeline_item.get("tasks") or []
+        ),
+        *(task for tasks in daily_tasks_by_user.values() for task in tasks.values()),
+        *(task for row in visible for task in (row.facts_json or {}).get("tasks") or []),
+    ]
+    creation_days = await _task_creation_days(db, weekly_tasks)
+    _apply_creation_days(weekly_tasks, creation_days)
+    answers_by_user = await _weekly_manual_answers(
+        db, period=period, user_ids=[row.user_id for row in visible]
+    )
     answerer_ids = {
         answer.answered_by
-        for result_answers in answers_by_result.values()
-        for answer in result_answers.values()
+        for user_answers in answers_by_user.values()
+        for answer in user_answers.values()
     }
     answerer_names = {
         actor.id: actor.full_name
@@ -1179,8 +1282,13 @@ async def _weekly_response(
                 if daily_comment is not None
                 else task_comment_map.get((task_uuid, row.user_id)) if task_uuid else None
             )
+        _apply_creation_days(facts["tasks"], creation_days)
         facts["daily_timeline"] = daily_by_user.get(row.user_id, [])
-        facts.update(build_weekly_task_metrics(facts["tasks"], facts["daily_timeline"]))
+        facts.update(
+            build_weekly_task_metrics(
+                facts["tasks"], facts["daily_timeline"], week_start=period.start_date
+            )
+        )
         facts.update(build_weekly_question_metrics(facts["daily_timeline"]))
         facts["question_scope"] = "WEEKLY"
         facts["observations"] = live_by_user.get(row.user_id, [])
@@ -1209,19 +1317,15 @@ async def _weekly_response(
                 facts.get("tasks") or []
             )
             facts["questions"] = build_live_questions(facts)
-        latest_answers = answers_by_result.get(row.id, {})
         direct_answers = {
             key: _answer_payload(answer, answerer_names.get(answer.answered_by))
-            for key, answer in latest_answers.items()
+            for key, answer in answers_by_user.get(row.user_id, {}).items()
         }
         # Old FINAL snapshots may still classify meetings as automatic.
         for question in facts.get("questions") or []:
             if question.get("key") == "respected_meetings":
                 question["source_status"] = "MANUAL_UNANSWERED"
-        apply_checklist_answers(
-            facts, direct_answers=direct_answers,
-            daily_summaries=(facts.get("daily_question_summary") or {}) if period.status == RealizationPeriodStatus.LOCKED.value else daily_summaries.get(row.user_id, {}),
-        )
+        apply_checklist_answers(facts, direct_answers=direct_answers)
         facts["manager_review_comment"] = row.manager_comment
         payload["facts_json"] = facts
         if user.role == UserRole.STAFF:
@@ -1239,6 +1343,11 @@ async def _weekly_response(
     has_planned = period.planned_snapshot_id is not None
     has_final = period.final_snapshot_id is not None
     has_reviewed_result = any(row.reviewed_at is not None for row in rows)
+    # A plan photographed on Thursday is not a plan. Saying when it was taken
+    # lets the page warn instead of presenting mid-week work as planned.
+    planned_captured_day = (
+        local_day(planned_snapshot.created_at) if planned_snapshot is not None else None
+    )
     message = None
     if not has_planned:
         message = "Nuk ka PLANNED snapshot zyrtar për këtë javë."
@@ -1251,6 +1360,7 @@ async def _weekly_response(
         period=RealizationPeriodOut.model_validate(period),
         department_name=department_name,
         has_planned_snapshot=has_planned,
+        planned_snapshot_captured_day=planned_captured_day,
         has_final_snapshot=has_final,
         can_calculate=(
             has_planned
@@ -1822,11 +1932,13 @@ async def _daily_response(
             await db.execute(select(User).where(User.id.in_([item.user_id for item in rows])))
         ).scalars().all()
     } if rows else {}
-    answers_by_result = await _latest_question_answers(db, [row.id for row in rows])
+    answers_by_user = await _weekly_manual_answers(
+        db, period=period, user_ids=[row.user_id for row in rows]
+    )
     answerer_ids = {
         answer.answered_by
-        for result_answers in answers_by_result.values()
-        for answer in result_answers.values()
+        for user_answers in answers_by_user.values()
+        for answer in user_answers.values()
     }
     answerer_names = {
         actor.id: actor.full_name
@@ -1841,36 +1953,10 @@ async def _daily_response(
         # Rebuild from the stored facts so historical daily periods also expose
         # the current 17-question checklist without rewriting their snapshot.
         facts["questions"] = build_live_questions(facts)
-        latest_answers = answers_by_result.get(row.id, {})
-        facts["manual_answers"] = {
+        apply_checklist_answers(facts, direct_answers={
             key: _answer_payload(answer, answerer_names.get(answer.answered_by))
-            for key, answer in latest_answers.items()
-        }
-        enriched_questions = []
-        for question in facts.get("questions") or []:
-            item = dict(question)
-            question_key = str(item.get("key"))
-            answer = (
-                latest_answers.get(question_key)
-                if question_key in MANDATORY_MANUAL_QUESTION_KEYS
-                else None
-            )
-            if answer is not None:
-                item["final_value"] = (answer.value_json or {}).get("value")
-                item["manager_comment"] = answer.comment
-                item["linked_evidence_ids"] = [
-                    str(value) for value in (answer.evidence_ids_json or [])
-                ]
-                item["source_status"] = "MANUAL_ANSWERED"
-            enriched_questions.append(item)
-        facts["questions"] = enriched_questions
-        answered_mandatory = set(latest_answers) & MANDATORY_MANUAL_QUESTION_KEYS
-        facts["manual_question_completeness"] = {
-            "answered": len(answered_mandatory),
-            "required": len(MANDATORY_MANUAL_QUESTION_KEYS),
-            "missing_keys": sorted(MANDATORY_MANUAL_QUESTION_KEYS - answered_mandatory),
-            "complete": answered_mandatory == MANDATORY_MANUAL_QUESTION_KEYS,
-        }
+            for key, answer in answers_by_user.get(row.user_id, {}).items()
+        })
         payload["facts_json"] = facts
         if user.role == UserRole.STAFF:
             payload["manager_comment"] = None
@@ -1946,6 +2032,24 @@ async def get_daily_realization(
         db, department_id=department_id, day=day,
         user_id=user_id, exceptions_only=exceptions_only,
     )
+    live_by_user = {
+        str(person.get("user_id")): person
+        for person in (response.live or {}).get("people", [])
+    }
+    for person in response.people:
+        live_person = live_by_user.get(str(person.user_id))
+        if live_person is None:
+            continue
+        facts = dict(person.facts_json or {})
+        facts["questions"] = build_daily_questions_from_live(facts, live_person)
+        facts["daily_planned_count"] = int(
+            (live_person.get("metrics") or {}).get("original_planned_count") or 0
+        )
+        facts["daily_completed_count"] = int(
+            (live_person.get("metrics") or {}).get("planned_completed_today_count") or 0
+        )
+        facts["question_scope"] = "DAILY"
+        person.facts_json = facts
     return response
 
 
@@ -2022,6 +2126,15 @@ async def prepare_daily_checklist(
                 ),
                 "no_progress_count": int(metrics.get("no_progress_count") or 0),
                 "additional_count": int(metrics.get("additional_count") or 0),
+                "additional_completed_count": int(
+                    metrics.get("additional_completed_count") or 0
+                ),
+                "additional_in_progress_count": int(
+                    metrics.get("additional_in_progress_count") or 0
+                ),
+                "additional_no_progress_count": int(
+                    metrics.get("additional_no_progress_count") or 0
+                ),
                 "approved_postponement_count": int(
                     metrics.get("approved_postponement_count") or 0
                 ),
@@ -2762,6 +2875,8 @@ async def save_question_answer(
     elif question_key in MANUAL_BOOLEAN_QUESTION_KEYS:
         if payload.value is not None and not isinstance(payload.value, bool):
             raise HTTPException(status_code=422, detail="Boolean questions accept Po or Jo")
+        if payload.value is True and not (payload.comment and payload.comment.strip()):
+            raise HTTPException(status_code=422, detail="Përgjigjja Po kërkon koment")
     elif question_key in MANUAL_TEXT_QUESTION_KEYS:
         if not isinstance(payload.value, str) or not payload.value.strip():
             raise HTTPException(status_code=422, detail="This question requires manager text")
@@ -2798,11 +2913,17 @@ async def save_question_answer(
         }
         if not supplied_ids.issubset(question_support_ids | observation_ids):
             raise HTTPException(status_code=422, detail="Linked evidence must belong to this period")
+    try:
+        target_period, target_result = await _weekly_answer_target(
+            db, period=period, result=result, actor_id=user.id
+        )
+    except RealizationWorkflowError as exc:
+        raise _error(exc)
     previous = (
         await db.execute(
             select(RealizationQuestionAnswer)
             .where(
-                RealizationQuestionAnswer.result_id == result.id,
+                RealizationQuestionAnswer.result_id == target_result.id,
                 RealizationQuestionAnswer.question_key == question_key,
             )
             .order_by(
@@ -2814,8 +2935,8 @@ async def save_question_answer(
     ).scalar_one_or_none()
     now = datetime.now(timezone.utc)
     answer = RealizationQuestionAnswer(
-        period_id=period.id,
-        result_id=result.id,
+        period_id=target_period.id,
+        result_id=target_result.id,
         question_key=question_key,
         value_json=(
             {"value": None, "cleared": True}
@@ -2830,23 +2951,11 @@ async def save_question_answer(
         updated_at=now,
     )
     db.add(answer)
+    # The answer feeds both the day the manager was looking at and the week it
+    # is stored against, so both AI analyses need regenerating.
     mark_analysis_stale(result)
-    if period.period_type == "DAILY":
-        # A daily correction also changes the evidence supplied to weekly AI.
-        weekly_results = (await db.execute(
-            select(RealizationPersonResult)
-            .join(RealizationPeriod, RealizationPeriod.id == RealizationPersonResult.period_id)
-            .where(
-                RealizationPeriod.period_type == "WEEKLY",
-                RealizationPeriod.department_id == period.department_id,
-                RealizationPeriod.start_date <= period.start_date,
-                RealizationPeriod.end_date >= period.end_date,
-                RealizationPeriod.status != RealizationPeriodStatus.LOCKED.value,
-                RealizationPersonResult.user_id == result.user_id,
-            )
-        )).scalars().all()
-        for weekly_result in weekly_results:
-            mark_analysis_stale(weekly_result)
+    if target_result is not result:
+        mark_analysis_stale(target_result)
     await db.flush()
     add_audit_log(
         db=db,
@@ -2859,7 +2968,12 @@ async def save_question_answer(
     )
     await db.commit()
     return RealizationQuestionAnswerOut.model_validate(
-        {**_answer_payload(answer, user.full_name), "period_id": period.id, "result_id": result.id, "question_key": question_key}
+        {
+            **_answer_payload(answer, user.full_name),
+            "period_id": target_period.id,
+            "result_id": target_result.id,
+            "question_key": question_key,
+        }
     )
 
 
@@ -2889,12 +3003,13 @@ async def review_person_result(
     ).scalar_one_or_none()
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person result not found")
-    latest_answers = (await _latest_question_answers(db, [result.id])).get(result.id, {})
-    daily_summaries = await _daily_checklist_summaries(db, period=period, user_ids=[result.user_id]) if period.period_type == "WEEKLY" else {}
+    latest_answers = (
+        await _weekly_manual_answers(db, period=period, user_ids=[result.user_id])
+    ).get(result.user_id, {})
     review_facts = dict(result.facts_json or {})
     apply_checklist_answers(
-        review_facts, direct_answers={key: _answer_payload(answer) for key, answer in latest_answers.items()},
-        daily_summaries=daily_summaries.get(result.user_id, {}),
+        review_facts,
+        direct_answers={key: _answer_payload(answer) for key, answer in latest_answers.items()},
     )
     missing_manual = review_facts["manual_question_completeness"]["missing_keys"]
     if missing_manual:
@@ -3177,6 +3292,15 @@ async def _manager_review_context(
         raise HTTPException(status_code=403, detail="Forbidden")
     if not editing and not can_view:
         raise HTTPException(status_code=403, detail="Forbidden")
+    # The rating and comment are one weekly judgment, recorded or corrected from
+    # whichever day the manager happens to have open.
+    try:
+        if editing:
+            period = await ensure_weekly_scope_period(db, period=period, created_by=actor.id)
+        else:
+            period = await find_weekly_scope_period(db, period=period) or period
+    except RealizationWorkflowError as exc:
+        raise _error(exc)
     return period, subject, can_edit
 
 

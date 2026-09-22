@@ -4,6 +4,7 @@ import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import ValidationError
@@ -15,6 +16,8 @@ from app.schemas.meeting_scheduler import MeetingScheduleValidationIn
 from app.services.meeting_scheduler import (
     meeting_occurrence_window,
     microsoft_schedule_conflicts,
+    one_h_schedule_conflicts,
+    suggest_first_free_slot,
     validate_meeting_schedule,
 )
 
@@ -42,7 +45,7 @@ class _ValidationDb:
 
 
 def _base_payload(**overrides):
-    start = datetime.now(timezone.utc) + timedelta(days=2)
+    start = (datetime.now(timezone.utc) + timedelta(days=2)).replace(hour=6, minute=0, second=0, microsecond=0)
     values = {
         "title": "TAK EXT | Client | Demo",
         "meeting_type": "external",
@@ -221,3 +224,71 @@ def test_external_meeting_blocks_overlapping_external_without_shared_participant
     assert result.can_create is False
     assert any(conflict.source == "tak_ext" for conflict in result.conflicts)
     assert any("TAK EXT" in error for error in result.errors)
+
+
+def test_global_one_h_conflict_uses_fifteen_minute_window_and_boundaries() -> None:
+    participant_id = uuid.uuid4()
+    # Europe/Budapest is UTC+2 on this date, so 10:00 local is 08:00 UTC.
+    db = _ValidationDb([])
+    conflicts, _ = asyncio.run(one_h_schedule_conflicts(
+        db,
+        participant_ids={participant_id},
+        starts_at=datetime(2026, 9, 21, 7, 50, tzinfo=timezone.utc),
+        ends_at=datetime(2026, 9, 21, 8, 20, tzinfo=timezone.utc),
+    ))
+    assert len(conflicts) == 1
+    assert conflicts[0].source == "one_h"
+    assert conflicts[0].ends_at - conflicts[0].starts_at == timedelta(minutes=15)
+
+    db = _ValidationDb([])
+    conflicts, _ = asyncio.run(one_h_schedule_conflicts(
+        db,
+        participant_ids={participant_id},
+        starts_at=datetime(2026, 9, 21, 8, 15, tzinfo=timezone.utc),
+        ends_at=datetime(2026, 9, 21, 8, 45, tzinfo=timezone.utc),
+    ))
+    assert conflicts == []
+
+
+def test_suggestion_moves_in_fifteen_minute_steps_until_free() -> None:
+    conflict_start = datetime(2026, 9, 21, 8, 0, tzinfo=timezone.utc)
+    conflict = SimpleNamespace(starts_at=conflict_start, ends_at=conflict_start + timedelta(minutes=15))
+    suggestion = suggest_first_free_slot(
+        starts_at=conflict_start,
+        ends_at=conflict_start + timedelta(minutes=30),
+        one_h_conflicts=[conflict],
+        blockers=[
+            (conflict_start, conflict_start + timedelta(minutes=15)),
+            (conflict_start + timedelta(minutes=15), conflict_start + timedelta(minutes=45)),
+        ],
+    )
+    assert suggestion is not None
+    assert suggestion.starts_at == conflict_start + timedelta(minutes=45)
+    assert suggestion.ends_at == conflict_start + timedelta(minutes=75)
+
+
+def test_validation_returns_one_h_conflict_and_first_free_suggestion() -> None:
+    participant_id = uuid.UUID("00000000-0000-0000-0000-000000000002")
+    local_tz = ZoneInfo("Europe/Tirane")
+    local_start = datetime.now(local_tz).replace(hour=9, minute=50, second=0, microsecond=0) + timedelta(days=10)
+    while local_start.weekday() >= 5:
+        local_start += timedelta(days=1)
+    participant = SimpleNamespace(id=participant_id, is_active=True)
+    db = _ValidationDb([
+        [participant],
+        [],
+        [],
+        [],
+    ])
+    payload = MeetingScheduleValidationIn(**_base_payload(
+        meeting_type="internal",
+        starts_at=local_start.astimezone(timezone.utc),
+        ends_at=(local_start + timedelta(minutes=30)).astimezone(timezone.utc),
+    ))
+
+    result = asyncio.run(validate_meeting_schedule(db, payload))
+
+    assert result.can_create is False
+    assert any(conflict.source == "one_h" for conflict in result.conflicts)
+    assert result.suggested_slot is not None
+    assert result.suggested_slot.starts_at.astimezone(local_tz).strftime("%H:%M") == "10:15"

@@ -32,7 +32,7 @@ QUESTION_LABELS = {
     "approved_postponement": "A ka ndryshuar prioriteti ose ka shtyrje me konfirmim?",
     "requested_extra_tasks": "Kërkoi detyra shtesë?",
     "helped_colleague": "Ndihmoi koleg?",
-    "extra_engagement": "Angazhim ekstra?",
+    "extra_engagement": "A pati detyra ekstra?",
     "gave_proposal": "Dha propozim?",
     "respected_meetings": "Respektoi takimet?",
     "closed_tasks": "Mbylli detyrat?",
@@ -77,7 +77,6 @@ MANUAL_BOOLEAN_QUESTION_KEYS = {
     "respected_meetings",
     "requested_extra_tasks",
     "helped_colleague",
-    "extra_engagement",
     "gave_proposal",
     "week_positive",
     "week_problems",
@@ -178,10 +177,28 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
         if is_daily
         else count("weekly_additional_count")
     )
-    weekly_fast = (
-        int(counters.get("fast_task_count", 0) or 0)
-        if is_daily
-        else count("weekly_fast_task_count")
+    additional_completed = count(
+        "additional_completed_count" if is_daily else "weekly_additional_completed_count"
+    )
+    additional_in_progress = count(
+        "additional_in_progress_count" if is_daily else "weekly_additional_in_progress_count"
+    )
+    additional_no_progress = count(
+        "additional_no_progress_count" if is_daily else "weekly_additional_no_progress_count",
+        max(0, weekly_added - additional_completed - additional_in_progress),
+    )
+    additional_postponed = count(
+        "additional_postponed_count" if is_daily else "weekly_additional_postponed_count"
+    )
+    additional_todo = count(
+        "additional_todo_count" if is_daily else "weekly_additional_todo_count",
+        max(
+            0,
+            weekly_added
+            - additional_completed
+            - additional_in_progress
+            - additional_postponed,
+        ),
     )
     no_progress_count = (
         int(counters.get("no_progress_count", 0) or 0)
@@ -240,14 +257,6 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
         if (item.get("evidence_json") or {}).get("affected_user_id")
     ]
     repeated = category(negative, "REPEATED_PROBLEM")
-    engagement = sorted(
-        {
-            str(item.get("category"))
-            for item in positive
-            if item.get("category")
-            in {"EXTRA_TASK", "QUALITY", "TIME_SAVED", "HELPED_COLLEAGUE", "PROPOSAL"}
-        }
-    )
     positive_comments = [
         str(item["comment"]).strip()
         for item in positive
@@ -301,7 +310,14 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         _question(
             "new_tasks_added",
-            {"yes": weekly_added > 0, "count": weekly_added, "fast_tasks": weekly_fast},
+            {
+                "yes": weekly_added > 0,
+                "total": weekly_added,
+                "completed": additional_completed,
+                "in_progress": additional_in_progress,
+                "todo": additional_todo,
+                "postponed": additional_postponed,
+            },
             evidence_ids=added_ids,
             answer_type="object",
         ),
@@ -339,10 +355,16 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
             evidence_ids=ids(helped),
             answer_type="boolean",
         ),
-        _manual_question(
+        _question(
             "extra_engagement",
-            {"verified_categories": engagement, "additional_tasks_candidate": weekly_added},
-            evidence_ids=ids(positive),
+            {
+                "answer": weekly_added > 0,
+                "total": weekly_added,
+                "completed": additional_completed,
+                "in_progress": additional_in_progress,
+                "no_progress": additional_no_progress,
+            },
+            evidence_ids=added_ids,
             answer_type="object",
         ),
         _manual_question(
@@ -423,6 +445,83 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def build_daily_questions_from_live(
+    stored_facts: dict[str, Any], live_person: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Use the Daily table's baseline and outcomes for automatic questions.
+
+    Manual answers remain sourced from the saved checklist. This prevents an
+    older weekly-snapshot calculation from disagreeing with the immutable daily
+    baseline shown in the staff table.
+    """
+    metrics = live_person.get("metrics") or {}
+    live_tasks = live_person.get("tasks") or []
+    question_tasks = []
+    for raw in live_tasks:
+        task = dict(raw)
+        task["attribution"] = (
+            "planned_today" if task.get("in_original_plan") else "added_after_weekly_plan"
+        )
+        classification = str(task.get("classification") or "").upper()
+        if classification == "POSTPONED_APPROVED":
+            task["postponement"] = "approved_postponement"
+        elif classification == "POSTPONED_UNAPPROVED":
+            task["postponement"] = "unapproved_postponement"
+        question_tasks.append(task)
+
+    counters = dict(stored_facts.get("counters") or {})
+    extra_postponed_count = sum(
+        not task.get("in_original_plan")
+        and str(task.get("classification") or "").upper().startswith("POSTPONED_")
+        for task in live_tasks
+    )
+    extra_todo_count = max(
+        0,
+        int(metrics.get("additional_count") or 0)
+        - int(metrics.get("additional_completed_count") or 0)
+        - int(metrics.get("additional_in_progress_count") or 0)
+        - extra_postponed_count,
+    )
+    counters.update({
+        "planned_count": int(metrics.get("original_planned_count") or 0),
+        "completed_count": int(metrics.get("planned_completed_today_count") or 0),
+        "additional_count": int(metrics.get("additional_count") or 0),
+        "additional_completed_count": int(
+            metrics.get("additional_completed_count") or 0
+        ),
+        "additional_in_progress_count": int(
+            metrics.get("additional_in_progress_count") or 0
+        ),
+        "additional_no_progress_count": int(
+            metrics.get("additional_no_progress_count") or 0
+        ),
+        "additional_postponed_count": extra_postponed_count,
+        "additional_todo_count": extra_todo_count,
+        "in_progress_count": int(metrics.get("in_progress_count") or 0),
+        "no_progress_count": int(metrics.get("no_progress_count") or 0),
+    })
+    live_facts = {
+        **stored_facts,
+        "question_scope": "DAILY",
+        "tasks": question_tasks,
+        "counters": counters,
+        "daily_planned_count": counters["planned_count"],
+        "daily_completed_count": counters["completed_count"],
+    }
+    fresh_questions = build_live_questions(live_facts)
+    saved_manual = {
+        str(question.get("key")): question
+        for question in stored_facts.get("questions") or []
+        if str(question.get("source_status") or "").startswith("MANUAL")
+    }
+    return [
+        saved_manual.get(str(question.get("key")), question)
+        if str(question.get("source_status") or "").startswith("MANUAL")
+        else question
+        for question in fresh_questions
+    ]
+
+
 def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> list[dict[str, Any]]:
     c = person["counters"]
     tasks = person["tasks"]
@@ -469,13 +568,6 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
     ]
     helped = [item for item in positive if item["category"] == "HELPED_COLLEAGUE"]
     proposals = [item for item in positive if item["category"] == "PROPOSAL"]
-    engagement_categories = {
-        item["category"]
-        for item in positive
-        if item["category"] in {
-            "EXTRA_TASK", "QUALITY", "TIME_SAVED", "HELPED_COLLEAGUE", "PROPOSAL"
-        }
-    }
     blockers = [
         item for item in negative
         if item["category"] == "BLOCKER"
@@ -521,9 +613,20 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
             "new_tasks_added",
             {
                 "yes": bool(c.get("additional_count", 0)),
-                "count": c.get("additional_count", 0),
+                "total": c.get("additional_count", 0),
                 "completed": c.get("additional_completed_count", 0),
-                "open": c.get("additional_count", 0) - c.get("additional_completed_count", 0),
+                "in_progress": c.get("additional_in_progress_count", 0),
+                "todo": c.get(
+                    "additional_todo_count",
+                    max(
+                        0,
+                        int(c.get("additional_count", 0) or 0)
+                        - int(c.get("additional_completed_count", 0) or 0)
+                        - int(c.get("additional_in_progress_count", 0) or 0)
+                        - int(c.get("additional_postponed_count", 0) or 0),
+                    ),
+                ),
+                "postponed": c.get("additional_postponed_count", 0),
                 "task_ids": additional_ids,
             },
             evidence_ids=additional_ids,
@@ -556,10 +659,27 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
             evidence_ids=[str(item["id"]) for item in helped],
             answer_type="boolean",
         ),
-        _manual_question(
+        _question(
             "extra_engagement",
-            {"count": len(engagement_categories), "categories": sorted(engagement_categories)},
-            evidence_ids=[str(item["id"]) for item in positive],
+            {
+                "answer": int(c.get("additional_count", 0) or 0) > 0,
+                "total": int(c.get("additional_count", 0) or 0),
+                "completed": int(c.get("additional_completed_count", 0) or 0),
+                "in_progress": int(c.get("additional_in_progress_count", 0) or 0),
+                "no_progress": int(
+                    c.get(
+                        "additional_no_progress_count",
+                        max(
+                            0,
+                            int(c.get("additional_count", 0) or 0)
+                            - int(c.get("additional_completed_count", 0) or 0)
+                            - int(c.get("additional_in_progress_count", 0) or 0),
+                        ),
+                    )
+                    or 0
+                ),
+            },
+            evidence_ids=additional_ids,
             answer_type="object",
         ),
         _manual_question(

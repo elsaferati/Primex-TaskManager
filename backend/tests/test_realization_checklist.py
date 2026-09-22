@@ -5,117 +5,113 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 import uuid
 
-from app.services.realization_calculator import MANDATORY_MANUAL_QUESTION_KEYS, build_live_questions
-from app.services.realization_checklist import aggregate_daily_answers, apply_checklist_answers
-from app.services.realization_ai import _safe_input
-from app.api.routers.realization import _daily_checklist_summaries, _latest_question_answers
+from app.services.realization_calculator import (
+    MANDATORY_MANUAL_QUESTION_KEYS,
+    build_daily_questions_from_live,
+    build_live_questions,
+)
+
+
+def test_daily_automatic_questions_use_the_same_metrics_as_the_live_table():
+    stored = {
+        "daily_planned_count": 7,
+        "daily_completed_count": 3,
+        "questions": build_live_questions({"date": "2026-09-18"}),
+    }
+    live_person = {
+        "metrics": {
+            "original_planned_count": 6,
+            "planned_completed_today_count": 2,
+            "additional_count": 7,
+            "additional_completed_count": 3,
+            "additional_in_progress_count": 2,
+            "additional_no_progress_count": 2,
+            "in_progress_count": 0,
+            "no_progress_count": 1,
+        },
+        "tasks": [
+            {"task_id": "planned", "in_original_plan": True, "source_type": "project"},
+            {"task_id": "extra", "in_original_plan": False, "source_type": "fast"},
+        ],
+    }
+
+    questions = {
+        question["key"]: question
+        for question in build_daily_questions_from_live(stored, live_person)
+    }
+
+    assert questions["plan_completed"]["auto_value"] == {
+        "answer": False,
+        "planned": 6,
+        "completed": 2,
+        "remaining": 4,
+    }
+    assert questions["new_tasks_added"]["auto_value"] == {
+        "yes": True,
+        "total": 7,
+        "completed": 3,
+        "in_progress": 2,
+        "todo": 2,
+        "postponed": 0,
+    }
+    assert questions["extra_engagement"]["source_status"] == "AUTO"
+    assert questions["extra_engagement"]["auto_value"] == {
+        "answer": True,
+        "total": 7,
+        "completed": 3,
+        "in_progress": 2,
+        "no_progress": 2,
+    }
+from app.models.realization import RealizationPersonResult
+from app.services.realization_checklist import apply_checklist_answers
+from app.api.routers.realization import (
+    _latest_question_answers,
+    _weekly_answer_target,
+    _weekly_manual_answers,
+)
 
 
 MONDAY = date(2026, 9, 14)
 TUESDAY = date(2026, 9, 15)
 
 
-def answer(key, value, day=MONDAY, comment=None, revision=1):
-    return {
-        "id": f"{day}:{key}:{revision}", "question_key": key,
-        "value": value, "date": day.isoformat(), "comment": comment,
-        "answered_at": f"{day}T10:00:0{revision}+00:00",
-        "evidence_ids": [f"evidence-{day}-{revision}"],
-    }
-
-
-class TestDailyChecklistRollup(unittest.TestCase):
-    def rollup(self, records, days=None):
-        return aggregate_daily_answers(records, expected_dates=days if days is not None else {MONDAY, TUESDAY})
-
-    def test_one_missed_meeting_marks_week_negative_and_keeps_date_comment(self):
-        result = self.rollup([
-            answer("respected_meetings", True),
-            answer("respected_meetings", False, TUESDAY, "Nuk mori pjesë në M3"),
-        ])["respected_meetings"]
-        self.assertFalse(result["value"])
-        self.assertTrue(result["complete"])
-        self.assertEqual(result["no_days"], 1)
-        self.assertIn("2026-09-15: Nuk mori pjesë në M3", result["comment"])
-        self.assertEqual(result["history"][1]["date"], "2026-09-15")
-
-    def test_one_positive_help_occurrence_is_preserved_for_the_week(self):
-        result = self.rollup([answer("helped_colleague", True), answer("helped_colleague", False, TUESDAY)])["helped_colleague"]
-        self.assertTrue(result["value"])
-        self.assertEqual(result["yes_days"], 1)
-        self.assertEqual(result["no_days"], 1)
-
-    def test_latest_correction_does_not_double_count_an_old_answer(self):
-        result = self.rollup([
-            answer("respected_meetings", False),
-            answer("respected_meetings", True, revision=2),
-            answer("respected_meetings", True, TUESDAY),
-        ])["respected_meetings"]
-        self.assertTrue(result["value"])
-        self.assertEqual(result["answered_days"], 2)
-        self.assertEqual(result["no_days"], 0)
-
-    def test_missing_day_is_partial_and_does_not_satisfy_weekly_review(self):
-        summaries = self.rollup([answer("helped_colleague", False)])
+class TestWeeklyChecklistAnswers(unittest.TestCase):
+    def test_one_answer_per_question_drives_the_whole_week(self):
         facts = {"questions": build_live_questions({})}
-        apply_checklist_answers(facts, direct_answers={}, daily_summaries=summaries)
+        apply_checklist_answers(facts, direct_answers={
+            "respected_meetings": {"value": False, "comment": "Mungoi M3 të martën"},
+        })
+        question = next(item for item in facts["questions"] if item["key"] == "respected_meetings")
+        self.assertIs(question["final_value"], False)
+        self.assertEqual(question["manager_comment"], "Mungoi M3 të martën")
+        self.assertEqual(question["source_status"], "MANUAL_ANSWERED")
+        self.assertEqual(facts["manual_answers"]["respected_meetings"]["value"], False)
+
+    def test_unanswered_question_blocks_weekly_review(self):
+        facts = {"questions": build_live_questions({})}
+        apply_checklist_answers(facts, direct_answers={})
         question = next(item for item in facts["questions"] if item["key"] == "helped_colleague")
-        self.assertEqual(question["source_status"], "MANUAL_DAILY_PARTIAL")
-        self.assertEqual(question["daily_summary"]["missing_dates"], ["2026-09-15"])
+        self.assertEqual(question["source_status"], "MANUAL_UNANSWERED")
         self.assertIn("helped_colleague", facts["manual_question_completeness"]["missing_keys"])
         self.assertNotIn("helped_colleague", facts["manual_answers"])
 
-    def test_empty_value_is_unfilled_and_does_not_count_as_an_answer(self):
-        result = self.rollup([answer("respected_meetings", None), answer("respected_meetings", True, TUESDAY)])["respected_meetings"]
-        self.assertTrue(result["value"])
-        self.assertEqual(result["answered_days"], 1)
-        self.assertEqual(result["missing_dates"], ["2026-09-14"])
-        empty = self.rollup([answer("respected_meetings", None)], {MONDAY})["respected_meetings"]
-        self.assertIsNone(empty["value"])
-        self.assertEqual(empty["missing_dates"], ["2026-09-14"])
-
-    def test_leave_or_future_dates_excluded_by_expected_scope(self):
-        result = self.rollup([answer("helped_colleague", True), answer("helped_colleague", False, TUESDAY)], {MONDAY})["helped_colleague"]
-        self.assertTrue(result["complete"])
-        self.assertEqual(result["answered_days"], 1)
-        self.assertEqual(result["expected_days"], 1)
-
-    def test_positive_question_counts_yes_days_and_keeps_comments(self):
-        result = self.rollup([
-            answer("week_positive", True, comment="Ndihmoi Elzën"),
-            answer("week_positive", False, TUESDAY),
-        ])["week_positive"]
-        self.assertTrue(result["value"])
-        self.assertEqual(result["yes_days"], 1)
-        self.assertEqual(result["no_days"], 1)
-        self.assertIn("Ndihmoi Elzën", result["comment"])
-
-    def test_weekly_manager_override_preserves_original_daily_evidence(self):
+    def test_all_eight_answers_satisfy_weekly_review(self):
         facts = {"questions": build_live_questions({})}
-        summaries = self.rollup([answer("respected_meetings", False)], {MONDAY})
-        apply_checklist_answers(facts, direct_answers={"respected_meetings": {"value": True, "comment": "Mungesa ishte e konfirmuar"}}, daily_summaries=summaries)
-        question = next(item for item in facts["questions"] if item["key"] == "respected_meetings")
-        self.assertTrue(question["final_value"])
-        self.assertEqual(question["source_status"], "MANUAL_ANSWERED")
-        self.assertFalse(question["daily_summary"]["value"])
-
-    def test_complete_rollup_of_all_manual_questions_satisfies_weekly_review(self):
-        records = [answer(key, False) for key in MANDATORY_MANUAL_QUESTION_KEYS]
-        facts = {"questions": build_live_questions({})}
-        apply_checklist_answers(facts, direct_answers={}, daily_summaries=self.rollup(records, {MONDAY}))
-        self.assertEqual(facts["manual_question_completeness"]["answered"], 9)
+        apply_checklist_answers(facts, direct_answers={
+            key: {"value": False, "comment": None} for key in MANDATORY_MANUAL_QUESTION_KEYS
+        })
+        self.assertEqual(facts["manual_question_completeness"]["answered"], 8)
         self.assertTrue(facts["manual_question_completeness"]["complete"])
 
-    def test_ai_receives_dates_comments_and_manual_source_even_when_partial(self):
+    def test_automatic_questions_are_never_overwritten_by_manual_answers(self):
         facts = {"questions": build_live_questions({})}
-        apply_checklist_answers(facts, direct_answers={}, daily_summaries=self.rollup([answer("respected_meetings", False, comment="Mungoi M3")]))
-        summary = _safe_input("result", facts)["daily_question_summary"]["respected_meetings"]
-        self.assertEqual(summary["missing_dates"], ["2026-09-15"])
-        self.assertEqual(summary["history"][0]["comment"], "Mungoi M3")
-        self.assertIn("MANUAL", summary["source"].replace("MANAGER", "MANUAL"))
+        apply_checklist_answers(facts, direct_answers={"plan_completed": {"value": True}})
+        question = next(item for item in facts["questions"] if item["key"] == "plan_completed")
+        self.assertNotEqual(question["source_status"], "MANUAL_ANSWERED")
+        self.assertNotIn("plan_completed", facts["manual_answers"])
 
 
-class TestDailyChecklistLoading(unittest.IsolatedAsyncioTestCase):
+class TestWeeklyChecklistLoading(unittest.IsolatedAsyncioTestCase):
     async def test_latest_clear_marker_restores_unfilled_state(self):
         result_id = uuid.uuid4()
         rows = [
@@ -140,32 +136,60 @@ class TestDailyChecklistLoading(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn("helped_colleague", latest[result_id])
 
-    async def test_rollup_keeps_people_separate_and_excludes_common_leave(self):
+    async def test_a_daily_view_reads_the_weekly_answers_of_each_person(self):
         first, second, department = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
         first_result = SimpleNamespace(id=uuid.uuid4(), user_id=first)
         second_result = SimpleNamespace(id=uuid.uuid4(), user_id=second)
-        period = SimpleNamespace(id=uuid.uuid4(), start_date=MONDAY, end_date=TUESDAY, department_id=department)
-        daily_period = SimpleNamespace(id=uuid.uuid4(), start_date=MONDAY)
+        daily = SimpleNamespace(id=uuid.uuid4(), period_type="DAILY", start_date=MONDAY, end_date=MONDAY, department_id=department)
+        weekly = SimpleNamespace(id=uuid.uuid4(), period_type="WEEKLY", department_id=department)
         now = datetime(2026, 9, 14, 10, tzinfo=timezone.utc)
 
         def stored(value):
             return SimpleNamespace(id=uuid.uuid4(), value_json={"value": value}, comment="M3", evidence_ids_json=[], answered_by=uuid.uuid4(), answered_at=now, updated_at=now, supersedes_answer_id=None)
 
-        db = SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(all=lambda: [(first_result, daily_period), (second_result, daily_period)])))
-        with patch("app.api.routers.realization._latest_question_answers", new=AsyncMock(return_value={
-            first_result.id: {"respected_meetings": stored(False)},
-            second_result.id: {"respected_meetings": stored(True)},
-        })):
-            results = await _daily_checklist_summaries(
-                db, period=period, user_ids=[first, second],
-                common_leave={first: SimpleNamespace(days={TUESDAY})},
-            )
-        self.assertFalse(results[first]["respected_meetings"]["value"])
-        self.assertTrue(results[first]["respected_meetings"]["complete"])
-        self.assertTrue(results[second]["respected_meetings"]["value"])
-        self.assertEqual(results[second]["respected_meetings"]["missing_dates"], ["2026-09-15"])
+        db = SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: [first_result, second_result])
+        )))
+        with patch("app.api.routers.realization.find_weekly_scope_period", new=AsyncMock(return_value=weekly)), \
+             patch("app.api.routers.realization._latest_question_answers", new=AsyncMock(return_value={
+                 first_result.id: {"respected_meetings": stored(False)},
+                 second_result.id: {"respected_meetings": stored(True)},
+             })):
+            results = await _weekly_manual_answers(db, period=daily, user_ids=[first, second])
+        self.assertFalse((results[first]["respected_meetings"].value_json)["value"])
+        self.assertTrue((results[second]["respected_meetings"].value_json)["value"])
         statement = db.execute.call_args.args[0]
-        query = str(statement)
-        self.assertIn("realization_periods.department_id =", query)
-        self.assertIn("realization_person_results.user_id IN", query)
-        self.assertIn(department, statement.compile().params.values())
+        self.assertIn("realization_person_results.user_id IN", str(statement))
+        self.assertIn(weekly.id, statement.compile().params.values())
+
+    async def test_answering_from_a_day_creates_and_targets_the_weekly_result(self):
+        department, user_id = uuid.uuid4(), uuid.uuid4()
+        daily = SimpleNamespace(id=uuid.uuid4(), period_type="DAILY", start_date=TUESDAY, department_id=department)
+        weekly = SimpleNamespace(id=uuid.uuid4(), period_type="WEEKLY", department_id=department, status="OPEN")
+        daily_result = SimpleNamespace(id=uuid.uuid4(), user_id=user_id, department_id=department)
+        added = []
+        db = SimpleNamespace(
+            execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: None)),
+            add=added.append,
+            flush=AsyncMock(),
+        )
+        with patch("app.api.routers.realization.ensure_weekly_scope_period", new=AsyncMock(return_value=weekly)):
+            target_period, target_result = await _weekly_answer_target(
+                db, period=daily, result=daily_result, actor_id=uuid.uuid4()
+            )
+        self.assertIs(target_period, weekly)
+        self.assertIsInstance(target_result, RealizationPersonResult)
+        self.assertEqual(target_result.period_id, weekly.id)
+        self.assertEqual(target_result.user_id, user_id)
+        self.assertEqual(added, [target_result])
+
+    async def test_answering_from_the_weekly_view_stays_on_its_own_result(self):
+        weekly = SimpleNamespace(id=uuid.uuid4(), period_type="WEEKLY", department_id=uuid.uuid4(), status="OPEN")
+        weekly_result = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), department_id=None)
+        db = SimpleNamespace(execute=AsyncMock(), add=lambda value: self.fail("no result should be created"), flush=AsyncMock())
+        with patch("app.api.routers.realization.ensure_weekly_scope_period", new=AsyncMock(return_value=weekly)):
+            target_period, target_result = await _weekly_answer_target(
+                db, period=weekly, result=weekly_result, actor_id=uuid.uuid4()
+            )
+        self.assertIs(target_period, weekly)
+        self.assertIs(target_result, weekly_result)

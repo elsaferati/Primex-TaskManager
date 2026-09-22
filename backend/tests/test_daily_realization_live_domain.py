@@ -13,7 +13,8 @@ from app.services.daily_realization_classifier import DailyClassificationInput, 
 from app.services.daily_realization_events import semantic_local_day
 from app.services.daily_realization_explanation import requires_daily_explanation
 from app.services.daily_realization_live import (
-    candidate_task_ids_for_person, credited_completion_day, day_bounds, local_day,
+    additional_task_has_day_evidence, candidate_task_ids_for_person,
+    credited_completion_day, day_bounds, local_day,
     manager_decision_timeline_item, timeline_from_events,
 )
 from app.services.daily_realization_metrics import calculate_daily_metrics
@@ -188,9 +189,47 @@ def test_deadline_metrics_keep_postponed_original_deadline_in_population():
     assert metrics["deadlines_today_count"] == 3
     assert metrics["deadlines_completed_count"] == 1
     assert metrics["deadlines_postponed_count"] == 1
+    assert metrics["deadlines_in_progress_count"] == 0
+    assert metrics["deadlines_no_progress_count"] == 1
     assert metrics["deadlines_open_count"] == 1
     assert metrics["deadline_compliance_percentage"] == 33.3
     assert metrics["daily_control_state"] == "ACTION_REQUIRED"
+
+
+def test_deadline_states_are_exclusive_and_include_progress():
+    metrics = calculate_daily_metrics([
+        {"classification": "REALIZED_AS_PLANNED", "deadline_was_today": True, "deadline_completed": True},
+        {"classification": "IN_PROGRESS", "deadline_was_today": True, "current_status": "IN_PROGRESS"},
+        {"classification": "POSTPONED_UNAPPROVED", "deadline_was_today": True, "postponed_today": True},
+        {"classification": "NO_PROGRESS", "deadline_was_today": True},
+    ])
+    assert metrics["deadlines_today_count"] == 4
+    assert metrics["deadlines_completed_count"] == 1
+    assert metrics["deadlines_in_progress_count"] == 1
+    assert metrics["deadlines_postponed_count"] == 1
+    assert metrics["deadlines_no_progress_count"] == 1
+    assert sum(metrics[key] for key in (
+        "deadlines_completed_count",
+        "deadlines_in_progress_count",
+        "deadlines_postponed_count",
+        "deadlines_no_progress_count",
+    )) == metrics["deadlines_today_count"]
+
+
+def test_deadline_tasks_name_every_deadline_and_list_the_unfinished_first():
+    metrics = calculate_daily_metrics([
+        {"task_id": "1", "title": "Raporti", "deadline_was_today": True, "deadline_completed": True},
+        {"task_id": "2", "title": "Oferta", "deadline_was_today": True, "postponed_today": True},
+        {"task_id": "3", "title": "Kontrata", "deadline_was_today": True, "deadline_critical": True},
+        {"task_id": "4", "title": "Pa afat", "classification": "NO_PROGRESS"},
+    ])
+
+    assert [(card["title"], card["state"]) for card in metrics["deadline_tasks"]] == [
+        ("Kontrata", "NO_PROGRESS"),
+        ("Oferta", "POSTPONED"),
+        ("Raporti", "COMPLETED"),
+    ]
+    assert metrics["deadline_tasks"][0]["critical"] is True
 
 
 def audit(action, at, old, new):
@@ -266,6 +305,18 @@ def test_baseline_model_and_service_enforce_immutability_by_construction():
     assert ".payload =" not in source
 
 
+def test_plan_counts_a_postponement_on_its_decision_day_but_deadlines_do_not():
+    """Moving a deadline early is a postponement today, not a missed deadline."""
+    from app.services.daily_realization_live import build_live_daily_realization
+
+    source = inspect.getsource(build_live_daily_realization)
+
+    assert "postponed=postponed_on_day," in source
+    # The deadline population still waits for the obligation's own day.
+    assert "postponed_today = bool(had_postponement_event" in source
+    assert 'semantic_local_day((event.before or {}).get("value")) == day' in source
+
+
 def test_tirana_midnight_boundary_is_not_naive_utc():
     # 22:30 UTC is 00:30 on the next local summer day in Tirana.
     assert local_day(datetime(2026, 8, 25, 22, 30, tzinfo=timezone.utc)) == DAY
@@ -317,7 +368,7 @@ def test_reassignment_a_to_b_to_c_keeps_intermediate_owner_candidate():
         )
 
 
-def test_current_overdue_todo_is_live_without_entering_original_plan():
+def test_overdue_todo_without_day_evidence_is_not_a_daily_extra():
     task_id, person_id = uuid.uuid4(), uuid.uuid4()
     task = SimpleNamespace(
         id=task_id, is_active=True, status="TODO",
@@ -329,20 +380,31 @@ def test_current_overdue_todo_is_live_without_entering_original_plan():
         person_id, baseline_by_user={}, current_assignees={task_id: {person_id}},
         tasks={task_id: task}, events_by_task={}, day=DAY,
     )
-    assert candidates == {task_id}
-    classification = classify_daily_task(case(
-        in_baseline=False, original_due_date=date(2026, 8, 25),
-        current_due_date=date(2026, 8, 25), status="TODO",
-    ))
-    metrics = calculate_daily_metrics([{
-        "classification": classification, "in_original_plan": False,
-        "deadline_is_overdue": True, "deadline_completed": False,
-        "action_required": True,
-    }])
-    assert classification == "NO_PROGRESS"
-    assert metrics["original_planned_count"] == 0
-    assert metrics["overdue_open_count"] == 1
-    assert metrics["daily_control_state"] == "ACTION_REQUIRED"
+    assert candidates == set()
+
+
+def test_future_task_created_during_planning_is_not_a_daily_extra():
+    task = SimpleNamespace(
+        created_at=datetime(2026, 8, 26, 10, tzinfo=timezone.utc),
+        start_date=datetime(2026, 8, 27, 8, tzinfo=timezone.utc),
+        due_date=datetime(2026, 8, 28, 16, tzinfo=timezone.utc),
+    )
+    assert not additional_task_has_day_evidence(
+        task=task, day=DAY, completion_credited=False, progress=None, state=None,
+        events=[SimpleNamespace(action="created", before={}, after={})],
+    )
+
+
+def test_task_started_today_outside_baseline_is_a_daily_extra():
+    task = SimpleNamespace(
+        created_at=datetime(2026, 8, 26, 8, tzinfo=timezone.utc),
+        start_date=datetime(2026, 8, 26, 8, tzinfo=timezone.utc),
+        due_date=datetime(2026, 8, 28, 16, tzinfo=timezone.utc),
+    )
+    assert additional_task_has_day_evidence(
+        task=task, day=DAY, completion_credited=False, progress=None, state=None,
+        events=[SimpleNamespace(action="created", before={}, after={})],
+    )
 
 
 def test_resolved_overdue_task_is_completed_late():

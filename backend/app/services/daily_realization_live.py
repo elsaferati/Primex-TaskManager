@@ -57,8 +57,10 @@ def candidate_task_ids_for_person(
     tasks: dict[uuid.UUID, Any],
     events_by_task: dict[uuid.UUID, list[AuditLog]],
     day: date,
+    daily_evidence_task_ids: set[uuid.UUID] | None = None,
 ) -> set[uuid.UUID]:
-    """Keep baseline, operational carryover, created-today, and owner history."""
+    """Keep baseline tasks and tasks with evidence tied to the selected day."""
+    daily_evidence_task_ids = daily_evidence_task_ids or set()
     candidate_ids = set(baseline_by_user.get(person_id, {}))
     candidate_ids.update(
         task_id for task_id, owners in current_assignees.items()
@@ -67,7 +69,7 @@ def candidate_task_ids_for_person(
             or local_day(getattr(tasks.get(task_id), "created_at", None)) == day
             or local_day(getattr(tasks.get(task_id), "completed_at", None)) == day
             or bool(events_by_task.get(task_id))
-            or is_overdue_open_task(tasks.get(task_id), day=day)
+            or task_id in daily_evidence_task_ids
         )
     )
     candidate_ids.update(
@@ -81,14 +83,57 @@ def candidate_task_ids_for_person(
     return candidate_ids
 
 
-def is_overdue_open_task(task: Any | None, *, day: date) -> bool:
-    """Return whether a current task is unresolved operational carryover."""
-    if task is None or not bool(task.is_active):
-        return False
-    return (
-        str(task.status or "").upper() in {"TODO", "IN_PROGRESS", "WAITING_CONFIRMATION"}
-        and bool(local_day(task.due_date) and local_day(task.due_date) < day)
+def additional_task_has_day_evidence(
+    *,
+    task: Any | None,
+    day: date,
+    completion_credited: bool,
+    progress: TaskDailyProgress | None,
+    state: TaskDailyRlzState | None,
+    events: list[AuditLog],
+) -> bool:
+    """Exclude backlog and future planning from a day's Extra counters."""
+    if completion_credited or progress is not None or state is not None:
+        return True
+    if task is None:
+        return bool(events)
+
+    start_day = local_day(task.start_date)
+    due_day = local_day(task.due_date)
+    created_day = local_day(task.created_at)
+    operational_by_day = (
+        start_day <= day
+        if start_day is not None
+        else due_day <= day
+        if due_day is not None
+        else created_day == day
     )
+    if created_day == day and operational_by_day:
+        return True
+
+    for event in events:
+        action = str(event.action or "").lower()
+        before = event.before or {}
+        after = event.after or {}
+        if action == "task.status_changed" and str(after.get("value") or "").upper() in {
+            "IN_PROGRESS", "DONE",
+        }:
+            return True
+        if action == "task.progress_changed":
+            try:
+                if float(after.get("value") or 0) > float(before.get("value") or 0):
+                    return True
+            except (TypeError, ValueError):
+                pass
+        if action in {"task.due_date_changed", "task.start_date_changed"}:
+            if day in {
+                semantic_local_day(before.get("value")),
+                semantic_local_day(after.get("value")),
+            }:
+                return True
+        if action in {"task.assignee_changed", "task.reopened"} and operational_by_day:
+            return True
+    return False
 
 
 def assignees_at_timestamp(
@@ -332,6 +377,10 @@ async def build_live_daily_realization(
             person_id, baseline_by_user=baseline_by_user,
             current_assignees=current_assignees, tasks=tasks,
             events_by_task=events_by_task, day=day,
+            daily_evidence_task_ids=(
+                set(progress)
+                | {task_id for owner_id, task_id in states if owner_id == person_id}
+            ),
         )
         rows = []
         metric_rows = []
@@ -389,6 +438,7 @@ async def build_live_daily_realization(
                 done_for_day=completion_credited,
             )
             current_due = local_day(task.due_date) if task else None
+            created_day = local_day(task.created_at) if task else None
             had_postponement_event = any(
                 event.action == "task.due_date_changed"
                 and semantic_local_day((event.before or {}).get("value")) == day
@@ -397,6 +447,18 @@ async def build_live_daily_realization(
                 for event in due_events
             )
             postponed_today = bool(had_postponement_event and current_due and current_due > day)
+            # A deadline pushed back before its own day still is a postponement
+            # on the day it was decided, so the plan column has to record it.
+            # The deadline column keeps the stricter rule above: an obligation
+            # only counts as missed once its day actually arrives.
+            forward_due_events = [
+                event for event in due_events
+                if semantic_local_day((event.before or {}).get("value"))
+                and semantic_local_day((event.after or {}).get("value"))
+                and semantic_local_day((event.after or {}).get("value"))
+                > semantic_local_day((event.before or {}).get("value"))
+            ]
+            postponed_on_day = bool(forward_due_events and current_due and current_due > day)
             deadline_was_today = bool(original_due == day or (original is None and current_due == day)) or any(
                 semantic_local_day((event.before or {}).get("value")) == day for event in due_events
             )
@@ -409,14 +471,23 @@ async def build_live_daily_realization(
             )
             classification = classify_daily_task(DailyClassificationInput(
                 day=day, in_baseline=bool(original), original_due_date=original_due or current_due,
-                current_due_date=current_due, created_date=local_day(task.created_at) if task else None,
+                current_due_date=current_due, created_date=created_day,
                 completed_date=credited_completed_day, status=task.status if task else "TODO",
                 progress_delta=max(progress_delta, percentage_delta, quantity["completed"] if quantity and quantity["source"] == "title" else 0),
-                postponed=bool(postponed_today and current_due and current_due > day),
+                postponed=postponed_on_day,
                 postponement_approved=approved, reopened=reopened,
                 reassigned_out=was_assigned_out, reassigned_in=was_assigned_in,
             ))
             state = states.get((person_id, task_id))
+            if not original and not additional_task_has_day_evidence(
+                task=task,
+                day=day,
+                completion_credited=completion_credited,
+                progress=progress.get(task_id),
+                state=state,
+                events=task_events,
+            ):
+                continue
             issues = []
             if classification in {"NO_PROGRESS", "POSTPONED_UNAPPROVED"} and not (state and state.reason_code): issues.append("MISSING_REASON")
             reason_missing = requirement.reason_required and not (state and state.reason_code)
@@ -441,6 +512,7 @@ async def build_live_daily_realization(
                 "current_due_date": current_due.isoformat() if current_due else None,
                 "current_status": task.status if task else "DELETED",
                 "classification": classification, "in_original_plan": bool(original),
+                "created_date": created_day.isoformat() if created_day else None,
                 "completion_credited": completion_credited,
                 "progress_today": percentage_delta, "completed_delta": progress_delta,
                 "quantity": quantity,
@@ -457,12 +529,7 @@ async def build_live_daily_realization(
                     + ([slot_updates.get(task_id)] if slot_updates.get(task_id) else []),
                     default=None,
                 ).isoformat() if (task or task_events or progress.get(task_id) or state or latest_due_adjustment or slot_updates.get(task_id)) else None,
-                "postponement_count": sum(
-                    1 for event in due_events
-                    if semantic_local_day((event.after or {}).get("value"))
-                    and semantic_local_day((event.before or {}).get("value"))
-                    and semantic_local_day((event.after or {}).get("value")) > semantic_local_day((event.before or {}).get("value"))
-                ),
+                "postponement_count": len(forward_due_events),
                 "adjustment_status": adjustment_status,
                 "manager_decision": manager_decision,
                 "requires_explanation": requirement.requires_explanation,

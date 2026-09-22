@@ -147,6 +147,48 @@ async def ensure_weekly_period(
     return period, planned, final
 
 
+async def ensure_weekly_scope_period(
+    db: AsyncSession,
+    *,
+    period: RealizationPeriod,
+    created_by: uuid.UUID | None,
+) -> RealizationPeriod:
+    """Manual manager judgment is weekly, so a daily period resolves to its week."""
+    if period.period_type == "WEEKLY":
+        return period
+    if period.department_id is None:
+        raise RealizationWorkflowError("Weekly manager judgment requires a department period")
+    weekly, _, _ = await ensure_weekly_period(
+        db,
+        department_id=period.department_id,
+        week_start=normalize_week_start(period.start_date),
+        created_by=created_by,
+    )
+    return weekly
+
+
+async def find_weekly_scope_period(
+    db: AsyncSession, *, period: RealizationPeriod
+) -> RealizationPeriod | None:
+    """Read-only counterpart of ensure_weekly_scope_period."""
+    if period.period_type == "WEEKLY":
+        return period
+    if period.department_id is None:
+        return None
+    start = normalize_week_start(period.start_date)
+    return (
+        await db.execute(
+            select(RealizationPeriod).where(
+                RealizationPeriod.period_type == "WEEKLY",
+                RealizationPeriod.slot == "ALL",
+                RealizationPeriod.start_date == start,
+                RealizationPeriod.end_date == weekly_end(start),
+                RealizationPeriod.department_id == period.department_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
 async def ensure_daily_period(
     db: AsyncSession,
     *,

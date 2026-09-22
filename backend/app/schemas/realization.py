@@ -220,13 +220,11 @@ class RealizationObservationVoid(RealizationSchema):
 class RealizationManagerReviewUpsert(RealizationSchema):
     rating: Literal["GOOD", "VERY_GOOD", "ACTION_REQUIRED", "BAD"] | None = None
     marker: Literal["POSITIVE", "NEGATIVE"]
-    comment: str = Field(min_length=1, max_length=4000)
+    comment: str | None = Field(default=None, max_length=4000)
 
     @model_validator(mode="after")
     def validate_comment(self) -> "RealizationManagerReviewUpsert":
-        self.comment = self.comment.strip()
-        if not self.comment:
-            raise ValueError("Komenti është i detyrueshëm")
+        self.comment = self.comment.strip() if self.comment else None
         return self
 
 
@@ -394,6 +392,7 @@ class RealizationWeeklyOut(RealizationSchema):
     period: RealizationPeriodOut
     department_name: str | None = None
     has_planned_snapshot: bool
+    planned_snapshot_captured_day: date | None = None
     has_final_snapshot: bool
     can_calculate: bool
     message: str | None = None

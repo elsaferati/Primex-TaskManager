@@ -122,7 +122,7 @@ export function RealizationManagerReview({ periodId, userId, onSaved }: { period
   const beginEdit = (dimension: RealizationManagerReviewDimension, item: RealizationManagerReviewItem | null) => {
     setEditing(dimension)
     setMarker(item?.marker ?? null)
-    setRating(item?.rating ?? (item ? item.marker === "POSITIVE" ? "GOOD" : "ACTION_REQUIRED" : ""))
+    setRating(item?.rating ?? "")
     setComment(item?.comment ?? "")
   }
   const cancelEdit = () => {

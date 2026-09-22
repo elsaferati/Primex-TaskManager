@@ -18,6 +18,7 @@ M3_MANAGER_REVIEW_SOURCE = "M3_MANAGER_REVIEW"
 M3_MANAGER_REVIEW_DIMENSIONS = {"PLANNING", "REALIZATION"}
 M3_MANAGER_REVIEW_MARKERS = {"POSITIVE", "NEGATIVE"}
 M3_MANAGER_REVIEW_RATINGS = {"GOOD": "Mirë", "VERY_GOOD": "Shumë mirë", "ACTION_REQUIRED": "Kërkon veprim", "BAD": "Keq"}
+M3_MANAGER_REVIEW_UNRATED_LABEL = "Pa vlerësim"
 
 
 def is_m3_manager_review(observation: RealizationObservation | dict) -> bool:
@@ -79,15 +80,21 @@ async def build_manager_review_response(
         dimension = review_dimension(row)
         if dimension is None or row.marker not in M3_MANAGER_REVIEW_MARKERS:
             return None
-        rating = (row.evidence_json or {}).get("review_rating")
-        if rating not in M3_MANAGER_REVIEW_RATINGS:
+        evidence = row.evidence_json or {}
+        if "review_rating" in evidence:
+            # Written by the rating-aware flow: an absent rating means the manager
+            # saved only a comment, so it must stay unrated.
+            rating = evidence["review_rating"]
+            if rating not in M3_MANAGER_REVIEW_RATINGS:
+                rating = None
+        else:
             rating = "GOOD" if row.marker == "POSITIVE" else "ACTION_REQUIRED"
         return {
             "rating": rating,
             "id": row.id,
             "dimension": dimension,
             "marker": row.marker,
-            "label": M3_MANAGER_REVIEW_RATINGS[rating],
+            "label": M3_MANAGER_REVIEW_RATINGS[rating] if rating else M3_MANAGER_REVIEW_UNRATED_LABEL,
             "comment": row.comment or "",
             "created_by_user_id": row.created_by,
             "created_by_name": names.get(row.created_by, "Përdorues i panjohur"),
@@ -120,7 +127,7 @@ async def upsert_manager_review(
     department_id: uuid.UUID,
     dimension: str,
     marker: str,
-    comment: str,
+    comment: str | None,
     actor_id: uuid.UUID,
     rating: str | None = None,
 ) -> RealizationObservation:
@@ -147,10 +154,10 @@ async def upsert_manager_review(
         department_id=department_id,
         marker=marker,
         category=RealizationObservationCategory.QUALITY.value,
-        comment=comment.strip(),
+        comment=(comment or "").strip(),
         evidence_json={
             "review_dimension": dimension,
-            **({"review_rating": rating} if rating is not None else {}),
+            "review_rating": rating,
             "review_source": M3_MANAGER_REVIEW_SOURCE,
             **(
                 {"supersedes_observation_id": str(previous.id)}

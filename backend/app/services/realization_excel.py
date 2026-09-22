@@ -244,8 +244,6 @@ def build_realization_workbook(
             "MISSING_EVIDENCE": "Kërkon evidencë",
             "MANAGER_CONFIRMED": "Konfirmuar nga menaxheri",
             "MANUAL_ANSWERED": "Përgjigjja e përgjegjësit",
-            "MANUAL_DAILY_ANSWERED": "Përmbledhur nga përgjigjet ditore",
-            "MANUAL_DAILY_PARTIAL": "Përmbledhje ditore e paplotë",
             "MANUAL_UNANSWERED": "Pa përgjigje manuale",
         }
         long_answer_keys = {
@@ -293,7 +291,7 @@ def build_realization_workbook(
                     if answer is None and not source_status.startswith("MANUAL"):
                         answer = question.get("auto_value")
                     needs_confirmation = (
-                        source_status in {"MANUAL_UNANSWERED", "MANUAL_DAILY_PARTIAL"}
+                        source_status == "MANUAL_UNANSWERED"
                         or
                         source_status in {"AUTO_NEEDS_CONFIRMATION", "MISSING_EVIDENCE"}
                         and answer is None
@@ -317,18 +315,6 @@ def build_realization_workbook(
                         if evidence
                         else "",
                     ]
-                    summary = question.get("daily_summary") or {}
-                    if summary:
-                        note_parts.append(f"Përgjigje ditore: {summary['answered_days']}/{summary['expected_days']} ditë")
-                        if question.get("answer_type") == "boolean":
-                            note_parts.append(
-                                f"Po: {summary.get('yes_days', 0)} ditë; "
-                                f"Jo: {summary.get('no_days', 0)} ditë; "
-                                f"Pa plotësuar: {len(summary.get('missing_dates') or [])} ditë"
-                            )
-                        note_parts.extend(f"{item['date']}: {_value(item['value'])}" + (f" — {item['comment']}" if item.get("comment") else "") for item in summary.get("history") or [])
-                        if summary.get("missing_dates"):
-                            note_parts.append("Pa përgjigje: " + ", ".join(summary["missing_dates"]))
                     ws.cell(
                         current_row,
                         col + 1,

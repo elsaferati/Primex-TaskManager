@@ -4,12 +4,14 @@ export function combineDailyRealization(reports: DailyRealizationLive[]): DailyR
   if (!reports.length) return null
   if (reports.length === 1) return reports[0]
   const metrics = { ...reports[0].metrics }
-  type CountKey = Exclude<keyof DailyRealizationMetrics,
-    "raw_plan_realization" | "adjusted_plan_realization" | "deadline_compliance_percentage" | "daily_control_state">
+  type DerivedKey = "raw_plan_realization" | "adjusted_plan_realization" | "deadline_compliance_percentage" | "daily_control_state" | "deadline_tasks"
+  type CountKey = Exclude<keyof DailyRealizationMetrics, DerivedKey>
+  const derivedKeys: DerivedKey[] = ["raw_plan_realization", "adjusted_plan_realization", "deadline_compliance_percentage", "daily_control_state", "deadline_tasks"]
   for (const key of Object.keys(metrics) as (keyof DailyRealizationMetrics)[]) {
-    if (key === "raw_plan_realization" || key === "adjusted_plan_realization" || key === "deadline_compliance_percentage" || key === "daily_control_state") continue
+    if ((derivedKeys as string[]).includes(key)) continue
     metrics[key as CountKey] = reports.reduce((sum, report) => sum + report.metrics[key as CountKey], 0)
   }
+  metrics.deadline_tasks = reports.flatMap((report) => report.metrics.deadline_tasks ?? [])
   const percent = (completed: number, total: number) => total ? Math.min(100, Math.round(completed * 1000 / total) / 10) : null
   metrics.raw_plan_realization = percent(metrics.total_completed_today_count, metrics.original_planned_count)
   metrics.adjusted_plan_realization = percent(metrics.total_completed_today_count, metrics.adjusted_denominator)

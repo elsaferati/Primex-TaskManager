@@ -41,9 +41,9 @@ def period(department_id: uuid.UUID, period_type: str = "DAILY"):
 
 
 @pytest.mark.parametrize("marker", ["POSITIVE", "NEGATIVE"])
-def test_positive_and_negative_manager_reviews_require_comment(marker):
-    with pytest.raises(ValidationError):
-        RealizationManagerReviewUpsert(marker=marker, comment="   ")
+def test_positive_and_negative_manager_reviews_allow_optional_comment(marker):
+    empty = RealizationManagerReviewUpsert(marker=marker)
+    assert empty.comment is None
     value = RealizationManagerReviewUpsert(marker=marker, comment="  Shpjegim i qartë.  ")
     assert value.comment == "Shpjegim i qartë."
 
@@ -78,16 +78,18 @@ def test_manager_cannot_review_wrong_department():
 
 
 @pytest.mark.parametrize("period_type", ["DAILY", "WEEKLY"])
-def test_authorized_manager_can_review_daily_and_weekly(period_type):
+def test_authorized_manager_review_always_resolves_to_the_week(period_type):
     department_id = uuid.uuid4()
     subject = SimpleNamespace(id=uuid.uuid4(), department_id=department_id)
     actor = SimpleNamespace(id=uuid.uuid4(), role=UserRole.MANAGER, department_id=department_id)
     db = SimpleNamespace(execute=AsyncMock(return_value=ScalarResult(subject)))
-    expected = period(department_id, period_type)
-    with patch("app.api.routers.realization._period", new=AsyncMock(return_value=expected)):
-        actual = asyncio.run(_manager_review_context(db, period_id=expected.id, subject_user_id=subject.id,
+    opened = period(department_id, period_type)
+    weekly = period(department_id, "WEEKLY")
+    with patch("app.api.routers.realization._period", new=AsyncMock(return_value=opened)), \
+         patch("app.api.routers.realization.ensure_weekly_scope_period", new=AsyncMock(return_value=weekly)):
+        actual = asyncio.run(_manager_review_context(db, period_id=opened.id, subject_user_id=subject.id,
                                                      actor=actor, editing=True))
-    assert actual == (expected, subject, True)
+    assert actual == (weekly, subject, True)
 
 
 def observation(*, period_id, user_id, dimension, marker="POSITIVE"):
@@ -234,3 +236,22 @@ def test_legacy_review_gets_compatible_rating():
     with patch("app.services.realization_manager_review.manager_review_rows", new=AsyncMock(return_value=[review])):
         response = asyncio.run(build_manager_review_response(db, period_id=period_id, user_id=user_id, can_edit=False))
     assert response["realization"]["rating"] == "ACTION_REQUIRED"
+
+
+def test_comment_only_review_stays_unrated():
+    period_id, user_id, actor_id, department_id = (uuid.uuid4() for _ in range(4))
+    db = SimpleNamespace(add=lambda value: setattr(db, "added", value), flush=AsyncMock())
+    with patch("app.services.realization_manager_review.manager_review_rows", new=AsyncMock(return_value=[])):
+        review = asyncio.run(upsert_manager_review(
+            db, period_id=period_id, user_id=user_id, department_id=department_id,
+            dimension="REALIZATION", marker="POSITIVE", rating=None,
+            comment="Vetëm koment, pa vlerësim.", actor_id=actor_id))
+    assert review.evidence_json["review_rating"] is None
+    review.id = uuid.uuid4()
+    review.created_at = datetime.now(timezone.utc)
+    db.execute = AsyncMock(return_value=ListResult([SimpleNamespace(id=actor_id, full_name="Manager")]))
+    with patch("app.services.realization_manager_review.manager_review_rows", new=AsyncMock(return_value=[review])):
+        response = asyncio.run(build_manager_review_response(db, period_id=period_id, user_id=user_id, can_edit=True))
+    assert response["realization"]["rating"] is None
+    assert response["realization"]["label"] == "Pa vlerësim"
+    assert response["realization"]["comment"] == "Vetëm koment, pa vlerësim."

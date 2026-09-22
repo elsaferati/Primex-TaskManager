@@ -406,6 +406,19 @@ type InternalMeetingParticipantConflict = {
   userName: string
   reasons: string[]
 }
+type MeetingAvailability = {
+  can_create: boolean
+  errors: string[]
+  warnings: string[]
+  conflicts: Array<{
+    source: string
+    title: string
+    starts_at: string
+    ends_at: string
+    participant_ids?: string[]
+  }>
+  suggested_slot?: { starts_at: string; ends_at: string } | null
+}
 type FastTaskItemMeta = {
   taskId?: string
   userId?: string
@@ -1011,6 +1024,11 @@ const ONE_H_SLOT_ROWS: Array<{ id: OneHSlotRowId; slot: OneHReportSlot | null; l
   { id: "oneH1550", slot: "16:00", label: "1H 16:00" },
   { id: "oneHNoSlot", slot: null, label: "1H NO SLOT" },
 ]
+const toLocalDateTimeInput = (value: string | Date) => {
+  const date = value instanceof Date ? value : new Date(value)
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+}
+const toLocalTimeInput = (value: string | Date) => toLocalDateTimeInput(value).slice(11, 16)
 
 const normalizeOneHReportSlot = (value?: string | null): OneHReportSlot | null => {
   const normalized = (value || "").trim()
@@ -1884,6 +1902,8 @@ export default function CommonViewPage() {
   const [internalMeetingPairExternalTitle, setInternalMeetingPairExternalTitle] = React.useState("")
   const [internalMeetingPersonsOpen, setInternalMeetingPersonsOpen] = React.useState(false)
   const [internalMeetingPersonSearch, setInternalMeetingPersonSearch] = React.useState("")
+  const [internalMeetingAvailability, setInternalMeetingAvailability] = React.useState<MeetingAvailability | null>(null)
+  const [checkingInternalMeetingAvailability, setCheckingInternalMeetingAvailability] = React.useState(false)
   const internalMeetingPersonsRef = React.useRef<HTMLDivElement | null>(null)
   const [meetingOccurrenceStatuses, setMeetingOccurrenceStatuses] = React.useState<Map<string, MeetingOccurrenceStatus>>(new Map())
   const [savingMeetingStatusKey, setSavingMeetingStatusKey] = React.useState<string | null>(null)
@@ -2827,6 +2847,17 @@ export default function CommonViewPage() {
         ? Boolean(internalMeetingStartsAt)
         : Boolean(internalMeetingStartTime)
     )
+  const internalOneHConflicts = internalMeetingAvailability?.conflicts.filter((conflict) => conflict.source === "one_h") || []
+  const applyInternalSuggestedSlot = () => {
+    const suggested = internalMeetingAvailability?.suggested_slot
+    if (!suggested) return
+    if (internalMeetingRecurrenceType === "none") {
+      setInternalMeetingStartsAt(toLocalDateTimeInput(suggested.starts_at))
+    } else {
+      setInternalMeetingStartTime(toLocalTimeInput(suggested.starts_at))
+    }
+    setInternalMeetingAvailability(null)
+  }
 
   const reloadMeetingTemplates = React.useCallback(async () => {
     try {
@@ -6355,6 +6386,36 @@ export default function CommonViewPage() {
     [apiFetch, externalMeetingChecklistItems]
   )
 
+  const requestMeetingAvailability = React.useCallback(async (params: {
+    title: string
+    meetingType: "internal" | "external"
+    startsAt: Date
+    departmentId: string
+    participantIds: string[]
+  }): Promise<MeetingAvailability | null> => {
+    if (!params.departmentId || params.participantIds.length === 0 || Number.isNaN(params.startsAt.getTime())) return null
+    const durationMinutes = params.meetingType === "internal" ? 30 : 60
+    const endsAt = new Date(params.startsAt.getTime() + durationMinutes * 60_000)
+    const response = await apiFetch("/meeting-scheduler/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: params.title.trim() || `Kontroll TAK ${params.meetingType === "internal" ? "INT" : "EXT"}`,
+        meeting_type: params.meetingType,
+        starts_at: params.startsAt.toISOString(),
+        ends_at: endsAt.toISOString(),
+        platform: params.meetingType === "external" ? "Teams" : null,
+        notes: null,
+        department_id: params.departmentId,
+        project_id: null,
+        standard_id: null,
+        participant_ids: params.participantIds,
+      }),
+    })
+    if (!response.ok) return null
+    return (await response.json()) as MeetingAvailability
+  }, [apiFetch])
+
   const submitExternalMeeting = React.useCallback(async () => {
     if (!externalMeetingTitle.trim()) return
     if (!externalMeetingParticipantIds.length) {
@@ -6453,6 +6514,36 @@ export default function CommonViewPage() {
           internalStartsAt = internalNext.toISOString()
         }
       }
+      const externalAvailability = await requestMeetingAvailability({
+        title: externalMeetingTitle,
+        meetingType: "external",
+        startsAt: new Date(startsAt),
+        departmentId,
+        participantIds: externalMeetingParticipantIds,
+      })
+      const pairedInternalAvailability = internalStartsAt
+        ? await requestMeetingAvailability({
+            title: externalMeetingTitle,
+            meetingType: "internal",
+            startsAt: new Date(internalStartsAt),
+            departmentId,
+            participantIds: externalMeetingParticipantIds,
+          })
+        : null
+      const oneHConflicts = [
+        ...(externalAvailability?.conflicts.filter((conflict) => conflict.source === "one_h") || []),
+        ...(pairedInternalAvailability?.conflicts.filter((conflict) => conflict.source === "one_h") || []),
+      ]
+      let allowOneHConflict = false
+      if (oneHConflicts.length) {
+        allowOneHConflict = await confirm({
+          title: "Konflikt me orarin 1H",
+          description: "Ky orar përputhet me 1H.",
+          confirmLabel: "Aprovo gjithsesi",
+          cancelLabel: "Ndrysho",
+        })
+        if (!allowOneHConflict) return
+      }
       const payload = {
         title: externalMeetingTitle.trim(),
         platform: externalMeetingPlatform.trim() || null,
@@ -6474,6 +6565,7 @@ export default function CommonViewPage() {
         department_id: departmentId,
         project_id: null,
         participant_ids: externalMeetingParticipantIds,
+        allow_one_h_conflict: allowOneHConflict,
       }
       const res = await apiFetch("/meetings", {
         method: "POST",
@@ -6481,6 +6573,9 @@ export default function CommonViewPage() {
         body: JSON.stringify(payload),
       })
       if (!res?.ok) {
+        const body = await res.json().catch(() => null)
+        const message = body?.detail?.message || body?.detail || "Failed to create meeting."
+        toast.error(typeof message === "string" ? message : "Failed to create meeting.")
         console.error("Failed to create meeting", res?.status)
         return
       }
@@ -6596,6 +6691,7 @@ export default function CommonViewPage() {
     formatTime,
     toISODate,
     externalMeetingChecklist,
+    requestMeetingAvailability,
   ])
 
   const canEditExternalMeeting = React.useCallback((meeting: Meeting) => {
@@ -6897,6 +6993,67 @@ export default function CommonViewPage() {
     [apiFetch, isAdmin, isManager, syncCommonMeetingBucket]
   )
 
+  const internalMeetingProposedStart = React.useMemo(() => {
+    if (internalMeetingRecurrenceType === "none") {
+      if (!internalMeetingStartsAt) return null
+      const value = new Date(internalMeetingStartsAt)
+      return Number.isNaN(value.getTime()) ? null : value
+    }
+    if (!internalMeetingStartTime) return null
+    return computeNextOccurrenceDate({
+      recurrenceType: internalMeetingRecurrenceType,
+      daysOfWeek: internalMeetingRecurrenceDaysOfWeek,
+      daysOfMonth: internalMeetingRecurrenceType === "yearly"
+        ? [Number(internalMeetingRecurrenceDay)]
+        : internalMeetingRecurrenceDaysOfMonth,
+      timeValue: internalMeetingStartTime,
+      monthOfYear: internalMeetingRecurrenceType === "yearly"
+        ? Math.max(0, Math.min(11, Number(internalMeetingRecurrenceMonth) - 1))
+        : undefined,
+    })
+  }, [
+    internalMeetingRecurrenceDay,
+    internalMeetingRecurrenceDaysOfMonth,
+    internalMeetingRecurrenceDaysOfWeek,
+    internalMeetingRecurrenceMonth,
+    internalMeetingRecurrenceType,
+    internalMeetingStartTime,
+    internalMeetingStartsAt,
+  ])
+
+  React.useEffect(() => {
+    const departmentId = internalMeetingDepartmentId || user?.department_id || ""
+    if (!internalMeetingProposedStart || !departmentId || !internalMeetingParticipantIds.length) {
+      setInternalMeetingAvailability(null)
+      return
+    }
+    let active = true
+    const timeout = window.setTimeout(() => {
+      setCheckingInternalMeetingAvailability(true)
+      void requestMeetingAvailability({
+        title: internalMeetingTitle,
+        meetingType: "internal",
+        startsAt: internalMeetingProposedStart,
+        departmentId,
+        participantIds: internalMeetingParticipantIds,
+      }).then((result) => {
+        if (active) setInternalMeetingAvailability(result)
+      }).finally(() => {
+        if (active) setCheckingInternalMeetingAvailability(false)
+      })
+    }, 450)
+    return () => {
+      active = false
+      window.clearTimeout(timeout)
+    }
+  }, [
+    internalMeetingDepartmentId,
+    internalMeetingParticipantIds,
+    internalMeetingProposedStart,
+    internalMeetingTitle,
+    requestMeetingAvailability,
+    user?.department_id,
+  ])
 
   const findInternalMeetingParticipantConflicts = React.useCallback(
     (proposedStart: Date): InternalMeetingParticipantConflict[] => {
@@ -7112,6 +7269,25 @@ export default function CommonViewPage() {
         startsAt = next.toISOString()
       }
       const participantConflicts = findInternalMeetingParticipantConflicts(new Date(startsAt))
+      const availability = await requestMeetingAvailability({
+        title: internalMeetingTitle,
+        meetingType: "internal",
+        startsAt: new Date(startsAt),
+        departmentId,
+        participantIds: internalMeetingParticipantIds,
+      })
+      const oneHConflicts = availability?.conflicts.filter((conflict) => conflict.source === "one_h") || []
+      let allowOneHConflict = false
+      if (oneHConflicts.length) {
+        setInternalMeetingAvailability(availability)
+        allowOneHConflict = await confirm({
+          title: "Konflikt me orarin 1H",
+          description: "Ky orar përputhet me 1H.",
+          confirmLabel: "Aprovo gjithsesi",
+          cancelLabel: "Ndrysho",
+        })
+        if (!allowOneHConflict) return
+      }
       if (participantConflicts.length) {
         const approved = await confirm({
           title: "Konflikte për pjesëmarrësit",
@@ -7163,6 +7339,7 @@ export default function CommonViewPage() {
         project_id: null,
         participant_ids: internalMeetingParticipantIds,
         paired_external_meeting_id: internalMeetingPairExternalId,
+        allow_one_h_conflict: allowOneHConflict,
       }
       const res = await apiFetch("/meetings", {
         method: "POST",
@@ -7170,6 +7347,9 @@ export default function CommonViewPage() {
         body: JSON.stringify(payload),
       })
       if (!res?.ok) {
+        const body = await res.json().catch(() => null)
+        const message = body?.detail?.message || body?.detail || "Failed to create meeting."
+        toast.error(typeof message === "string" ? message : "Failed to create meeting.")
         console.error("Failed to create meeting", res?.status)
         return
       }
@@ -7201,6 +7381,7 @@ export default function CommonViewPage() {
       setInternalMeetingPairExternalTitle("")
       setInternalMeetingPersonsOpen(false)
       setInternalMeetingPersonSearch("")
+      setInternalMeetingAvailability(null)
     } finally {
       setCreatingInternalMeeting(false)
     }
@@ -7221,6 +7402,7 @@ export default function CommonViewPage() {
     confirm,
     externalMeetings,
     findInternalMeetingParticipantConflicts,
+    requestMeetingAvailability,
     user?.department_id,
     user?.email,
     user?.full_name,
@@ -14941,20 +15123,32 @@ export default function CommonViewPage() {
                   {internalMeetingRecurrenceType === "none" ? "Date and time" : "Time"}
                   {internalMeetingRecurrenceType === "none" ? (
                     <input
-                      className="input"
+                      className={`input ${internalOneHConflicts.length ? "border-red-500 bg-red-50 text-red-800" : ""}`}
                       type="datetime-local"
                       value={internalMeetingStartsAt}
                       onChange={(e) => setInternalMeetingStartsAt(e.target.value)}
                     />
                   ) : (
                     <input
-                      className="input"
+                      className={`input ${internalOneHConflicts.length ? "border-red-500 bg-red-50 text-red-800" : ""}`}
                       type="time"
                       value={internalMeetingStartTime}
                       onChange={(e) => setInternalMeetingStartTime(e.target.value)}
                     />
                   )}
                 </label>
+                {checkingInternalMeetingAvailability ? (
+                  <div style={{ fontSize: "12px", color: "#64748b" }}>Duke kontrolluar orarin…</div>
+                ) : internalOneHConflicts.length ? (
+                  <div style={{ border: "1px solid #fecaca", borderRadius: "8px", background: "#fef2f2", color: "#991b1b", padding: "10px", fontSize: "12px" }}>
+                    <strong style={{ display: "block" }}>Ky orar përputhet me 1H.</strong>
+                    {internalMeetingAvailability?.suggested_slot ? (
+                      <button className="btn-surface" type="button" onClick={applyInternalSuggestedSlot} style={{ marginTop: "8px" }}>
+                        Përdor orarin e lirë {toLocalTimeInput(internalMeetingAvailability.suggested_slot.starts_at)}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
                 {internalMeetingRecurrenceType === "weekly" ? (
                   <>
                     <div className="external-meeting-row" style={{ justifyContent: "flex-start" }}>

@@ -872,7 +872,7 @@ export interface RealizationManagerReviewItem {
   id: string
   dimension: RealizationManagerReviewDimension
   marker: RealizationManagerReviewMarker
-  label: "Mirë" | "Duhet përmirësim"
+  label: string
   comment: string
   created_by_user_id?: string | null
   created_by_name: string
@@ -888,6 +888,18 @@ export interface RealizationManagerReviewResponse {
   planning: RealizationManagerReviewItem | null
   realization: RealizationManagerReviewItem | null
   history: RealizationManagerReviewItem[]
+}
+
+export type RealizationDeadlineState = "COMPLETED" | "IN_PROGRESS" | "POSTPONED" | "NO_PROGRESS"
+
+export interface RealizationDeadlineTask {
+  task_id: string | null
+  title: string
+  day: string | null
+  state: RealizationDeadlineState
+  critical: boolean
+  /** Filled in by the table when several people's deadlines are pooled. */
+  person?: string
 }
 
 export interface DailyRealizationMetrics {
@@ -920,6 +932,9 @@ export interface DailyRealizationMetrics {
   deadlines_today_count: number
   deadlines_completed_count: number
   deadlines_postponed_count: number
+  deadlines_in_progress_count: number
+  deadlines_no_progress_count: number
+  deadline_tasks?: RealizationDeadlineTask[]
   deadlines_open_count: number
   overdue_open_count: number
   deadline_compliance_percentage: number | null
@@ -1049,21 +1064,6 @@ export interface RealizationQuestion {
   explanation: string
   manager_comment?: string | null
   linked_evidence_ids?: string[]
-  daily_summary?: RealizationDailyQuestionSummary
-}
-
-export interface RealizationDailyQuestionSummary {
-  value: boolean | string | null
-  comment?: string | null
-  source: "DAILY_AGGREGATE"
-  answered_days: number
-  expected_days: number
-  missing_dates: string[]
-  complete: boolean
-  yes_days: number
-  no_days: number
-  na_days: number
-  history: Array<RealizationManualAnswer & { date: string; question_key: string; period_id: string; result_id: string }>
 }
 
 export interface RealizationManualAnswer {
@@ -1111,6 +1111,28 @@ export interface RealizationPersonResult {
     weekly_completed_outside_plan_count?: number
     weekly_completed_tasks?: RealizationTaskFact[]
     weekly_additional_count?: number
+    weekly_additional_completed_count?: number
+    weekly_additional_in_progress_count?: number
+    /** Extras added, never started, then pushed past the week, so left out of it. */
+    weekly_additional_deferred_count?: number
+    weekly_additional_postponed_count?: number
+    weekly_additional_todo_count?: number
+    weekly_additional_no_progress_count?: number
+    weekly_in_progress_task_count?: number
+    weekly_postponed_task_count?: number
+    weekly_no_progress_task_count?: number
+    weekly_quantity_task_count?: number
+    weekly_quantity_planned_count?: number
+    weekly_quantity_completed_count?: number
+    weekly_quantity_delta?: number
+    weekly_deadline_count?: number
+    weekly_deadline_completed_count?: number
+    weekly_deadline_postponed_count?: number
+    weekly_deadline_in_progress_count?: number
+    weekly_deadline_no_progress_count?: number
+    weekly_deadline_tasks?: RealizationDeadlineTask[]
+    weekly_critical_deadline_count?: number
+    weekly_critical_deadline_completed_count?: number
     weekly_fast_task_count?: number
     weekly_in_progress_count?: number
     weekly_no_progress_count?: number
@@ -1293,6 +1315,8 @@ export interface RealizationWeeklyResponse {
   period: RealizationPeriod
   department_name?: string | null
   has_planned_snapshot: boolean
+  /** When the weekly plan was actually photographed, which is not always Monday. */
+  planned_snapshot_captured_day?: string | null
   has_final_snapshot: boolean
   can_calculate: boolean
   message?: string | null
