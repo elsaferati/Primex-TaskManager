@@ -439,7 +439,12 @@ async def ensure_calendar_internal_pair(
     for user_id in participant_ids:
         if user_id in existing_participant_ids:
             continue
-        db.add(MeetingParticipant(meeting_id=internal_meeting.id, user_id=user_id))
+        db.add(MeetingParticipant(
+            meeting_id=internal_meeting.id,
+            user_id=user_id,
+            assignment_source="manual",
+            assigned_by_user_id=external_meeting.created_by,
+        ))
         existing_participant_ids.add(user_id)
     return internal_meeting
 
@@ -479,7 +484,12 @@ async def ensure_calendar_preparation_pair(
     for user_id in participant_ids:
         if user_id in existing_participant_ids:
             continue
-        db.add(MeetingParticipant(meeting_id=internal_meeting.id, user_id=user_id))
+        db.add(MeetingParticipant(
+            meeting_id=internal_meeting.id,
+            user_id=user_id,
+            assignment_source="manual",
+            assigned_by_user_id=external_meeting.created_by,
+        ))
         existing_participant_ids.add(user_id)
     return internal_meeting
 
@@ -576,7 +586,8 @@ async def sync_external_calendar_events(
                 (
                     await db.execute(
                         select(MeetingParticipant).where(
-                            MeetingParticipant.meeting_id.in_([row.id for row in participant_meetings])
+                            MeetingParticipant.meeting_id.in_([row.id for row in participant_meetings]),
+                            MeetingParticipant.assignment_source == "manual",
                         )
                     )
                 ).scalars().all()
@@ -699,14 +710,10 @@ async def sync_external_calendar_events(
                     row.department_id = mapped_department_id
                 updated += 1
 
-            # Calendar attendees are added automatically, while PrimeFlow users
-            # assigned manually remain assigned across subsequent syncs.
+            # Outlook attendees are deliberately not PrimeFlow participants.
+            # This set contains only users assigned manually in PrimeFlow and is
+            # preserved across subsequent calendar syncs.
             existing_participant_ids = existing_participant_ids_by_meeting.setdefault(row.id, set())
-            for participant in participants:
-                if participant.id in existing_participant_ids:
-                    continue
-                db.add(MeetingParticipant(meeting_id=row.id, user_id=participant.id))
-                existing_participant_ids.add(participant.id)
 
             await ensure_calendar_internal_pair(
                 db,

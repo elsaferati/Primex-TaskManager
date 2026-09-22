@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { DiamondAward, TaskReviewDialog } from "@/components/task-review-dialog"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
+import { MeetingDetailsDialog } from "@/components/meeting-details-dialog"
 import { useAuth } from "@/lib/auth"
 import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
 import { formatDateDMY, formatDateTimeDMY } from "@/lib/dates"
@@ -2205,6 +2206,9 @@ export default function CommonViewPage() {
   const [editingExternalMeetingParticipantIds, setEditingExternalMeetingParticipantIds] = React.useState<string[]>([])
   const [editingExternalMeetingPersonsOpen, setEditingExternalMeetingPersonsOpen] = React.useState(false)
   const [editingExternalMeetingPersonSearch, setEditingExternalMeetingPersonSearch] = React.useState("")
+  const [meetingDetailsId, setMeetingDetailsId] = React.useState<string | null>(null)
+  const [savingMeetingDetails, setSavingMeetingDetails] = React.useState(false)
+  const handledMeetingDeepLinkRef = React.useRef(false)
   const editingExternalMeetingPersonsRef = React.useRef<HTMLDivElement | null>(null)
   const [showEditWeekendDays, setShowEditWeekendDays] = React.useState(false)
   const [updatingExternalMeeting, setUpdatingExternalMeeting] = React.useState(false)
@@ -2490,7 +2494,9 @@ export default function CommonViewPage() {
     if (selectedDates.size) {
       return activeMeetings.filter((meeting) => {
         const meetingDate = getExternalMeetingListDate(meeting)
-        return meetingDate ? selectedDates.has(toISODate(meetingDate)) : false
+        return meetingDate
+          ? expandExternalMeetingDates(meeting, meetingDate).some((date) => selectedDates.has(toISODate(date)))
+          : false
       })
     }
     if (externalMeetingListFilter === "all") return activeMeetings
@@ -6705,6 +6711,100 @@ export default function CommonViewPage() {
     if (meeting.created_by && meeting.created_by === user.id) return true
     return false
   }, [user, isAdmin, isManager])
+
+  const activeMeetingDetails = React.useMemo(
+    () => externalMeetings.find((meeting) => meeting.id === meetingDetailsId)
+      || internalMeetings.find((meeting) => meeting.id === meetingDetailsId)
+      || null,
+    [externalMeetings, internalMeetings, meetingDetailsId]
+  )
+
+  const openMeetingDetails = React.useCallback((meeting: Meeting) => {
+    setMeetingDetailsId(meeting.id)
+  }, [])
+
+  const openMeetingDetailsById = React.useCallback((meetingId?: string) => {
+    if (!meetingId) return
+    const meeting = externalMeetings.find((candidate) => candidate.id === meetingId)
+      || internalMeetings.find((candidate) => candidate.id === meetingId)
+    if (meeting) openMeetingDetails(meeting)
+  }, [externalMeetings, internalMeetings, openMeetingDetails])
+
+  React.useEffect(() => {
+    if (handledMeetingDeepLinkRef.current || typeof window === "undefined") return
+    const meetingId = new URLSearchParams(window.location.search).get("meeting")
+    if (!meetingId) return
+    const meeting = externalMeetings.find((candidate) => candidate.id === meetingId)
+      || internalMeetings.find((candidate) => candidate.id === meetingId)
+    if (!meeting) return
+    handledMeetingDeepLinkRef.current = true
+    if (meeting.meeting_type === "internal") setInternalMeetingsOpen(true)
+    else setExternalMeetingsOpen(true)
+    openMeetingDetails(meeting)
+  }, [externalMeetings, internalMeetings, openMeetingDetails])
+
+  const closeMeetingDetails = React.useCallback(() => {
+    if (savingMeetingDetails) return
+    setMeetingDetailsId(null)
+  }, [savingMeetingDetails])
+
+  const saveMeetingDetails = React.useCallback(async (
+    participantIds: string[],
+    reminderMinutes: number | null,
+  ) => {
+    if (!meetingDetailsId) return
+    setSavingMeetingDetails(true)
+    try {
+      const response = await apiFetch(`/meetings/${meetingDetailsId}/reminder-settings`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          participant_ids: participantIds,
+          reminder_minutes_before: reminderMinutes,
+        }),
+      })
+      if (!response.ok) {
+        toast.error("Could not save PrimeFlow participants and reminder settings.")
+        return
+      }
+      const updated = (await response.json()) as Meeting
+      const meetingType = updated.meeting_type === "internal" ? "internal" : "external"
+      if (meetingType === "internal") {
+        setInternalMeetings((current) => current.map((meeting) => meeting.id === updated.id ? updated : meeting))
+        syncCommonMeetingBucket("internal", [
+          ...internalMeetings.filter((meeting) => meeting.id !== updated.id),
+          updated,
+        ])
+      } else {
+        setExternalMeetings((current) => current.map((meeting) => meeting.id === updated.id ? updated : meeting))
+        syncCommonMeetingBucket("external", [
+          ...externalMeetings.filter((meeting) => meeting.id !== updated.id),
+          updated,
+        ])
+      }
+      COMMON_VIEW_CACHE.clear()
+      toast.success("Meeting participants and reminder saved.")
+      setMeetingDetailsId(null)
+    } catch (error) {
+      console.error("Failed to save meeting reminder settings", error)
+      toast.error("Could not save PrimeFlow participants and reminder settings.")
+    } finally {
+      setSavingMeetingDetails(false)
+    }
+  }, [
+    apiFetch,
+    externalMeetings,
+    internalMeetings,
+    meetingDetailsId,
+    syncCommonMeetingBucket,
+  ])
+
+  const canManageMeetingParticipants = React.useCallback((meeting: Meeting) => {
+    if (!user) return false
+    if (isAdmin || isManager) return true
+    if (meeting.created_by === user.id) return true
+    return Boolean(user.department_id && user.department_id === meeting.department_id)
+  }, [isAdmin, isManager, user])
 
   const startLinkedInternalMeeting = React.useCallback((meeting: Meeting) => {
     setInternalMeetingPairExternalId(meeting.id)
@@ -14948,11 +15048,16 @@ export default function CommonViewPage() {
                                   ) : null}
                                 </div>
                               </div>
-                              {((isAdmin || isManager) && (
-                                canCreateAgentTestTaskForMeeting(meeting) || canCreatePimImageTestTaskForMeeting(meeting)
-                              ))
-                              || canEditExternalMeeting(meeting) ? (
-                                <div style={{ display: "flex", gap: "6px", marginLeft: "12px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                              <div style={{ display: "flex", gap: "6px", marginLeft: "12px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                  <button
+                                    className="btn-surface"
+                                    type="button"
+                                    onClick={() => openMeetingDetails(meeting)}
+                                    title="View meeting details and assign PrimeFlow participants"
+                                    style={{ borderColor: "#93c5fd", color: "#1d4ed8" }}
+                                  >
+                                    Participants &amp; reminder
+                                  </button>
                                   {(isAdmin || isManager) && canCreateAgentTestTaskForMeeting(meeting) ? (
                                     <button
                                       className="btn-surface"
@@ -15027,7 +15132,6 @@ export default function CommonViewPage() {
                                     </>
                                   ) : null}
                                 </div>
-                              ) : null}
                             </div>
                           </>
                         )}
@@ -15050,6 +15154,16 @@ export default function CommonViewPage() {
           </div>
         </section>
       ) : null}
+
+      <MeetingDetailsDialog
+        meeting={activeMeetingDetails}
+        users={users}
+        canEdit={activeMeetingDetails ? canManageMeetingParticipants(activeMeetingDetails) : false}
+        saving={savingMeetingDetails}
+        formatWhen={formatExternalMeetingWhen}
+        onClose={closeMeetingDetails}
+        onSave={saveMeetingDetails}
+      />
 
       {internalMeetingsOpen ? (
         <section className="meeting-panel internal-meetings-panel">
@@ -15687,8 +15801,18 @@ export default function CommonViewPage() {
                                   <span>Status: {renderMeetingStatusControl(meeting)}</span>
                                 </div>
                               </div>
-                              {canEditInternalMeeting(meeting) ? (
-                                <div style={{ display: "flex", gap: "6px", marginLeft: "12px" }}>
+                              <div style={{ display: "flex", gap: "6px", marginLeft: "12px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                  <button
+                                    className="btn-surface"
+                                    type="button"
+                                    onClick={() => openMeetingDetails(meeting)}
+                                    title="View meeting details and assign PrimeFlow participants"
+                                    style={{ borderColor: "#93c5fd", color: "#1d4ed8" }}
+                                  >
+                                    Participants &amp; reminder
+                                  </button>
+                                {canEditInternalMeeting(meeting) ? (
+                                  <>
                                   <button
                                     className="btn-surface"
                                     type="button"
@@ -15710,8 +15834,9 @@ export default function CommonViewPage() {
                                       {deletingInternalMeetingId === meeting.id ? "Deleting..." : "Delete"}
                                     </button>
                                   ) : null}
-                                </div>
-                              ) : null}
+                                  </>
+                                ) : null}
+                              </div>
                             </div>
                           </>
                         )}
@@ -16610,6 +16735,20 @@ export default function CommonViewPage() {
                                 ]
                                   .filter(Boolean)
                                   .join(" ")}
+                                role={cell.meetingId ? "button" : undefined}
+                                tabIndex={cell.meetingId ? 0 : undefined}
+                                title={cell.meetingId ? "Open meeting participants and reminder settings" : undefined}
+                                onClick={(event) => {
+                                  if (!cell.meetingId) return
+                                  if ((event.target as HTMLElement).closest("button, select, input, textarea, a")) return
+                                  openMeetingDetailsById(cell.meetingId)
+                                }}
+                                onKeyDown={(event) => {
+                                  if (!cell.meetingId || (event.key !== "Enter" && event.key !== " ")) return
+                                  event.preventDefault()
+                                  openMeetingDetailsById(cell.meetingId)
+                                }}
+                                style={cell.meetingId ? { cursor: "pointer" } : undefined}
                               >
                                 {!cell.placeholder && canDeleteCommon && cell.entryId ? (
                                   <button

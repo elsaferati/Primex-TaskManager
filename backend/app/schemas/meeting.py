@@ -18,6 +18,7 @@ class MeetingOut(BaseModel):
     calendar_sync_status: str | None = None
     calendar_categories: list[str] = Field(default_factory=list)
     calendar_last_synced_at: datetime | None = None
+    reminder_minutes_before: int | None = 15
     meeting_type: str
     recurrence_type: str | None = None
     recurrence_days_of_week: list[int] | None = None
@@ -29,7 +30,7 @@ class MeetingOut(BaseModel):
     created_by: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
-    participant_ids: list[uuid.UUID] = []
+    participant_ids: list[uuid.UUID] = Field(default_factory=list)
     paired_external_meeting_id: uuid.UUID | None = None
     pre_external_meeting_id: uuid.UUID | None = None
 
@@ -50,7 +51,7 @@ class MeetingCreate(BaseModel):
     recurrence_days_of_month: list[int] | None = None
     department_id: uuid.UUID
     project_id: uuid.UUID | None = None
-    participant_ids: list[uuid.UUID] = []
+    participant_ids: list[uuid.UUID] = Field(default_factory=list)
     create_internal_meeting: bool | None = None
     internal_starts_at: datetime | None = None
     paired_external_meeting_id: uuid.UUID | None = None
@@ -69,6 +70,11 @@ class MeetingUpdate(BaseModel):
     recurrence_days_of_month: list[int] | None = None
     project_id: uuid.UUID | None = None
     participant_ids: list[uuid.UUID] | None = None
+
+
+class MeetingReminderSettingsUpdate(BaseModel):
+    participant_ids: list[uuid.UUID] = Field(default_factory=list)
+    reminder_minutes_before: int | None = Field(default=15, ge=0, le=1440)
 
 
 class MeetingOccurrenceStatusOut(BaseModel):

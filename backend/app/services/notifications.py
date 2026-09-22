@@ -71,9 +71,17 @@ def notification_to_payload(notification: Notification) -> dict:
     }
 
 
+def notification_realtime_payload(notification: Notification) -> dict:
+    payload = notification_to_payload(notification)
+    payload["notification_type"] = payload.pop("type")
+    payload["type"] = "notification"
+    return payload
+
+
 async def publish_notification(*, user_id: uuid.UUID, notification: Notification) -> None:
     if not settings.REDIS_ENABLED:
         return
     client = get_redis_sync()
-    payload = json.dumps({"user_id": str(user_id), "notification": {"type": "notification", **notification_to_payload(notification)}})
+    notification_payload = notification_realtime_payload(notification)
+    payload = json.dumps({"user_id": str(user_id), "notification": notification_payload})
     await asyncio.to_thread(client.publish, CHANNEL, payload)

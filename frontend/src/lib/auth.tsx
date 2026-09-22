@@ -35,6 +35,28 @@ const PREFETCH_CACHE_TTL_MS = 30 * 1000
 const REFERENCE_CACHE_PATHS = new Set(["/departments", "/users/lookup", "/task-statuses", "/boards"])
 let cacheGeneration = 0
 
+function playMeetingReminderSound() {
+  try {
+    const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AudioContextClass) return
+    const context = new AudioContextClass()
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    oscillator.type = "sine"
+    oscillator.frequency.setValueAtTime(880, context.currentTime)
+    gain.gain.setValueAtTime(0.0001, context.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.18, context.currentTime + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.5)
+    oscillator.connect(gain)
+    gain.connect(context.destination)
+    oscillator.start()
+    oscillator.stop(context.currentTime + 0.5)
+    oscillator.addEventListener("ended", () => void context.close())
+  } catch {
+    // Browsers can block audio until the user has interacted with the page.
+  }
+}
+
 function clearSessionCaches() {
   cacheGeneration += 1
   inFlightGetRequests.clear()
@@ -289,9 +311,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const ws = new WebSocket(`${API_WS_URL}/ws/notifications?token=${encodeURIComponent(token)}`)
     ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data) as { type?: string; title?: string; body?: string }
+        const msg = JSON.parse(event.data) as {
+          type?: string
+          notification_type?: string
+          title?: string
+          body?: string
+          data?: { open_url?: string }
+        }
         if (msg.type === "notification") {
-          toast(msg.title || "Notification", { description: msg.body || undefined })
+          const openUrl = msg.data?.open_url
+          toast(msg.title || "Notification", {
+            description: msg.body || undefined,
+            action: openUrl ? { label: "Open Meeting", onClick: () => window.open(openUrl, "_blank", "noopener,noreferrer") } : undefined,
+          })
+          if (msg.notification_type === "reminder") {
+            playMeetingReminderSound()
+            if ("Notification" in window && Notification.permission === "granted") {
+              const browserNotification = new Notification(msg.title || "PrimeFlow Meeting Reminder", {
+                body: msg.body || undefined,
+                tag: openUrl || msg.title,
+              })
+              browserNotification.onclick = () => {
+                window.focus()
+                if (openUrl) window.open(openUrl, "_blank", "noopener,noreferrer")
+                browserNotification.close()
+              }
+            }
+          }
           window.dispatchEvent(new CustomEvent("primex:notification"))
         }
       } catch {

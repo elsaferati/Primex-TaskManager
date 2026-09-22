@@ -291,7 +291,10 @@ async def validate_meeting_schedule(
         await db.execute(
             select(Meeting, MeetingParticipant.user_id)
             .join(MeetingParticipant, MeetingParticipant.meeting_id == Meeting.id)
-            .where(MeetingParticipant.user_id.in_(participant_ids))
+            .where(
+                MeetingParticipant.user_id.in_(participant_ids),
+                MeetingParticipant.assignment_source == "manual",
+            )
             .where(Meeting.starts_at.is_not(None))
         )
     ).all()

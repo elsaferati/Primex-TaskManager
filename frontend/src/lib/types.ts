@@ -747,6 +747,7 @@ export interface Meeting {
   calendar_sync_status?: string | null
   calendar_categories?: string[]
   calendar_last_synced_at?: string | null
+  reminder_minutes_before?: number | null
   meeting_type?: string | null
   recurrence_type?: string | null // "none", "weekly", "monthly"
   recurrence_days_of_week?: number[] | null

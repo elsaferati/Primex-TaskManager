@@ -307,6 +307,17 @@ export function Topbar() {
                         <div className="mt-1 text-xs text-muted-foreground">
                           {n.read_at ? "Read" : "Unread"}
                         </div>
+                        {n.type === "reminder" && typeof n.data?.open_url === "string" ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="mt-2"
+                            onClick={() => window.open(n.data?.open_url as string, "_blank", "noopener,noreferrer")}
+                          >
+                            Open Meeting
+                          </Button>
+                        ) : null}
                       </div>
                       <Button
                         type="button"

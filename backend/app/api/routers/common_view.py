@@ -1199,7 +1199,10 @@ async def get_common_view(
             participant_rows = (
                 await db.execute(
                     select(MeetingParticipant.meeting_id, MeetingParticipant.user_id)
-                    .where(MeetingParticipant.meeting_id.in_(meetings_by_id))
+                    .where(
+                        MeetingParticipant.meeting_id.in_(meetings_by_id),
+                        MeetingParticipant.assignment_source == "manual",
+                    )
                 )
             ).all()
             for meeting_id, user_id in participant_rows:

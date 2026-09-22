@@ -6,10 +6,16 @@ from datetime import date, datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import delete, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.access import ensure_admin, ensure_department_access, ensure_manager_or_admin, ensure_meeting_editor
+from app.api.access import (
+    ensure_admin,
+    ensure_department_access,
+    ensure_manager_or_admin,
+    ensure_meeting_editor,
+    ensure_meeting_participant_editor,
+)
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.integrations.microsoft import delete_calendar_event, update_calendar_event
@@ -23,6 +29,7 @@ from app.schemas.meeting import (
     MeetingOccurrenceStatusOut,
     MeetingOccurrenceStatusUpdate,
     MeetingOut,
+    MeetingReminderSettingsUpdate,
     MeetingUpdate,
 )
 from app.services.meeting_system_tasks import (
@@ -32,6 +39,12 @@ from app.services.meeting_system_tasks import (
     reconcile_pim_image_test_task_for_meeting,
 )
 from app.services.meeting_scheduler import one_h_schedule_conflicts
+from app.services.audit import add_audit_log
+from app.services.meeting_participants import (
+    manual_participant_ids,
+    meeting_to_out,
+    replace_manual_participants,
+)
 from app.services.microsoft_calendar_sync import (
     get_shared_calendar_token,
     is_common_view_visible_meeting,
@@ -96,7 +109,10 @@ async def list_meetings(
             ensure_department_access(user, department_id)
         stmt = stmt.where(Meeting.department_id == department_id)
     if participant_user_id is not None:
-        stmt = stmt.join(MeetingParticipant).where(MeetingParticipant.user_id == participant_user_id)
+        stmt = stmt.join(MeetingParticipant).where(
+            MeetingParticipant.user_id == participant_user_id,
+            MeetingParticipant.assignment_source == "manual",
+        )
     if meeting_type is not None:
         stmt = stmt.where(Meeting.meeting_type == meeting_type)
 
@@ -108,42 +124,10 @@ async def list_meetings(
     
     # Load participants for all meetings
     meeting_ids = [m.id for m in meetings]
-    participants_stmt = select(MeetingParticipant).where(MeetingParticipant.meeting_id.in_(meeting_ids))
-    participants = (await db.execute(participants_stmt)).scalars().all()
-    participants_by_meeting: dict[uuid.UUID, list[uuid.UUID]] = {}
-    for p in participants:
-        if p.meeting_id not in participants_by_meeting:
-            participants_by_meeting[p.meeting_id] = []
-        participants_by_meeting[p.meeting_id].append(p.user_id)
+    participants_by_meeting = await manual_participant_ids(db, meeting_ids)
     
     return [
-        MeetingOut(
-            id=m.id,
-            title=m.title,
-            platform=m.platform,
-            starts_at=m.starts_at,
-            ends_at=m.ends_at,
-            meeting_url=m.meeting_url,
-            microsoft_event_id=m.microsoft_event_id,
-            calendar_imported=bool(m.calendar_imported),
-            calendar_sync_status=m.calendar_sync_status,
-            calendar_categories=m.calendar_categories or [],
-            calendar_last_synced_at=m.calendar_last_synced_at,
-            meeting_type=m.meeting_type,
-            recurrence_type=m.recurrence_type,
-            recurrence_days_of_week=m.recurrence_days_of_week,
-            recurrence_days_of_month=m.recurrence_days_of_month,
-            external_agent_test_task_requested=m.external_agent_test_task_requested,
-            external_pim_image_test_task_requested=m.external_pim_image_test_task_requested,
-            department_id=m.department_id,
-            project_id=m.project_id,
-            created_by=m.created_by,
-            created_at=m.created_at,
-            updated_at=m.updated_at,
-            participant_ids=participants_by_meeting.get(m.id, []),
-            paired_external_meeting_id=m.paired_external_meeting_id,
-            pre_external_meeting_id=m.pre_external_meeting_id,
-        )
+        meeting_to_out(m, participant_ids=participants_by_meeting.get(m.id, []))
         for m in meetings
     ]
 
@@ -390,10 +374,20 @@ async def create_meeting(
     
     # Create participants
     for user_id in participant_ids:
-        participant = MeetingParticipant(meeting_id=meeting.id, user_id=user_id)
+        participant = MeetingParticipant(
+            meeting_id=meeting.id,
+            user_id=user_id,
+            assignment_source="manual",
+            assigned_by_user_id=user.id,
+        )
         db.add(participant)
         if paired_internal_meeting is not None:
-            db.add(MeetingParticipant(meeting_id=paired_internal_meeting.id, user_id=user_id))
+            db.add(MeetingParticipant(
+                meeting_id=paired_internal_meeting.id,
+                user_id=user_id,
+                assignment_source="manual",
+                assigned_by_user_id=user.id,
+            ))
 
     await db.flush()
     await db.commit()
@@ -402,68 +396,57 @@ async def create_meeting(
         await db.refresh(paired_internal_meeting)
     
     # Load participants for response
-    participants_stmt = select(MeetingParticipant).where(MeetingParticipant.meeting_id == meeting.id)
-    participants = (await db.execute(participants_stmt)).scalars().all()
-    participant_ids_list = [p.user_id for p in participants]
-    
-    paired_internal_out = None
-    if paired_internal_meeting is not None:
-        paired_internal_out = MeetingOut(
-            id=paired_internal_meeting.id,
-            title=paired_internal_meeting.title,
-            platform=paired_internal_meeting.platform,
-            starts_at=paired_internal_meeting.starts_at,
-            ends_at=paired_internal_meeting.ends_at,
-            meeting_url=paired_internal_meeting.meeting_url,
-            microsoft_event_id=paired_internal_meeting.microsoft_event_id,
-            calendar_imported=bool(paired_internal_meeting.calendar_imported),
-            calendar_sync_status=paired_internal_meeting.calendar_sync_status,
-            calendar_categories=paired_internal_meeting.calendar_categories or [],
-            calendar_last_synced_at=paired_internal_meeting.calendar_last_synced_at,
-            meeting_type=paired_internal_meeting.meeting_type,
-            recurrence_type=paired_internal_meeting.recurrence_type,
-            recurrence_days_of_week=paired_internal_meeting.recurrence_days_of_week,
-            recurrence_days_of_month=paired_internal_meeting.recurrence_days_of_month,
-            external_agent_test_task_requested=paired_internal_meeting.external_agent_test_task_requested,
-            external_pim_image_test_task_requested=paired_internal_meeting.external_pim_image_test_task_requested,
-            department_id=paired_internal_meeting.department_id,
-            project_id=paired_internal_meeting.project_id,
-            created_by=paired_internal_meeting.created_by,
-            created_at=paired_internal_meeting.created_at,
-            updated_at=paired_internal_meeting.updated_at,
-            participant_ids=participant_ids_list,
-            paired_external_meeting_id=paired_internal_meeting.paired_external_meeting_id,
-            pre_external_meeting_id=paired_internal_meeting.pre_external_meeting_id,
-        )
-
+    participant_ids_list = list(dict.fromkeys(participant_ids))
+    paired_internal_out = (
+        meeting_to_out(paired_internal_meeting, participant_ids=participant_ids_list)
+        if paired_internal_meeting is not None
+        else None
+    )
     return MeetingCreateOut(
-        id=meeting.id,
-        title=meeting.title,
-        platform=meeting.platform,
-        starts_at=meeting.starts_at,
-        ends_at=meeting.ends_at,
-        meeting_url=meeting.meeting_url,
-        microsoft_event_id=meeting.microsoft_event_id,
-        calendar_imported=bool(meeting.calendar_imported),
-        calendar_sync_status=meeting.calendar_sync_status,
-        calendar_categories=meeting.calendar_categories or [],
-        calendar_last_synced_at=meeting.calendar_last_synced_at,
-        meeting_type=meeting.meeting_type,
-        recurrence_type=meeting.recurrence_type,
-        recurrence_days_of_week=meeting.recurrence_days_of_week,
-        recurrence_days_of_month=meeting.recurrence_days_of_month,
-        external_agent_test_task_requested=meeting.external_agent_test_task_requested,
-        external_pim_image_test_task_requested=meeting.external_pim_image_test_task_requested,
-        department_id=meeting.department_id,
-        project_id=meeting.project_id,
-        created_by=meeting.created_by,
-        created_at=meeting.created_at,
-        updated_at=meeting.updated_at,
-        participant_ids=participant_ids_list,
-        paired_external_meeting_id=meeting.paired_external_meeting_id,
-        pre_external_meeting_id=meeting.pre_external_meeting_id,
+        **meeting_to_out(meeting, participant_ids=participant_ids_list).model_dump(),
         paired_internal_meeting=paired_internal_out,
     )
+
+
+@router.patch("/{meeting_id}/reminder-settings", response_model=MeetingOut)
+async def update_meeting_reminder_settings(
+    meeting_id: uuid.UUID,
+    payload: MeetingReminderSettingsUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> MeetingOut:
+    """Update PrimeFlow-only participants and reminders without modifying the source calendar."""
+    meeting = (await db.execute(select(Meeting).where(Meeting.id == meeting_id))).scalar_one_or_none()
+    if meeting is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
+    ensure_meeting_participant_editor(user, meeting)
+    before_ids = (await manual_participant_ids(db, [meeting.id])).get(meeting.id, [])
+    before = {
+        "participant_ids": [str(value) for value in before_ids],
+        "reminder_minutes_before": meeting.reminder_minutes_before,
+    }
+    participant_ids = await replace_manual_participants(
+        db,
+        meeting_id=meeting.id,
+        participant_ids=payload.participant_ids,
+        actor_user_id=user.id,
+    )
+    meeting.reminder_minutes_before = payload.reminder_minutes_before
+    add_audit_log(
+        db=db,
+        actor_user_id=user.id,
+        entity_type="meeting",
+        entity_id=meeting.id,
+        action="UPDATE_PARTICIPANTS_AND_REMINDER",
+        before=before,
+        after={
+            "participant_ids": [str(value) for value in participant_ids],
+            "reminder_minutes_before": payload.reminder_minutes_before,
+        },
+    )
+    await db.commit()
+    await db.refresh(meeting)
+    return meeting_to_out(meeting, participant_ids=participant_ids)
 
 
 @router.patch("/{meeting_id}", response_model=MeetingOut)
@@ -483,7 +466,8 @@ async def update_meeting(
     # Get fields that were explicitly set in the request
     payload_dict = payload.model_dump(exclude_unset=True)
 
-    if meeting.calendar_imported and meeting.microsoft_event_id:
+    calendar_fields = {"title", "platform", "starts_at", "ends_at"}
+    if meeting.calendar_imported and meeting.microsoft_event_id and calendar_fields.intersection(payload_dict):
         token = await get_shared_calendar_token(db, redirect_uri=resolve_redirect_uri(request))
         if token is None:
             raise HTTPException(
@@ -558,26 +542,12 @@ async def update_meeting(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Select at least one person for the meeting",
             )
-        # Validate participant user IDs
-        users_stmt = select(User).where(User.id.in_(participant_ids))
-        existing_users = (await db.execute(users_stmt)).scalars().all()
-        existing_user_ids = {u.id for u in existing_users}
-        invalid_ids = set(participant_ids) - existing_user_ids
-        if invalid_ids:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid user IDs: {list(invalid_ids)}"
-            )
-        
-        # Delete existing participants
-        await db.execute(
-            delete(MeetingParticipant).where(MeetingParticipant.meeting_id == meeting.id)
+        await replace_manual_participants(
+            db,
+            meeting_id=meeting.id,
+            participant_ids=participant_ids,
+            actor_user_id=user.id,
         )
-        
-        # Create new participants
-        for user_id in participant_ids:
-            participant = MeetingParticipant(meeting_id=meeting.id, user_id=user_id)
-            db.add(participant)
 
     await db.flush()
     await reconcile_external_meeting_system_tasks_for_meeting(db, meeting)
@@ -586,37 +556,8 @@ async def update_meeting(
     await db.refresh(meeting)
     
     # Load participants for response
-    participants_stmt = select(MeetingParticipant).where(MeetingParticipant.meeting_id == meeting.id)
-    participants = (await db.execute(participants_stmt)).scalars().all()
-    participant_ids_list = [p.user_id for p in participants]
-    
-    return MeetingOut(
-        id=meeting.id,
-        title=meeting.title,
-        platform=meeting.platform,
-        starts_at=meeting.starts_at,
-        ends_at=meeting.ends_at,
-        meeting_url=meeting.meeting_url,
-        microsoft_event_id=meeting.microsoft_event_id,
-        calendar_imported=bool(meeting.calendar_imported),
-        calendar_sync_status=meeting.calendar_sync_status,
-        calendar_categories=meeting.calendar_categories or [],
-        calendar_last_synced_at=meeting.calendar_last_synced_at,
-        meeting_type=meeting.meeting_type,
-        recurrence_type=meeting.recurrence_type,
-        recurrence_days_of_week=meeting.recurrence_days_of_week,
-        recurrence_days_of_month=meeting.recurrence_days_of_month,
-        external_agent_test_task_requested=meeting.external_agent_test_task_requested,
-        external_pim_image_test_task_requested=meeting.external_pim_image_test_task_requested,
-        department_id=meeting.department_id,
-        project_id=meeting.project_id,
-        created_by=meeting.created_by,
-        created_at=meeting.created_at,
-        updated_at=meeting.updated_at,
-        participant_ids=participant_ids_list,
-        paired_external_meeting_id=meeting.paired_external_meeting_id,
-        pre_external_meeting_id=meeting.pre_external_meeting_id,
-    )
+    participant_ids_list = (await manual_participant_ids(db, [meeting.id])).get(meeting.id, [])
+    return meeting_to_out(meeting, participant_ids=participant_ids_list)
 
 
 @router.post("/{meeting_id}/agent-test-task", response_model=MeetingOut)
@@ -644,37 +585,8 @@ async def create_agent_test_task_for_meeting(
     await db.commit()
     await db.refresh(meeting)
 
-    participants_stmt = select(MeetingParticipant).where(MeetingParticipant.meeting_id == meeting.id)
-    participants = (await db.execute(participants_stmt)).scalars().all()
-    participant_ids_list = [p.user_id for p in participants]
-
-    return MeetingOut(
-        id=meeting.id,
-        title=meeting.title,
-        platform=meeting.platform,
-        starts_at=meeting.starts_at,
-        ends_at=meeting.ends_at,
-        meeting_url=meeting.meeting_url,
-        microsoft_event_id=meeting.microsoft_event_id,
-        calendar_imported=bool(meeting.calendar_imported),
-        calendar_sync_status=meeting.calendar_sync_status,
-        calendar_categories=meeting.calendar_categories or [],
-        calendar_last_synced_at=meeting.calendar_last_synced_at,
-        meeting_type=meeting.meeting_type,
-        recurrence_type=meeting.recurrence_type,
-        recurrence_days_of_week=meeting.recurrence_days_of_week,
-        recurrence_days_of_month=meeting.recurrence_days_of_month,
-        external_agent_test_task_requested=meeting.external_agent_test_task_requested,
-        external_pim_image_test_task_requested=meeting.external_pim_image_test_task_requested,
-        department_id=meeting.department_id,
-        project_id=meeting.project_id,
-        created_by=meeting.created_by,
-        created_at=meeting.created_at,
-        updated_at=meeting.updated_at,
-        participant_ids=participant_ids_list,
-        paired_external_meeting_id=meeting.paired_external_meeting_id,
-        pre_external_meeting_id=meeting.pre_external_meeting_id,
-    )
+    participant_ids_list = (await manual_participant_ids(db, [meeting.id])).get(meeting.id, [])
+    return meeting_to_out(meeting, participant_ids=participant_ids_list)
 
 
 @router.post("/{meeting_id}/pim-image-test-task", response_model=MeetingOut)
@@ -701,37 +613,8 @@ async def create_pim_image_test_task_for_meeting(
     await db.commit()
     await db.refresh(meeting)
 
-    participants_stmt = select(MeetingParticipant).where(MeetingParticipant.meeting_id == meeting.id)
-    participants = (await db.execute(participants_stmt)).scalars().all()
-    participant_ids_list = [p.user_id for p in participants]
-
-    return MeetingOut(
-        id=meeting.id,
-        title=meeting.title,
-        platform=meeting.platform,
-        starts_at=meeting.starts_at,
-        ends_at=meeting.ends_at,
-        meeting_url=meeting.meeting_url,
-        microsoft_event_id=meeting.microsoft_event_id,
-        calendar_imported=bool(meeting.calendar_imported),
-        calendar_sync_status=meeting.calendar_sync_status,
-        calendar_categories=meeting.calendar_categories or [],
-        calendar_last_synced_at=meeting.calendar_last_synced_at,
-        meeting_type=meeting.meeting_type,
-        recurrence_type=meeting.recurrence_type,
-        recurrence_days_of_week=meeting.recurrence_days_of_week,
-        recurrence_days_of_month=meeting.recurrence_days_of_month,
-        external_agent_test_task_requested=meeting.external_agent_test_task_requested,
-        external_pim_image_test_task_requested=meeting.external_pim_image_test_task_requested,
-        department_id=meeting.department_id,
-        project_id=meeting.project_id,
-        created_by=meeting.created_by,
-        created_at=meeting.created_at,
-        updated_at=meeting.updated_at,
-        participant_ids=participant_ids_list,
-        paired_external_meeting_id=meeting.paired_external_meeting_id,
-        pre_external_meeting_id=meeting.pre_external_meeting_id,
-    )
+    participant_ids_list = (await manual_participant_ids(db, [meeting.id])).get(meeting.id, [])
+    return meeting_to_out(meeting, participant_ids=participant_ids_list)
 
 
 @router.delete("/{meeting_id}", status_code=status.HTTP_200_OK)
