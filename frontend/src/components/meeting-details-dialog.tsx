@@ -2,6 +2,8 @@
 
 import * as React from "react"
 
+import { playMeetingReminderSound } from "@/lib/auth"
+
 import type { Meeting, User } from "@/lib/types"
 
 type Props = {
@@ -82,6 +84,16 @@ export function MeetingDetailsDialog({
     if (!("Notification" in window)) return
     const permission = await Notification.requestPermission()
     setNotificationPermission(permission)
+    if (permission === "granted") testBrowserAlerts()
+  }
+
+  const testBrowserAlerts = () => {
+    playMeetingReminderSound()
+    if (!("Notification" in window) || Notification.permission !== "granted") return
+    new Notification("PrimeFlow browser alerts enabled", {
+      body: "Meeting reminder popups and sounds are ready on this browser.",
+      tag: "primeflow-browser-alert-test",
+    })
   }
 
   return (
@@ -199,6 +211,8 @@ export function MeetingDetailsDialog({
           </div>
           {notificationPermission === "default" ? (
             <button className="btn-surface" type="button" onClick={() => void enableBrowserAlerts()}>Enable browser alerts</button>
+          ) : notificationPermission === "granted" ? (
+            <button className="btn-surface" type="button" onClick={testBrowserAlerts}>Test browser alert</button>
           ) : null}
         </div>
 

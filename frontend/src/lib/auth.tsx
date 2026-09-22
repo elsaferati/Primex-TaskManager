@@ -35,7 +35,7 @@ const PREFETCH_CACHE_TTL_MS = 30 * 1000
 const REFERENCE_CACHE_PATHS = new Set(["/departments", "/users/lookup", "/task-statuses", "/boards"])
 let cacheGeneration = 0
 
-function playMeetingReminderSound() {
+export function playMeetingReminderSound() {
   try {
     const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
     if (!AudioContextClass) return
@@ -308,8 +308,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     if (!token || !user) return
 
-    const ws = new WebSocket(`${API_WS_URL}/ws/notifications?token=${encodeURIComponent(token)}`)
-    ws.onmessage = (event) => {
+    let stopped = false
+    let ws: WebSocket | null = null
+    let reconnectTimer: number | null = null
+    let heartbeatTimer: number | null = null
+    let reconnectDelayMs = 1000
+
+    const clearHeartbeat = () => {
+      if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer)
+      heartbeatTimer = null
+    }
+
+    const handleMessage = (event: MessageEvent) => {
       try {
         const msg = JSON.parse(event.data) as {
           type?: string
@@ -344,11 +354,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // ignore
       }
     }
-    ws.onerror = () => {
-      // ignore
+
+    const connect = () => {
+      if (stopped) return
+      ws = new WebSocket(`${API_WS_URL}/ws/notifications?token=${encodeURIComponent(token)}`)
+      ws.onopen = () => {
+        reconnectDelayMs = 1000
+        clearHeartbeat()
+        heartbeatTimer = window.setInterval(() => {
+          if (ws?.readyState === WebSocket.OPEN) ws.send("ping")
+        }, 30_000)
+      }
+      ws.onmessage = handleMessage
+      ws.onerror = () => ws?.close()
+      ws.onclose = () => {
+        clearHeartbeat()
+        if (stopped) return
+        reconnectTimer = window.setTimeout(connect, reconnectDelayMs)
+        reconnectDelayMs = Math.min(reconnectDelayMs * 2, 30_000)
+      }
     }
-    return () => ws.close()
-  }, [token])
+
+    connect()
+    return () => {
+      stopped = true
+      clearHeartbeat()
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
+      ws?.close()
+    }
+  }, [token, user])
 
   const logout = React.useCallback(async () => {
     try {

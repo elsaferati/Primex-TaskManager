@@ -418,7 +418,9 @@ jobs:
               Stop-Process -Id $_ -Force
             }
 
-          $env:REDIS_ENABLED = "false"
+          # The public API terminates browser WebSocket connections and must
+          # consume Redis notification events for realtime alerts and sounds.
+          $env:REDIS_ENABLED = "true"
           $env:REDIS_URL = "redis://127.0.0.1:6379/0"
           $env:APP_TIMEZONE = "Europe/Budapest"
           # The primary API on port 8000 exclusively owns the shared Outlook
