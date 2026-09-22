@@ -536,6 +536,7 @@ function WeeklyRealizationView() {
   const [meetingId, setMeetingId] = React.useState("")
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
   const reportRequestRef = React.useRef(0)
+  const reportScopeRef = React.useRef("")
   const selectedIdRef = React.useRef(selectedId)
   selectedIdRef.current = selectedId
 
@@ -559,25 +560,40 @@ function WeeklyRealizationView() {
     const response = await apiFetch("/departments")
     if (!response.ok) return
     const rows = (await response.json()) as Department[]
-    setDepartments(rows)
+    const visibleRows = user?.role === "STAFF"
+      ? rows.filter((row) => row.id === user.department_id)
+      : rows
+    setDepartments(visibleRows)
     // Staff retain their own department; managers and admins start with all.
     const preferred = user?.department_id
-    const next = user?.role === "STAFF" ? rows.find((row) => row.id === preferred)?.id || rows[0]?.id || "" : "ALL"
+    const next = user?.role === "STAFF" ? visibleRows.find((row) => row.id === preferred)?.id || "" : "ALL"
     setDepartmentId((current) => current || next)
   }, [apiFetch, user])
 
   React.useEffect(() => {
+    if (user?.role === "STAFF") {
+      setPlannerUsers([])
+      return
+    }
     void apiFetch("/users/lookup").then(async (response) => {
       if (response.ok) setPlannerUsers((await response.json()) as UserLookup[])
     })
-  }, [apiFetch])
+  }, [apiFetch, user?.role])
 
-  const loadReport = React.useCallback(async () => {
+  const loadReport = React.useCallback(async (recalculate = false) => {
     if (!departmentId) return
     const requestId = ++reportRequestRef.current
+    const scope = `${user?.id}:${departmentId}:${weekStart}`
+    const initialLoad = reportScopeRef.current !== scope
+    if (initialLoad) {
+      reportScopeRef.current = scope
+      setReports([])
+      setData(null)
+    }
     setLoading(true)
     try {
       const departmentIds = departmentId === "ALL" ? departments.map((item) => item.id) : [departmentId]
+      const received = new Map<string, RealizationWeeklyResponse>()
       const outcomes = await Promise.allSettled(departmentIds.map(async (reportDepartmentId) => {
         const params = new URLSearchParams({ department_id: reportDepartmentId, week_start: weekStart })
         let response = await apiFetch(`/realization/weekly?${params}`)
@@ -588,6 +604,7 @@ function WeeklyRealizationView() {
         const canPrepareCurrentWeek = (
           weekStart === currentWeek
           && user?.role !== "STAFF"
+          && (recalculate || !payload.has_planned_snapshot || !payload.people.length)
         )
         if (canPrepareCurrentWeek) {
           const prepareResponse = await apiFetch(`/realization/weekly/prepare?${params}`, {
@@ -598,7 +615,7 @@ function WeeklyRealizationView() {
         }
 
         const canRefreshLive = (
-          weekStart === currentWeek
+          recalculate && weekStart === currentWeek
           && payload.has_planned_snapshot
           && !payload.has_final_snapshot
           && ["OPEN", "CALCULATED"].includes(payload.period.status)
@@ -623,6 +640,10 @@ function WeeklyRealizationView() {
           }
         }
 
+        received.set(reportDepartmentId, payload)
+        if (initialLoad && requestId === reportRequestRef.current) {
+          setReports(departmentIds.flatMap(id => received.has(id) ? [received.get(id)!] : []))
+        }
         return payload
       }))
       if (requestId !== reportRequestRef.current) return
@@ -638,9 +659,6 @@ function WeeklyRealizationView() {
     } catch (error) {
       if (requestId !== reportRequestRef.current) return
       toast.error("Raporti nuk u ngarkua", { description: error instanceof Error ? error.message : undefined })
-      setData(null)
-      setReports([])
-      setFailedDepartmentCount(0)
     } finally {
       if (requestId === reportRequestRef.current) setLoading(false)
     }
@@ -654,14 +672,6 @@ function WeeklyRealizationView() {
   React.useEffect(() => {
     // Data loading is asynchronous; state updates happen only after the request resolves.
     if (departmentId) queueMicrotask(() => void loadReport())
-  }, [departmentId, loadReport])
-
-  React.useEffect(() => {
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible" && departmentId) void loadReport()
-    }
-    document.addEventListener("visibilitychange", refreshWhenVisible)
-    return () => document.removeEventListener("visibilitychange", refreshWhenVisible)
   }, [departmentId, loadReport])
 
   const run = React.useCallback(
@@ -690,7 +700,7 @@ function WeeklyRealizationView() {
 
   const calculateToday = async () => {
     setAction("daily")
-    await loadReport()
+    await loadReport(true)
     setAction(null)
   }
 
@@ -1205,7 +1215,9 @@ function WeeklyRealizationView() {
             </div>
             <div className="space-y-1.5">
               <Label>Personi</Label>
-              <Select value={personFilter} onValueChange={(value) => {
+              {user.role === "STAFF" ? (
+                <Input value={people[0]?.user_name || user.full_name || "Profili im"} disabled />
+              ) : <Select value={personFilter} onValueChange={(value) => {
                 setPersonFilter(value)
                 setDetailsOpen(false)
                 const report = reports.find((item) => item.people.some((person) => person.user_id === value))
@@ -1224,7 +1236,7 @@ function WeeklyRealizationView() {
                     </SelectItem>
                   ))}
                 </SelectContent>
-              </Select>
+              </Select>}
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1266,12 +1278,13 @@ function WeeklyRealizationView() {
         </div>
       ) : null}
 
+      {loading && reports.length > 0 ? <p role="status" className="text-xs text-slate-500">Duke ngarkuar departamentet e tjera; përmbledhja është ende e pjesshme…</p> : null}
       {!loading && failedDepartmentCount > 0 ? (
         <p role="alert" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
           Përmbledhja është e pjesshme: {failedDepartmentCount} departamente nuk u ngarkuan. Rifresko për të provuar përsëri.
         </p>
       ) : null}
-      <WeeklyRealizationTable reports={loading ? [] : reports} personId={personFilter} loading={loading} plannerOrderByUserId={Object.fromEntries(plannerUsers.map((plannerUser) => [plannerUser.id, plannerUser.weekly_planner_sort_order]))} onReviewSaved={() => { setReviewVersion((value) => value + 1); void loadReport() }} onSelect={(report, person) => {
+      <WeeklyRealizationTable reports={reports} personId={personFilter} loading={loading && !reports.length} plannerOrderByUserId={Object.fromEntries(plannerUsers.map((plannerUser) => [plannerUser.id, plannerUser.weekly_planner_sort_order]))} onReviewSaved={() => { setReviewVersion((value) => value + 1); void loadReport() }} onSelect={(report, person) => {
         setData(report)
         setSelectedId(person.id)
         setDetailsOpen(true)
@@ -1719,14 +1732,22 @@ function WeeklyRealizationView() {
 
 export default function RealizationPage() {
   const [mode, setMode] = React.useState<"daily" | "weekly" | "monthly">("daily")
+  const [visited, setVisited] = React.useState({ daily: true, weekly: false, monthly: false })
+  const selectMode = (next: typeof mode) => {
+    setVisited(current => ({ ...current, [next]: true }))
+    setMode(next)
+  }
   return (
     <div className="mx-auto w-full max-w-[1720px] space-y-5 pb-12">
       <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm" aria-label="Periudha e Realizimit">
-        <Button size="sm" variant={mode === "daily" ? "default" : "ghost"} onClick={() => setMode("daily")}>Ditor</Button>
-        <Button size="sm" variant={mode === "weekly" ? "default" : "ghost"} onClick={() => setMode("weekly")}>Javor</Button>
-        <Button size="sm" variant={mode === "monthly" ? "default" : "ghost"} onClick={() => setMode("monthly")}>Mujor</Button>
+        <Button size="sm" variant={mode === "daily" ? "default" : "ghost"} onClick={() => selectMode("daily")}>Ditor</Button>
+        <Button size="sm" variant={mode === "weekly" ? "default" : "ghost"} onClick={() => selectMode("weekly")}>Javor</Button>
+        <Button size="sm" variant={mode === "monthly" ? "default" : "ghost"} onClick={() => selectMode("monthly")}>Mujor</Button>
       </div>
-      {mode === "daily" ? <DailyRealizationView /> : mode === "weekly" ? <WeeklyRealizationView /> : <MonthlyRealizationView />}
+      {/* Mount each report on first visit and retain its data and filters when switching tabs. */}
+      <div hidden={mode !== "daily"}><DailyRealizationView /></div>
+      {visited.weekly && <div hidden={mode !== "weekly"}><WeeklyRealizationView /></div>}
+      {visited.monthly && <div hidden={mode !== "monthly"}><MonthlyRealizationView /></div>}
     </div>
   )
 }

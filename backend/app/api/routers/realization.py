@@ -489,6 +489,8 @@ async def _weekly_response(
         working_days=working_days,
     )
     eligible_user_ids = active_user_ids - excluded_on_full_leave
+    if user.role == UserRole.STAFF:
+        eligible_user_ids &= {user.id}
     rows = [row for row in raw_rows if row.user_id in eligible_user_ids]
     visible = [
         row
@@ -582,28 +584,33 @@ async def _weekly_response(
             .order_by(RealizationPeriod.start_date.asc())
         )
     ).all()
-    if not visible and daily_rows:
-        latest_by_user: dict[uuid.UUID, tuple[RealizationPersonResult, RealizationPeriod]] = {}
-        for daily_result, daily_period in daily_rows:
-            latest_by_user[daily_result.user_id] = (daily_result, daily_period)
-        rows = [item[0] for item in latest_by_user.values()]
-        visible = [
-            row
-            for row in rows
-            if can_view_person_result(
-                user,
-                subject_user_id=row.user_id,
-                subject_department_id=row.department_id,
+    # Weekly rows can be sparse while the week is open: answering one person's
+    # weekly question creates only that person's weekly result. Merge the latest
+    # calculated daily row for every other eligible person so a partial weekly
+    # result set cannot hide the rest of the department.
+    latest_by_user: dict[uuid.UUID, tuple[RealizationPersonResult, RealizationPeriod]] = {}
+    for daily_result, daily_period in daily_rows:
+        latest_by_user[daily_result.user_id] = (daily_result, daily_period)
+    visible_user_ids = {row.user_id for row in visible}
+    for person_id, (daily_result, _) in latest_by_user.items():
+        if person_id in visible_user_ids or person_id not in eligible_user_ids:
+            continue
+        if not can_view_person_result(
+            user,
+            subject_user_id=daily_result.user_id,
+            subject_department_id=daily_result.department_id,
+        ):
+            continue
+        visible.append(daily_result)
+        visible_user_ids.add(person_id)
+    names = {
+        row.id: row.full_name
+        for row in (
+            await db.execute(
+                select(User).where(User.id.in_([item.user_id for item in visible]))
             )
-        ]
-        names = {
-            row.id: row.full_name
-            for row in (
-                await db.execute(
-                    select(User).where(User.id.in_([item.user_id for item in visible]))
-                )
-            ).scalars().all()
-        } if visible else {}
+        ).scalars().all()
+    } if visible else {}
     daily_by_user: dict[uuid.UUID, list[dict]] = {}
     daily_tasks_by_user: dict[uuid.UUID, dict[str, dict]] = {}
     weekly_completed_tasks_by_user: dict[uuid.UUID, list[dict]] = {}
@@ -955,6 +962,11 @@ async def _weekly_response(
     for row in visible:
         timeline = daily_by_user.setdefault(row.user_id, [])
         timeline_by_date = {item["date"]: item for item in timeline}
+        leave_days = (
+            common_leave[row.user_id].days
+            if row.user_id in common_leave
+            else frozenset()
+        )
         current_day = period.start_date
         while current_day <= period.end_date:
             if _is_working_day(current_day):
@@ -962,6 +974,42 @@ async def _weekly_response(
                 planned_tasks = planned_tasks_by_user_day.get(row.user_id, {}).get(day_key, [])
                 scheduled_system_tasks = system_tasks_by_user_day.get(row.user_id, {}).get(day_key, [])
                 item = timeline_by_date.get(day_key)
+                if current_day in leave_days:
+                    if item is None:
+                        item = {
+                            "date": day_key,
+                            "has_snapshot": False,
+                            "daily_progress_percent": 0,
+                            "weekly_progress_percent": 0,
+                            "planned_count": 0,
+                            "completed_count": 0,
+                            "weekly_planned_count": 0,
+                            "weekly_completed_count": 0,
+                            "additional_count": 0,
+                            "attendance": [],
+                            "tasks": [],
+                        }
+                        timeline.append(item)
+                        timeline_by_date[day_key] = item
+                    item["planned_count"] = 0
+                    item["completed_count"] = 0
+                    item["daily_progress_percent"] = 0
+                    item["tasks"] = []
+                    item["on_leave"] = True
+                    attendance = list(item.get("attendance") or [])
+                    if not any(
+                        str(entry.get("type") or "").upper() == "PUSHIM_VJETOR"
+                        for entry in attendance
+                        if isinstance(entry, dict)
+                    ):
+                        attendance.append({
+                            "date": day_key,
+                            "type": "PUSHIM_VJETOR",
+                            "source": "common_leave",
+                        })
+                    item["attendance"] = attendance
+                    current_day += timedelta(days=1)
+                    continue
                 if item is None:
                     tasks_by_key = {
                         str(task.get("task_id") or task.get("match_key") or ""): task
@@ -1137,9 +1185,9 @@ async def _weekly_response(
         try:
             task_id = uuid.UUID(str(task.get("task_id")))
         except (TypeError, ValueError):
-            # Snapshot-only planner facts are already sourced from the
-            # opt-in-filtered Weekly Planner.
-            return True
+            # Without a live task/template relation the opt-in cannot be
+            # verified, therefore a system fact must not affect Realization.
+            return False
         return task_id in opted_in_system_task_ids
 
     for timeline in daily_by_user.values():
@@ -1916,6 +1964,8 @@ async def _daily_response(
         if active_user.id not in common_leave
         or period.start_date not in common_leave[active_user.id].days
     }
+    if user.role == UserRole.STAFF:
+        eligible_user_ids &= {user.id}
     rows = [
         row
         for row in raw_rows
@@ -3279,13 +3329,8 @@ async def _manager_review_context(
     if subject is None or subject.department_id != period.department_id:
         raise HTTPException(status_code=404, detail="Reviewed employee not found in this period")
 
-    manager_in_scope = (
-        actor.role == UserRole.MANAGER
-        and actor.department_id is not None
-        and actor.department_id == period.department_id
-    )
-    can_edit = actor.role == UserRole.ADMIN or manager_in_scope
-    can_view = can_edit or actor.role == UserRole.MANAGER or (
+    can_edit = actor.role in {UserRole.ADMIN, UserRole.MANAGER}
+    can_view = can_edit or (
         actor.role == UserRole.STAFF and actor.id == subject_user_id
     )
     if editing and not can_edit:
@@ -3314,7 +3359,7 @@ async def get_manager_review(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> RealizationManagerReviewOut:
-    _period_row, _subject, can_edit = await _manager_review_context(
+    period, _subject, can_edit = await _manager_review_context(
         db,
         period_id=period_id,
         subject_user_id=subject_user_id,
@@ -3324,7 +3369,7 @@ async def get_manager_review(
     return RealizationManagerReviewOut.model_validate(
         await build_manager_review_response(
             db,
-            period_id=period_id,
+            period_id=period.id,
             user_id=subject_user_id,
             can_edit=can_edit,
         )

@@ -36,11 +36,15 @@ class TestSystemTaskWeeklyPlannerVisibility(unittest.TestCase):
         source = inspect.getsource(calculate_daily_period)
 
         self.assertIn("SystemTaskTemplate.show_in_weekly_planner.is_(True)", source)
+        self.assertIn("SystemTaskTemplate.show_in_weekly_planner.is_not(True)", source)
+        self.assertIn("planned_ids -= excluded_system_task_ids", source)
+        self.assertIn('row.get("source_type") != "system" or row.get("task_id") in task_by_id', source)
 
     def test_weekly_realization_only_loads_opted_in_system_tasks(self) -> None:
         source = inspect.getsource(_weekly_response)
 
         self.assertIn("SystemTaskTemplate.show_in_weekly_planner.is_(True)", source)
+        self.assertIn("return False", source)
 
 
 if __name__ == "__main__":

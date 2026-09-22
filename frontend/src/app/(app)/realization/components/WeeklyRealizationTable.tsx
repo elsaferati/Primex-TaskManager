@@ -44,6 +44,31 @@ export function weeklyMetrics(person: RealizationPersonResult) {
   }
 }
 
+export function hasWeeklyActivity(person: RealizationPersonResult) {
+  const value = weeklyMetrics(person)
+  return [
+    value.planned,
+    value.completed,
+    value.extra,
+    value.extraCompleted,
+    value.extraProgress,
+    value.extraPostponed,
+    value.extraTodo,
+    value.extraDeferred,
+    value.progress,
+    value.postponed,
+    value.noProgress,
+    value.quantityTasks,
+    value.quantityPlanned,
+    value.quantityCompleted,
+    value.deadlines,
+    value.deadlinesCompleted,
+    value.deadlinesPostponed,
+    value.deadlinesInProgress,
+    value.deadlinesNoProgress,
+  ].some((metric) => metric !== 0)
+}
+
 export function WeeklyRealizationTable({ reports, personId, onSelect, loading, onReviewSaved, plannerOrderByUserId }: {
   reports: RealizationWeeklyResponse[]; personId: string; loading: boolean
   plannerOrderByUserId: WeeklyPlannerSortOrder
@@ -52,10 +77,7 @@ export function WeeklyRealizationTable({ reports, personId, onSelect, loading, o
 }) {
   const rows = reports.flatMap((report) => report.people.map((person) => ({ report, person })))
     .filter(({ person }) => personId === "ALL" || person.user_id === personId)
-    .filter(({ person }) => {
-      const value = weeklyMetrics(person)
-      return value.planned + value.extra + value.completed + value.progress + value.postponed + value.noProgress > 0
-    })
+    .filter(({ person }) => hasWeeklyActivity(person))
     .sort((a, b) => compareRealizationDepartments({ name: a.report.department_name }, { name: b.report.department_name }) || compareWeeklyPlannerUsers(a.person, b.person, plannerOrderByUserId))
 
   const total = rows.reduce((sum, { person }) => {

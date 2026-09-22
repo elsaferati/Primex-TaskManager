@@ -357,6 +357,11 @@ class TestRealizationPeopleEligibility(unittest.TestCase):
             end_date=date(2026, 8, 4),
         )
         self.assertEqual(set(coverage), {first, second})
+        working_days = {date(2026, 8, day) for day in range(3, 8)}
+        self.assertEqual(
+            full_period_leave_user_ids(coverage, working_days=working_days),
+            set(),
+        )
 
 
 class TestQuestionsAndNarrative(unittest.TestCase):

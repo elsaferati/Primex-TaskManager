@@ -167,7 +167,7 @@ const navGroups: NavGroup[] = [
         href: "/realization",
         label: "Realization",
         icon: Activity,
-        roles: ["ADMIN", "MANAGER"],
+        roles: ["ADMIN", "MANAGER", "STAFF"],
       },
     ],
   },
