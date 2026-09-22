@@ -207,6 +207,34 @@ async def calculate_daily_period(
         }
         planned_ids -= question_task_ids
 
+    # A weekly snapshot may predate a template visibility change. System tasks
+    # are eligible for Realization only while their template is explicitly
+    # opted into the Weekly Planner, so remove opted-out snapshot rows before
+    # any daily or cumulative weekly counters are built.
+    excluded_system_task_ids = set(
+        (
+            await db.execute(
+                select(Task.id)
+                .join(
+                    SystemTaskTemplate,
+                    Task.system_template_origin_id == SystemTaskTemplate.id,
+                )
+                .where(
+                    Task.id.in_(planned_ids),
+                    Task.system_template_origin_id.is_not(None),
+                    SystemTaskTemplate.show_in_weekly_planner.is_not(True),
+                )
+            )
+        ).scalars().all()
+    ) if planned_ids else set()
+    if excluded_system_task_ids:
+        planned = {
+            key: row
+            for key, row in planned.items()
+            if row.get("task_id") not in excluded_system_task_ids
+        }
+        planned_ids -= excluded_system_task_ids
+
     department_users, common_leave = await load_active_users_and_common_leave(
         db,
         department_id=period.department_id,
@@ -242,6 +270,12 @@ async def calculate_daily_period(
     )
     tasks = (await db.execute(task_query)).scalars().all()
     task_by_id = {task.id: task for task in tasks}
+    planned = {
+        key: row
+        for key, row in planned.items()
+        if row.get("source_type") != "system" or row.get("task_id") in task_by_id
+    }
+    planned_ids = {row["task_id"] for row in planned.values() if row.get("task_id")}
     project_ids = {task.project_id for task in tasks if task.project_id}
     project_titles = {
         project.id: project.title

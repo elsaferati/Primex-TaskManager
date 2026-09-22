@@ -11,7 +11,7 @@ from pydantic import ValidationError
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET", "test-secret-that-is-long-enough-for-tests")
 
-from app.api.routers.realization import _manager_review_context
+from app.api.routers.realization import _manager_review_context, get_manager_review
 from app.models.enums import UserRole
 from app.models.realization import RealizationObservation
 from app.schemas.realization import RealizationManagerReviewUpsert
@@ -65,16 +65,24 @@ def test_staff_cannot_create_manager_review():
     assert exc.value.status_code == 403
 
 
-def test_manager_cannot_review_wrong_department():
+@pytest.mark.parametrize("role", [UserRole.MANAGER, UserRole.ADMIN])
+def test_manager_and_admin_can_review_users_from_other_departments(role):
     department_id = uuid.uuid4()
     subject = SimpleNamespace(id=uuid.uuid4(), department_id=department_id)
-    actor = SimpleNamespace(id=uuid.uuid4(), role=UserRole.MANAGER, department_id=uuid.uuid4())
+    actor = SimpleNamespace(id=uuid.uuid4(), role=role, department_id=uuid.uuid4())
     db = SimpleNamespace(execute=AsyncMock(return_value=ScalarResult(subject)))
-    with patch("app.api.routers.realization._period", new=AsyncMock(return_value=period(department_id))):
-        with pytest.raises(Exception) as exc:
-            asyncio.run(_manager_review_context(db, period_id=uuid.uuid4(), subject_user_id=subject.id,
-                                                actor=actor, editing=True))
-    assert exc.value.status_code == 403
+    opened = period(department_id)
+    weekly = period(department_id, "WEEKLY")
+    with patch("app.api.routers.realization._period", new=AsyncMock(return_value=opened)), \
+         patch("app.api.routers.realization.ensure_weekly_scope_period", new=AsyncMock(return_value=weekly)):
+        actual = asyncio.run(_manager_review_context(
+            db,
+            period_id=opened.id,
+            subject_user_id=subject.id,
+            actor=actor,
+            editing=True,
+        ))
+    assert actual == (weekly, subject, True)
 
 
 @pytest.mark.parametrize("period_type", ["DAILY", "WEEKLY"])
@@ -90,6 +98,45 @@ def test_authorized_manager_review_always_resolves_to_the_week(period_type):
         actual = asyncio.run(_manager_review_context(db, period_id=opened.id, subject_user_id=subject.id,
                                                      actor=actor, editing=True))
     assert actual == (weekly, subject, True)
+
+
+def test_get_from_daily_period_reads_review_from_resolved_weekly_period():
+    daily_id, weekly_id, user_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    actor = SimpleNamespace(id=uuid.uuid4())
+    weekly = SimpleNamespace(id=weekly_id)
+    db = SimpleNamespace()
+    response = {
+        "period_id": weekly_id,
+        "user_id": user_id,
+        "can_edit": True,
+        "planning": None,
+        "realization": None,
+        "history": [],
+    }
+    build = AsyncMock(return_value=response)
+    with patch(
+        "app.api.routers.realization._manager_review_context",
+        new=AsyncMock(return_value=(weekly, SimpleNamespace(id=user_id), True)),
+    ), patch(
+        "app.api.routers.realization.build_manager_review_response",
+        new=build,
+    ):
+        actual = asyncio.run(
+            get_manager_review(
+                period_id=daily_id,
+                subject_user_id=user_id,
+                db=db,
+                user=actor,
+            )
+        )
+
+    assert actual.period_id == weekly_id
+    build.assert_awaited_once_with(
+        db,
+        period_id=weekly_id,
+        user_id=user_id,
+        can_edit=True,
+    )
 
 
 def observation(*, period_id, user_id, dimension, marker="POSITIVE"):

@@ -298,21 +298,26 @@ async def build_live_daily_realization(
         events_by_task[event.entity_id].append(event)
         task_ids.add(event.entity_id)
 
-    load_task_ids = scoped_task_ids | task_ids
+    # Match candidate_task_ids_for_person before loading large titles/descriptions.
+    # Baseline and audit tasks are always retained, including former assignees.
+    # Current ownership alone does not make the entire backlog a daily obligation.
     current_rows = (await db.execute(
-        select(Task).outerjoin(TaskAssignee, TaskAssignee.task_id == Task.id).where(or_(
-            # scoped_task_ids also contains every task currently assigned to a
-            # department user. candidate_task_ids_for_person narrows these to
-            # unresolved overdue carryover or other day evidence.
-            Task.id.in_(load_task_ids) if load_task_ids else False,
+        select(Task).where(or_(
+            Task.id.in_(task_ids) if task_ids else False,
             and_(
-                Task.created_at >= start_utc, Task.created_at <= end_utc,
+                Task.id.in_(scoped_task_ids) if scoped_task_ids else False,
                 or_(
-                    Task.assigned_to.in_(department_user_ids) if department_user_ids else False,
-                    TaskAssignee.user_id.in_(department_user_ids) if department_user_ids else False,
+                    Task.created_at.between(start_utc, end_utc),
+                    Task.completed_at.between(start_utc, end_utc),
+                    Task.id.in_(select(TaskDailyProgress.task_id).where(
+                        TaskDailyProgress.day_date == day,
+                    )),
+                    Task.id.in_(select(TaskDailyRlzState.task_id).where(
+                        TaskDailyRlzState.day_date == day,
+                    )),
                 ),
             ),
-        )).distinct()
+        ))
     )).scalars().all()
     tasks = {row.id: row for row in current_rows}
     task_ids.update(tasks)
