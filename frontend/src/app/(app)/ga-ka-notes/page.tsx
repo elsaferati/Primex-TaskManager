@@ -32,7 +32,7 @@ import type { Department, GaNote, GaNoteAttachment, PlanNote, Project, SkillCate
 
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
-type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
+type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "F" | "BZ1N1" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
 type OneHMarkerFilter = "all" | "with" | "none" | OneHMarker
 const ONE_H_MARKER_NONE = "__none__"
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
@@ -46,7 +46,9 @@ const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "M2_M3", label: "M2/3" },
   { value: "GENT", label: "GENT" },
   { value: "KA", label: "KA" },
-  { value: "FLAG", label: "⚑" },
+  { value: "FLAG", label: "GA" },
+  { value: "F", label: "F" },
+  { value: "BZ1N1", label: "BZ1N1" },
 ]
 const oneHMarkerLabel = (value?: OneHMarker | null, byGa = false) => {
   const label = ONE_H_MARKER_OPTIONS.find((option) => option.value === value)?.label || ""
@@ -3338,7 +3340,11 @@ export default function GaKaNotesPage() {
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
             <span><b className="text-xs font-black text-red-600">KA</b> - PYETJE/SQARIM ME KA</span>
             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
-            <span><b className="text-base font-black text-red-600">⚑</b> - PYETJE/SQARIM ME GA</span>
+            <span><b className="text-xs font-black text-red-600">GA</b> - PYETJE/SQARIM ME GA</span>
+            <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
+            <span><b className="text-base font-black text-red-600">F</b> - DET FIZIKISHT</span>
+            <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
+            <span><b className="text-xs font-black text-red-600">BZ1N1</b></span>
           </div>
           {showLegend ? (
             <div className="rounded-md border bg-white">
@@ -3366,12 +3372,14 @@ export default function GaKaNotesPage() {
                       ["M2/3", "DOREZIM EDHE NE M2 EDHE M3"],
                       ["GENT", "PYETJE/SQARIM ME GENTIN"],
                       ["KA", "PYETJE/SQARIM ME KA"],
-                      ["⚑", "PYETJE/SQARIM ME GA"],
+                      ["GA", "PYETJE/SQARIM ME GA"],
+                      ["F", "DET FIZIKISHT"],
+                      ["BZ1N1", ""],
                     ].map(([symbol, meaning]) => (
                       <TableRow key={symbol} className="h-8">
                         <TableCell className="p-1 text-center text-lg font-black text-red-600">{symbol}</TableCell>
                         <TableCell className="text-sm font-semibold">Symbol</TableCell>
-                        <TableCell className="text-sm text-slate-600">{meaning}</TableCell>
+                        <TableCell className="text-sm text-slate-600">{meaning || "—"}</TableCell>
                       </TableRow>
                     ))}
                     <TableRow className="h-8">

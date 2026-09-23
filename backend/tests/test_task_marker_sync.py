@@ -86,6 +86,9 @@ def test_conflicting_assignee_symbols_are_rejected():
 def test_weekly_planner_marker_label_preserves_ga_parentheses():
     assert one_h_marker_label("M2_M3") == "M2/3"
     assert one_h_marker_label("QUESTION", True) == "(?)"
+    assert one_h_marker_label("FLAG") == "GA"
+    assert one_h_marker_label("F") == "F"
+    assert one_h_marker_label("BZ1N1") == "BZ1N1"
 
 
 def test_weekly_planner_carries_a_symbol_into_the_next_week():

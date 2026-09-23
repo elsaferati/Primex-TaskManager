@@ -11,7 +11,9 @@ const LEGEND_ITEMS = [
   ["M2/3", "DOREZIM EDHE NE M2 EDHE M3"],
   ["GENT", "PYETJE/SQARIM ME GENTIN"],
   ["KA", "PYETJE/SQARIM ME KA"],
-  ["⚑", "PYETJE/SQARIM ME GA"],
+  ["GA", "PYETJE/SQARIM ME GA"],
+  ["F", "DET FIZIKISHT"],
+  ["BZ1N1", ""],
 ] as const
 
 export function TaskOneHMarkerLegend({ className }: { className?: string }) {
@@ -21,7 +23,7 @@ export function TaskOneHMarkerLegend({ className }: { className?: string }) {
       {LEGEND_ITEMS.map(([symbol, description], index) => (
         <span key={symbol} className="contents">
           {index > 0 ? <span className="text-lg font-black leading-none text-[#0F2A5F]" aria-hidden="true">/</span> : null}
-          <span><b className={cn("font-black text-red-600", symbol.length > 1 ? "text-xs" : "text-base")}>{symbol}</b>{` - ${description}`}</span>
+          <span><b className={cn("font-black text-red-600", symbol.length > 1 ? "text-xs" : "text-base")}>{symbol}</b>{description ? ` - ${description}` : ""}</span>
         </span>
       ))}
     </div>

@@ -33,7 +33,10 @@ const prefetchedResponseCache = new Map<string, { response: Response; expiresAt:
 const REFERENCE_CACHE_TTL_MS = 60 * 1000
 const PREFETCH_CACHE_TTL_MS = 30 * 1000
 const REFERENCE_CACHE_PATHS = new Set(["/departments", "/users/lookup", "/task-statuses", "/boards"])
+const MEETING_ALARM_STOP_KEY = "primex_meeting_alarm_stopped_at"
+const MEETING_ALARM_REPEAT_MS = 2_000
 let cacheGeneration = 0
+let meetingAlarmTimer: number | null = null
 
 export function playMeetingReminderSound() {
   try {
@@ -55,6 +58,17 @@ export function playMeetingReminderSound() {
   } catch {
     // Browsers can block audio until the user has interacted with the page.
   }
+}
+
+export function stopMeetingReminderAlarm() {
+  if (meetingAlarmTimer !== null) window.clearInterval(meetingAlarmTimer)
+  meetingAlarmTimer = null
+}
+
+export function startMeetingReminderAlarm() {
+  stopMeetingReminderAlarm()
+  playMeetingReminderSound()
+  meetingAlarmTimer = window.setInterval(playMeetingReminderSound, MEETING_ALARM_REPEAT_MS)
 }
 
 function clearSessionCaches() {
@@ -209,12 +223,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = React.useState<string | null>(null)
   const [user, setUser] = React.useState<User | null>(null)
   const [loading, setLoading] = React.useState(true)
+  const [activeMeetingAlarm, setActiveMeetingAlarm] = React.useState<{
+    title: string
+    body?: string
+    openUrl?: string
+  } | null>(null)
   const logoutInProgressRef = React.useRef(false)
   const tokenRef = React.useRef<string | null>(null)
 
   React.useEffect(() => {
     tokenRef.current = token
   }, [token])
+
+  const stopActiveMeetingAlarm = React.useCallback(() => {
+    stopMeetingReminderAlarm()
+    setActiveMeetingAlarm(null)
+    window.localStorage.setItem(MEETING_ALARM_STOP_KEY, String(Date.now()))
+  }, [])
+
+  React.useEffect(() => {
+    const stopFromAnotherTab = (event: StorageEvent) => {
+      if (event.key !== MEETING_ALARM_STOP_KEY) return
+      stopMeetingReminderAlarm()
+      setActiveMeetingAlarm(null)
+    }
+    window.addEventListener("storage", stopFromAnotherTab)
+    return () => window.removeEventListener("storage", stopFromAnotherTab)
+  }, [])
 
   React.useEffect(() => {
     const boot = async () => {
@@ -332,16 +367,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const openUrl = msg.data?.open_url
           toast(msg.title || "Notification", {
             description: msg.body || undefined,
-            action: openUrl ? { label: "Open Meeting", onClick: () => window.open(openUrl, "_blank", "noopener,noreferrer") } : undefined,
+            action: openUrl ? {
+              label: "Open Meeting",
+              onClick: () => {
+                if (msg.notification_type === "reminder") stopActiveMeetingAlarm()
+                window.open(openUrl, "_blank", "noopener,noreferrer")
+              },
+            } : undefined,
           })
           if (msg.notification_type === "reminder") {
-            playMeetingReminderSound()
+            startMeetingReminderAlarm()
+            setActiveMeetingAlarm({
+              title: msg.title || "PrimeFlow Meeting Reminder",
+              body: msg.body || undefined,
+              openUrl,
+            })
             if ("Notification" in window && Notification.permission === "granted") {
               const browserNotification = new Notification(msg.title || "PrimeFlow Meeting Reminder", {
                 body: msg.body || undefined,
                 tag: openUrl || msg.title,
               })
               browserNotification.onclick = () => {
+                stopActiveMeetingAlarm()
                 window.focus()
                 if (openUrl) window.open(openUrl, "_blank", "noopener,noreferrer")
                 browserNotification.close()
@@ -382,9 +429,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
       ws?.close()
     }
-  }, [token, user])
+  }, [stopActiveMeetingAlarm, token, user])
 
   const logout = React.useCallback(async () => {
+    stopMeetingReminderAlarm()
+    setActiveMeetingAlarm(null)
     try {
       await fetch(`${API_HTTP_URL}/auth/logout`, { method: "POST", credentials: "include" })
     } catch {
@@ -608,7 +657,76 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [user, token, loading, login, logout, apiFetch, prefetchApiFetch]
   )
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+      {activeMeetingAlarm ? (
+        <div
+          role="alert"
+          aria-live="assertive"
+          style={{
+            position: "fixed",
+            right: 24,
+            bottom: 24,
+            zIndex: 200,
+            width: "min(420px, calc(100vw - 32px))",
+            border: "2px solid #dc2626",
+            borderRadius: 12,
+            background: "white",
+            boxShadow: "0 20px 45px rgba(15, 23, 42, 0.28)",
+            padding: 16,
+          }}
+        >
+          <strong style={{ display: "block", color: "#991b1b", fontSize: 16 }}>
+            {activeMeetingAlarm.title}
+          </strong>
+          {activeMeetingAlarm.body ? (
+            <span style={{ display: "block", marginTop: 6, color: "#334155", whiteSpace: "pre-line" }}>
+              {activeMeetingAlarm.body}
+            </span>
+          ) : null}
+          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+            <button
+              type="button"
+              onClick={stopActiveMeetingAlarm}
+              style={{
+                border: 0,
+                borderRadius: 8,
+                background: "#dc2626",
+                color: "white",
+                cursor: "pointer",
+                fontWeight: 700,
+                padding: "9px 14px",
+              }}
+            >
+              Stop alarm
+            </button>
+            {activeMeetingAlarm.openUrl ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const openUrl = activeMeetingAlarm.openUrl
+                  stopActiveMeetingAlarm()
+                  if (openUrl) window.open(openUrl, "_blank", "noopener,noreferrer")
+                }}
+                style={{
+                  border: "1px solid #cbd5e1",
+                  borderRadius: 8,
+                  background: "white",
+                  color: "#0f172a",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  padding: "9px 14px",
+                }}
+              >
+                Open meeting
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </AuthContext.Provider>
+  )
 }
 
 export function useAuth() {

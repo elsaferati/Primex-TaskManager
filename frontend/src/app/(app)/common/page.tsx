@@ -50,7 +50,7 @@ function canCreatePimImageTestTaskForMeeting(meeting: Meeting): boolean {
 
 type PersonalTaskGroup = "GA" | "KA" | "GENT" | "PX"
 type PersonalRowId = "personalGA" | "personalKA" | "personalGENT" | "personalPX"
-type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
+type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "F" | "BZ1N1" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
 type OneHMarkerFilter = "none" | OneHMarker
 
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
@@ -64,7 +64,9 @@ const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "M2_M3", label: "M2/3" },
   { value: "GENT", label: "GENT" },
   { value: "KA", label: "KA" },
-  { value: "FLAG", label: "⚑" },
+  { value: "FLAG", label: "GA" },
+  { value: "F", label: "F" },
+  { value: "BZ1N1", label: "BZ1N1" },
 ]
 const ONE_H_MARKER_VALUES = ONE_H_MARKER_OPTIONS.map((option) => option.value)
 
@@ -315,7 +317,7 @@ const oneHPrintChecklistsHtml = (reportDay: Date) =>
   ).join("")}</section>`
 
 const oneHMarkerLegendHtml = () =>
-  `<div class="one-h-marker-legend"><strong>LEGJENDA:</strong><span><b>?</b> - PYETJE/PAQARTESI</span><i aria-hidden="true">/</i><span><b>!</b> - DYSHIM/ NUK KUPTOHET DET</span><i aria-hidden="true">/</i><span><b>!!!</b> - KLIENT/URGJENT</span><i aria-hidden="true">/</i><span><b>👁</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span><i aria-hidden="true">/</i><span><b>X</b> - MBYLL DETYREN</span><i aria-hidden="true">/</i><span><b class="compact-marker">M2</b> - DOREZIM DERI NE PAUZE</span><i aria-hidden="true">/</i><span><b class="compact-marker">M3</b> - DOREZIM DERI NE FUND TE DITES</span><i aria-hidden="true">/</i><span><b class="compact-marker">M2/3</b> - DOREZIM EDHE NE M2 EDHE M3</span><i aria-hidden="true">/</i><span><b class="compact-marker">GENT</b> - PYETJE/SQARIM ME GENTIN</span><i aria-hidden="true">/</i><span><b class="compact-marker">KA</b> - PYETJE/SQARIM ME KA</span><i aria-hidden="true">/</i><span><b>⚑</b> - PYETJE/SQARIM ME GA</span></div>`
+  `<div class="one-h-marker-legend"><strong>LEGJENDA:</strong><span><b>?</b> - PYETJE/PAQARTESI</span><i aria-hidden="true">/</i><span><b>!</b> - DYSHIM/ NUK KUPTOHET DET</span><i aria-hidden="true">/</i><span><b>!!!</b> - KLIENT/URGJENT</span><i aria-hidden="true">/</i><span><b>👁</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span><i aria-hidden="true">/</i><span><b>X</b> - MBYLL DETYREN</span><i aria-hidden="true">/</i><span><b class="compact-marker">M2</b> - DOREZIM DERI NE PAUZE</span><i aria-hidden="true">/</i><span><b class="compact-marker">M3</b> - DOREZIM DERI NE FUND TE DITES</span><i aria-hidden="true">/</i><span><b class="compact-marker">M2/3</b> - DOREZIM EDHE NE M2 EDHE M3</span><i aria-hidden="true">/</i><span><b class="compact-marker">GENT</b> - PYETJE/SQARIM ME GENTIN</span><i aria-hidden="true">/</i><span><b class="compact-marker">KA</b> - PYETJE/SQARIM ME KA</span><i aria-hidden="true">/</i><span><b class="compact-marker">GA</b> - PYETJE/SQARIM ME GA</span><i aria-hidden="true">/</i><span><b>F</b> - DET FIZIKISHT</span><i aria-hidden="true">/</i><span><b class="compact-marker">BZ1N1</b></span></div>`
 
 function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
   return (
@@ -382,7 +384,11 @@ function OneHMarkerLegend() {
       <i aria-hidden="true">/</i>
       <span><b className="compact-marker">KA</b> - PYETJE/SQARIM ME KA</span>
       <i aria-hidden="true">/</i>
-      <span><b>⚑</b> - PYETJE/SQARIM ME GA</span>
+      <span><b className="compact-marker">GA</b> - PYETJE/SQARIM ME GA</span>
+      <i aria-hidden="true">/</i>
+      <span><b>F</b> - DET FIZIKISHT</span>
+      <i aria-hidden="true">/</i>
+      <span><b className="compact-marker">BZ1N1</b></span>
     </div>
   )
 }
@@ -5439,7 +5445,7 @@ export default function CommonViewPage() {
                 const content = isMeetingTable
                   ? `${taskNumber}. ${escapePrintHtml(title)}`
                   : `${taskBadges}<span class="print-task-title">${taskNumber}. ${commonPrintTitleHtml(title)}</span>${markerComment}`
-                return `<td${isMeetingTable ? "" : ' class="print-task-cell"'}><div>${content}</div>${isMeetingTable ? "" : printTaskDatesHtml(item as PrintTask)}</td>`
+                return `<td class="${isMeetingTable ? "print-meeting-cell" : "print-task-cell"}"><div>${content}</div>${isMeetingTable ? "" : printTaskDatesHtml(item as PrintTask)}</td>`
               }).join("")
               const rowHeaders =
                 chunkIndex === 0
@@ -5484,8 +5490,9 @@ export default function CommonViewPage() {
   col.print-label-column { width: 78px; }
   tbody th:nth-child(2) { padding-left: 2px; padding-right: 2px; }
   .print-slot-subtext { display: block; white-space: pre; overflow-wrap: normal !important; word-break: normal !important; font-size: 5.2px; font-weight: 400 !important; line-height: 1.05; }
-  .print-task-cell { position:relative; padding-bottom:27px; }
+  .print-task-cell { position:relative; padding-top:8px; padding-bottom:27px; }
   .print-task-title { font-size:17px; line-height:1.25; }
+  .print-meeting-cell { padding-top:8px; font-size:13px; line-height:1.3; }
   .print-task-dates { position:absolute; left:5px; right:5px; bottom:4px; display:flex; align-items:flex-end; justify-content:space-between; gap:4px; white-space:nowrap; }
   .print-task-date { display:inline-flex; box-sizing:border-box; height:18px; align-items:center; border:1px solid #93c5fd; border-radius:3px; background:#eff6ff; color:#1d4ed8; padding:1px 4px; font-weight:800; line-height:1; }
   .print-task-date.due { border:3px solid #b91c1c; padding:0 2px; }
@@ -9516,7 +9523,13 @@ export default function CommonViewPage() {
           }
           .single-day-print-table td.single-day-print-task-cell {
             position: relative;
+            padding-top: 8px;
             padding-bottom: 27px;
+          }
+          .single-day-print-meetings-table td.single-day-print-task-cell {
+            padding-top: 8px;
+            font-size: 13px;
+            line-height: 1.3;
           }
           .single-day-print-task-dates {
             position: absolute;
@@ -11997,8 +12010,8 @@ export default function CommonViewPage() {
             flex: 1 1 auto;
             display: block;
             margin: 0;
-            padding: 0;
-            line-height: 1;
+            padding: 2px 0 0;
+            line-height: 1.15;
             align-self: center;
           }
           .week-table-row.feedback .feedback-print-clamp {
@@ -12036,7 +12049,7 @@ export default function CommonViewPage() {
             font-size: 10px;
             line-height: 1;
             gap: 2px;
-            padding: 0;
+            padding: 2px 2px 1px;
             display: flex;
             align-items: center;
           }

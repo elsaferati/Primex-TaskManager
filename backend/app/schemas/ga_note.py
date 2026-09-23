@@ -59,7 +59,7 @@ class GaNoteCreate(BaseModel):
     completed_at: datetime | None = None
     is_converted_to_task: bool | None = None
     is_discussed: bool | None = None
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT)$")
+    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|F|BZ1N1|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT)$")
     one_h_marker_comment: str | None = Field(default=None, max_length=1000)
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
@@ -71,7 +71,7 @@ class GaNoteUpdate(BaseModel):
     priority: GaNotePriority | None = None
     is_converted_to_task: bool | None = None
     is_discussed: bool | None = None
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT)$")
+    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|F|BZ1N1|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT)$")
     one_h_marker_comment: str | None = Field(default=None, max_length=1000)
 
 
@@ -93,7 +93,7 @@ class GaNoteTaskAssigneeStateUpdate(BaseModel):
     due_date: datetime | None = None
     finish_period: TaskFinishPeriod | None = None
     one_h_report_slot: str | None = Field(default=None, pattern=r"^(10:00|11:00|11:50|14:20|16:00)$")
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT)$")
+    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|F|BZ1N1|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT)$")
     one_h_marker_comment: str | None = Field(default=None, max_length=1000)
     is_deadline_important: bool = False
     priority: TaskPriority = TaskPriority.NORMAL
@@ -109,7 +109,7 @@ class GaNoteTaskBundleUpdate(BaseModel):
     content: str | None = None
     description: str | None = None
     project_id: uuid.UUID | None = None
-    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT)$")
+    one_h_marker: str | None = Field(default=None, pattern=r"^(EXCLAMATION|QUESTION|KA|GENT|FLAG|F|BZ1N1|M2|M3|M2_M3|MONITOR|CLOSE|CLIENT_URGENT)$")
     one_h_marker_comment: str | None = Field(default=None, max_length=1000)
     assignee_ids: list[uuid.UUID] | None = None
     assignee_states: list[GaNoteTaskAssigneeStateUpdate] | None = None
