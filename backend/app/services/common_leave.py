@@ -6,6 +6,28 @@ from datetime import date
 from app.models.common_entry import CommonEntry
 
 
+def parse_common_view_entry_day(entry: CommonEntry) -> date:
+    """Common View stores the operational day in the note, not only entry_date."""
+    note = entry.description or ""
+    date_match = re.search(r"Date:\s*(\d{4}-\d{2}-\d{2})", note, re.I)
+    if date_match:
+        return date.fromisoformat(date_match.group(1))
+    return entry.entry_date or entry.created_at.date()
+
+
+def is_common_view_full_day_absence(entry: CommonEntry) -> bool:
+    """A timed gap during the day is still work; only a full-day MUNG hides it."""
+    note = entry.description or ""
+    match = re.search(
+        r"From:\s*(\d{1,2}:\d{2})\s*-\s*To:\s*(\d{1,2}:\d{2})", note, re.I
+    )
+    if not match:
+        return True
+    start_hour, start_minute = (int(part) for part in match.group(1).split(":"))
+    end_hour, end_minute = (int(part) for part in match.group(2).split(":"))
+    return start_hour * 60 + start_minute <= 8 * 60 and end_hour * 60 + end_minute >= 16 * 60
+
+
 def parse_common_view_annual_leave(
     entry: CommonEntry,
 ) -> tuple[date, date, bool, str | None, str | None, str | None, bool]:

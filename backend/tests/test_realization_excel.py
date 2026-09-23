@@ -41,7 +41,6 @@ class TestRealizationExcel(unittest.TestCase):
             "no_progress_tasks",
             "in_progress_tasks",
             "new_tasks_added",
-            "approved_postponement",
             "closed_tasks",
             "frequent_delays",
             "unexpected_absences",
@@ -49,6 +48,7 @@ class TestRealizationExcel(unittest.TestCase):
             self.assertTrue(by_key[key]["source_status"].startswith("AUTO"), key)
         # Managerial judgment remains manual even when supporting evidence is absent.
         for key in (
+            "approved_postponement",
             "respected_meetings",
             "helped_colleague",
             "requested_extra_tasks",

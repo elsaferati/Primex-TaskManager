@@ -45,6 +45,7 @@ export function weeklyMetrics(person: RealizationPersonResult) {
 }
 
 export function hasWeeklyActivity(person: RealizationPersonResult) {
+  if (person.facts_json.availability_status) return true
   const value = weeklyMetrics(person)
   return [
     value.planned,
@@ -135,6 +136,16 @@ export function WeeklyRealizationTable({ reports, personId, onSelect, loading, o
           <tr className="bg-slate-50 font-semibold"><td colSpan={3}>Gjithsej · {personId === "ALL" ? "Të gjithë" : "Përdoruesi i filtruar"}</td><td className={metricCell}>{planCell(total)}</td><td className={cn(metricCell, "bg-blue-50/70")}>{extraCell(total)}</td><td className={cn(metricCell, "bg-teal-50/60")}>{quantityCell(total)}</td><td className={cn(metricCell, "bg-orange-50/70", total.deadlinesNoProgress > 0 && "bg-pink-50/80", deadlineAlarmCount(total.deadlineTasks) > 0 && "!border-2 !border-red-600")}>{deadlineCell(total)}</td><td className={cn(metricCell, "text-center")}>{percentCell(totalPercent)}</td><td colSpan={2} className="text-slate-500">{total.completed} kryer gjithsej</td></tr>
           {loading ? <tr><td colSpan={10} className="p-4 text-center text-slate-500">Duke ngarkuar…</td></tr> : rows.length ? rows.map(({ report, person }, index) => {
             const value = weeklyMetrics(person)
+            const availability = person.facts_json.availability_status
+            if (availability) {
+              const statusLabel = availability === "PV" ? "PV · Pushim vjetor gjatë gjithë javës" : availability === "MUNGESE" ? "Mungesë gjatë gjithë javës" : "PV / Mungesë gjatë gjithë javës"
+              return <tr key={`${person.period_id}:${person.user_id}`} className="bg-slate-50/80 align-middle">
+                <td className="text-center tabular-nums text-slate-500">{index + 1}</td>
+                <td><span className="block whitespace-nowrap text-[15px] font-bold leading-5 text-slate-800">{person.user_name}</span></td>
+                <td className="text-center text-xs font-bold uppercase text-slate-600" title={report.department_name || undefined}>{realizationDepartmentTag({ name: report.department_name })}</td>
+                <td colSpan={7} className="bg-slate-100/80 text-center"><span className="inline-flex rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-bold text-slate-700">{statusLabel}</span></td>
+              </tr>
+            }
             return <tr key={`${person.period_id}:${person.user_id}`} className="align-middle hover:bg-slate-50/70">
               <td className="text-center tabular-nums text-slate-500">{index + 1}</td>
               <td><button type="button" onClick={() => onSelect(report, person)} className="block max-w-full whitespace-nowrap text-left text-[15px] font-bold leading-5 text-blue-800 hover:underline">{person.user_name}</button></td>

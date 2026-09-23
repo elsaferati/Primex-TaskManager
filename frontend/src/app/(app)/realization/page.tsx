@@ -467,18 +467,21 @@ function QuestionRow({
       </div>
       <div>
         {manual && editable && draft && onDraft && onSave ? (
-          <div className="flex items-center justify-between gap-3 rounded-md border bg-white px-3 py-2">
-            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
-              <Checkbox
-                checked={draft.value === "YES"}
-                disabled={saving}
-                onCheckedChange={(checked) => onDraft({ ...draft, value: checked ? "YES" : "NO" })}
-              />
-              {draft.value === "YES" ? "Po" : "Jo"}
-            </label>
-            <Button size="sm" variant="outline" onClick={onSave} disabled={saving}>
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck2 className="h-3.5 w-3.5" />} Ruaj përgjigjen e javës
-            </Button>
+          <div className="space-y-2 rounded-md border bg-white px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+                <Checkbox
+                  checked={draft.value === "YES"}
+                  disabled={saving}
+                  onCheckedChange={(checked) => onDraft({ ...draft, value: checked ? "YES" : "NO" })}
+                />
+                {draft.value === "YES" ? "Po" : "Jo"}
+              </label>
+              <Button size="sm" variant="outline" onClick={onSave} disabled={saving || (draft.value === "YES" && !draft.comment.trim())}>
+                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck2 className="h-3.5 w-3.5" />} Ruaj përgjigjen e javës
+              </Button>
+            </div>
+            {draft.value === "YES" ? <Textarea rows={2} value={draft.comment} disabled={saving} onChange={(event) => onDraft({ ...draft, comment: event.target.value })} placeholder="Shkruaj komentin e detyrueshëm për përgjigjen Po…" /> : null}
           </div>
         ) : (
           <p className={cn("text-sm leading-6 whitespace-pre-line", needsConfirmation && finalValue == null ? "font-medium text-amber-700" : "text-slate-700")}>{visibleValue}</p>
@@ -758,7 +761,7 @@ function WeeklyRealizationView() {
         body: JSON.stringify({
           value,
           clear: false,
-          comment: null,
+          comment: draft.comment.trim() || null,
           evidence_ids: [],
         }),
       }
@@ -776,7 +779,7 @@ function WeeklyRealizationView() {
     if (!selected || !data) return
     const completeness = selected.facts_json.manual_question_completeness
     if (!completeness?.complete) {
-      toast.error(`${completeness?.answered || 0} / ${completeness?.required || 8} pyetje manuale të plotësuara`)
+      toast.error(`${completeness?.answered || 0} / ${completeness?.required || MANUAL_BOOLEAN_KEYS.size} pyetje manuale të plotësuara`)
       return
     }
     const changed = reviewLevel !== selected.suggested_level
@@ -1699,7 +1702,7 @@ function WeeklyRealizationView() {
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader><DialogTitle>Rishikimi menaxherial — {selected?.user_name}</DialogTitle><DialogDescription>Konfirmo përgjigjet që nuk mund të provohen automatikisht. Çdo ndryshim nga sugjerimi kërkon arsye.</DialogDescription></DialogHeader>
           <div className="space-y-5">
-<div className="grid gap-3 sm:grid-cols-3"><div className="rounded-lg border bg-muted/30 p-3 text-sm"><p className="text-xs text-muted-foreground">Policy</p><p className="mt-1 text-xl font-semibold">{selected?.suggested_level || "—"}</p></div><div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm"><p className="text-xs text-indigo-700">AI</p><p className="mt-1 text-xl font-semibold text-indigo-950">{selected?.ai_suggested_level || "—"}</p>{selected?.ai_analysis_stale ? <p className="text-xs text-amber-700">Kërkon rigjenerim</p> : null}</div><div className="rounded-lg border p-3 text-sm"><p className="text-xs text-muted-foreground">Inputet e përgjegjësit</p><p className="mt-1 font-semibold">{manualCompleteness?.answered || 0} / {manualCompleteness?.required || 8}</p></div></div>
+<div className="grid gap-3 sm:grid-cols-3"><div className="rounded-lg border bg-muted/30 p-3 text-sm"><p className="text-xs text-muted-foreground">Policy</p><p className="mt-1 text-xl font-semibold">{selected?.suggested_level || "—"}</p></div><div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm"><p className="text-xs text-indigo-700">AI</p><p className="mt-1 text-xl font-semibold text-indigo-950">{selected?.ai_suggested_level || "—"}</p>{selected?.ai_analysis_stale ? <p className="text-xs text-amber-700">Kërkon rigjenerim</p> : null}</div><div className="rounded-lg border p-3 text-sm"><p className="text-xs text-muted-foreground">Inputet e përgjegjësit</p><p className="mt-1 font-semibold">{manualCompleteness?.answered || 0} / {manualCompleteness?.required || MANUAL_BOOLEAN_KEYS.size}</p></div></div>
             <div className="space-y-1.5"><Label>Vlerësimi final</Label><Select value={reviewLevel} onValueChange={(value) => setReviewLevel(value as RealizationLevel)}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{(["A+", "A", "B", "C", "M", "D", "E"] as RealizationLevel[]).map((level) => <SelectItem key={level} value={level}>{level} · {LEVEL_SYMBOL[level]}</SelectItem>)}</SelectContent></Select>{selected?.facts_json.decision?.hard_cap_level && selected.ai_suggested_level && LEVEL_RANK[selected.ai_suggested_level] < LEVEL_RANK[selected.facts_json.decision.hard_cap_level] ? <p className="text-xs font-medium text-red-700">AI propozon {selected.ai_suggested_level}, por policy vendos kufi {selected.facts_json.decision.hard_cap_level}. Një tejkalim kërkon arsye eksplicite.</p> : null}</div>
             <div className="space-y-1.5"><Label>Komenti i menaxherit</Label><Textarea value={managerComment} onChange={(event) => setManagerComment(event.target.value)} rows={3} placeholder="Përmbledhje e shkurtër dhe faktike..." /></div>
             <div className="space-y-1.5"><Label>Arsyeja e ndryshimit {reviewLevel !== selected?.suggested_level ? "(e detyrueshme)" : "(opsionale)"}</Label><Textarea value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} rows={2} placeholder="Cila evidencë justifikon ndryshimin?" /></div>

@@ -1010,6 +1010,7 @@ export interface DailyRealizationPerson {
   department_id: string
   tasks: DailyRealizationTask[]
   metrics: DailyRealizationMetrics
+  availability_status?: "PV" | "MUNGESE" | "PV_MUNGESE" | null
   close_state: "NOT_SAVED" | "CLOSED_EDIT_WINDOW" | "SAVED" | "STALE" | "REOPENED"
   close_state_details?: {
     status: DailyRealizationPerson["close_state"]
@@ -1085,6 +1086,7 @@ export interface RealizationPersonResult {
   user_name: string
   department_id?: string | null
   facts_json: {
+    availability_status?: "PV" | "MUNGESE" | "PV_MUNGESE" | null
     tasks?: RealizationTaskFact[]
     observations?: RealizationObservationFact[]
     questions?: RealizationQuestion[]

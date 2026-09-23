@@ -22,7 +22,8 @@ from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.services.realization_manager_review import M3_MANAGER_REVIEW_SOURCE
 from app.services.daily_rlz_compliance import REASON_LABELS
 from app.services.realization_people import (
-    full_period_leave_user_ids,
+    CommonLeaveCoverage,
+    full_period_availability_statuses,
     load_active_users_and_common_leave,
 )
 from app.services.system_task_schedule import _is_working_day
@@ -472,11 +473,63 @@ async def collect_weekly_evidence(
         if _is_working_day(current_day):
             working_days.add(current_day)
         current_day += timedelta(days=1)
-    excluded_on_full_leave = full_period_leave_user_ids(
-        common_leave,
+    attendance = list((await db.execute(
+        select(AttendanceLog)
+        .where(
+            AttendanceLog.user_id.in_(active_by_id),
+            AttendanceLog.date >= period.start_date,
+            AttendanceLog.date <= period.end_date,
+        )
+        .order_by(AttendanceLog.date.asc(), AttendanceLog.id.asc())
+    )).scalars().all()) if active_by_id else []
+    leave_days_by_user = {
+        user_id: set(coverage.days) for user_id, coverage in common_leave.items()
+    }
+    absence_days_by_user = {
+        user_id: set(coverage.absence_days) for user_id, coverage in common_leave.items()
+    }
+    full_day_absence_days_by_user = {
+        user_id: set(coverage.full_day_absence_days)
+        for user_id, coverage in common_leave.items()
+    }
+    delay_days_by_user = {
+        user_id: set(coverage.delay_days) for user_id, coverage in common_leave.items()
+    }
+    for row in attendance:
+        if row.user_id is None:
+            continue
+        if row.type == AttendanceType.PUSHIM_VJETOR:
+            leave_days_by_user.setdefault(row.user_id, set()).add(row.date)
+        elif row.type == AttendanceType.MUNGESE:
+            absence_days_by_user.setdefault(row.user_id, set()).add(row.date)
+            full_day_absence_days_by_user.setdefault(row.user_id, set()).add(row.date)
+        elif row.type == AttendanceType.VONESE:
+            delay_days_by_user.setdefault(row.user_id, set()).add(row.date)
+    availability_statuses = full_period_availability_statuses(
+        {
+            user_id: CommonLeaveCoverage(
+                days=frozenset(leave_days_by_user.get(user_id, set())),
+                entry_ids=common_leave.get(user_id, CommonLeaveCoverage(frozenset(), ())).entry_ids,
+                absence_days=frozenset(absence_days_by_user.get(user_id, set())),
+                absence_entry_ids=common_leave.get(user_id, CommonLeaveCoverage(frozenset(), ())).absence_entry_ids,
+                full_day_absence_days=frozenset(
+                    full_day_absence_days_by_user.get(user_id, set())
+                ),
+                delay_days=frozenset(delay_days_by_user.get(user_id, set())),
+                delay_entry_ids=common_leave.get(
+                    user_id, CommonLeaveCoverage(frozenset(), ())
+                ).delay_entry_ids,
+            )
+            for user_id in (
+                set(leave_days_by_user)
+                | set(absence_days_by_user)
+                | set(full_day_absence_days_by_user)
+                | set(delay_days_by_user)
+            )
+        },
         working_days=working_days,
     )
-    eligible_user_ids = set(active_by_id) - excluded_on_full_leave
+    eligible_user_ids = set(active_by_id)
 
     people: dict[uuid.UUID, dict[str, Any]] = {}
     unassigned: list[dict[str, Any]] = []
@@ -485,6 +538,21 @@ async def collect_weekly_evidence(
         if user_id not in eligible_user_ids:
             return None
         canonical_name = active_by_id[user_id].full_name or name
+        availability_status = availability_statuses.get(user_id)
+        if availability_status:
+            if user_id not in people:
+                people[user_id] = {
+                    "user_id": user_id,
+                    "user_name": canonical_name,
+                    "tasks": [],
+                    "observations": [],
+                    "attendance": {},
+                    "counters": defaultdict(int),
+                    "needs_review": [],
+                    "daily_rlz": [],
+                    "availability_status": availability_status,
+                }
+            return None
         if user_id not in people:
             people[user_id] = {
                 "user_id": user_id,
@@ -528,21 +596,6 @@ async def collect_weekly_evidence(
         ]
 
     user_ids = list(people)
-    attendance = (
-        (
-            await db.execute(
-                select(AttendanceLog)
-                .where(
-                    AttendanceLog.user_id.in_(user_ids),
-                    AttendanceLog.date >= period.start_date,
-                    AttendanceLog.date <= period.end_date,
-                )
-                .order_by(AttendanceLog.date.asc(), AttendanceLog.id.asc())
-            )
-        ).scalars().all()
-        if user_ids
-        else []
-    )
     approved_absence_dates: dict[uuid.UUID, set[date]] = defaultdict(set)
     for user_id, leave in common_leave.items():
         if user_id in eligible_user_ids:
@@ -941,13 +994,11 @@ async def collect_weekly_evidence(
                 person["counters"]["annual_leave_days"] += 1
                 person["counters"]["approved_absence_days"] += 1
         elif row.type == AttendanceType.MUNGESE:
-            if (row.user_id, row.date) not in verified_absence_by_user_date:
-                # The source model cannot distinguish absence types; a manager
-                # classification observation resolves this without guessing.
-                person["counters"]["absence_needs_review_count"] += 1
-                person["needs_review"].append(
-                    {"kind": "ABSENCE_APPROVAL", "attendance_id": str(row.id)}
-                )
+            classification = verified_absence_by_user_date.get((row.user_id, row.date))
+            if classification in {"APPROVED_PERSONAL", "ANNUAL_LEAVE", "UNEXCUSED"}:
+                pass
+            else:
+                person["counters"]["unexcused_absence_days"] += 1
         person["attendance"][str(row.id)] = {
             "date": row.date,
             "type": row.type.value,
@@ -958,6 +1009,16 @@ async def collect_weekly_evidence(
         (row.user_id, row.date)
         for row in attendance
         if row.user_id is not None and row.type == AttendanceType.PUSHIM_VJETOR
+    }
+    attendance_absence_pairs = {
+        (row.user_id, row.date)
+        for row in attendance
+        if row.user_id is not None and row.type == AttendanceType.MUNGESE
+    }
+    attendance_delay_pairs = {
+        (row.user_id, row.date)
+        for row in attendance
+        if row.user_id is not None and row.type == AttendanceType.VONESE
     }
     for user_id, leave in common_leave.items():
         if user_id not in people:
@@ -974,6 +1035,32 @@ async def collect_weekly_evidence(
                 "type": AttendanceType.PUSHIM_VJETOR.value,
                 "details": "Common View PV/FEST",
                 "common_entry_ids": [str(entry_id) for entry_id in leave.entry_ids],
+            }
+        for delay_day in sorted(leave.delay_days & working_days):
+            if (user_id, delay_day) in attendance_delay_pairs:
+                continue
+            person["counters"]["tardiness_count"] += 1
+            evidence_key = f"common-delay:{user_id}:{delay_day.isoformat()}"
+            person["attendance"][evidence_key] = {
+                "date": delay_day,
+                "type": AttendanceType.VONESE.value,
+                "details": "Common View Vonesë",
+                "common_entry_ids": [str(entry_id) for entry_id in leave.delay_entry_ids],
+            }
+        for absence_day in sorted(leave.absence_days & working_days):
+            if (user_id, absence_day) in attendance_absence_pairs:
+                continue
+            classification = verified_absence_by_user_date.get((user_id, absence_day))
+            if classification in {"APPROVED_PERSONAL", "ANNUAL_LEAVE"}:
+                continue
+            if classification != "UNEXCUSED":
+                person["counters"]["unexcused_absence_days"] += 1
+            evidence_key = f"common-absence:{user_id}:{absence_day.isoformat()}"
+            person["attendance"][evidence_key] = {
+                "date": absence_day,
+                "type": AttendanceType.MUNGESE.value,
+                "details": "Common View Mungesë",
+                "common_entry_ids": [str(entry_id) for entry_id in leave.absence_entry_ids],
             }
 
     daily_rlz_rows = (
@@ -1037,13 +1124,13 @@ async def collect_weekly_evidence(
             {
                 "user_id": str(user.id),
                 "user_name": user.full_name,
-                "reason": "FULL_PERIOD_ANNUAL_LEAVE_COMMON_VIEW",
+                "reason": availability_statuses[user.id],
                 "common_entry_ids": [
                     str(entry_id) for entry_id in common_leave[user.id].entry_ids
-                ],
+                ] if user.id in common_leave else [],
             }
             for user in active_users
-            if user.id in excluded_on_full_leave
+            if user.id in availability_statuses
         ],
         "planned_snapshot_id": str(planned_snapshot.id),
         "final_snapshot_id": str(final_snapshot.id),

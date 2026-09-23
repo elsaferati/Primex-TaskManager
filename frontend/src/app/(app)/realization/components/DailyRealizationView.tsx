@@ -156,7 +156,7 @@ function DailyChecklist({ result, canEdit, onSaved }: { result: RealizationPerso
       const value = draft.value === "YES"
       const response = await apiFetch(`/realization/periods/${result.period_id}/results/${result.id}/questions/${question.key}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value, clear: false, comment: null, evidence_ids: [] }),
+        body: JSON.stringify({ value, clear: false, comment: draft.comment.trim() || null, evidence_ids: [] }),
       })
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}))
@@ -182,7 +182,7 @@ function DailyChecklist({ result, canEdit, onSaved }: { result: RealizationPerso
             <p className="mt-1 text-xs text-slate-500">Një përgjigje për të gjithë javën, që mund ta japësh ose ta ndryshosh nga cilado ditë.</p>
             <p className="mt-1 text-xs text-slate-500">Mbyllja e detyrave, vonesat dhe mungesat dalin nga sistemi. Takimet dhe gjykimi plotësohen nga përgjegjësi.</p>
           </div>
-          <Badge variant="outline">{automaticCount} automatike · {completeness?.answered || 0}/{completeness?.required || 8} inpute</Badge>
+          <Badge variant="outline">{automaticCount} automatike · {completeness?.answered || 0}/{completeness?.required || manualChecklistBooleanKeys.size} inpute</Badge>
         </div>
       </CardHeader>
       <CardContent className="grid gap-4 p-4 xl:grid-cols-2">
@@ -206,14 +206,17 @@ function DailyChecklist({ result, canEdit, onSaved }: { result: RealizationPerso
                         </Badge>
                       </div>
                       {manual && canEdit ? (
-                        <div className="flex items-center justify-between gap-3 rounded-md border bg-white px-3 py-2">
-                          <label className="flex items-center gap-2 text-xs font-semibold">
-                            <Checkbox checked={draft.value === "YES"} disabled={saving !== null} onCheckedChange={checked => updateDraft(question.key, { value: checked ? "YES" : "NO" })} />
-                            {draft.value === "YES" ? "Po" : "Jo"}
-                          </label>
-                          <Button size="sm" variant="outline" disabled={saving !== null} onClick={() => void save(question)}>
-                            {saving === question.key ? "Duke ruajtur…" : "Ruaj përgjigjen ditore"}
-                          </Button>
+                        <div className="space-y-2 rounded-md border bg-white px-3 py-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <label className="flex items-center gap-2 text-xs font-semibold">
+                              <Checkbox checked={draft.value === "YES"} disabled={saving !== null} onCheckedChange={checked => updateDraft(question.key, { value: checked ? "YES" : "NO" })} />
+                              {draft.value === "YES" ? "Po" : "Jo"}
+                            </label>
+                            <Button size="sm" variant="outline" disabled={saving !== null || (draft.value === "YES" && !draft.comment.trim())} onClick={() => void save(question)}>
+                              {saving === question.key ? "Duke ruajtur…" : "Ruaj përgjigjen ditore"}
+                            </Button>
+                          </div>
+                          {draft.value === "YES" ? <Textarea rows={2} value={draft.comment} disabled={saving !== null} onChange={event => updateDraft(question.key, { comment: event.target.value })} placeholder="Shkruaj komentin e detyrueshëm për përgjigjen Po…" /> : null}
                         </div>
                       ) : (
                         <p className="text-sm text-slate-700">

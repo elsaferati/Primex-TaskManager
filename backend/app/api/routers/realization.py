@@ -129,7 +129,9 @@ from app.services.realization_periods import (
     weekly_end,
 )
 from app.services.realization_people import (
-    full_period_leave_user_ids,
+    availability_status_from_days,
+    full_period_availability_statuses,
+    is_realization_excluded_user,
     load_active_users_and_common_leave,
 )
 from app.services.realization_manager_review import (
@@ -417,6 +419,75 @@ def _merge_daily_report_timeline_evidence(
             )
 
 
+def _append_timeline_attendance(
+    item: dict, *, day_key: str, attendance_type: str, source: str
+) -> None:
+    attendance = [
+        entry for entry in (item.get("attendance") or []) if isinstance(entry, dict)
+    ]
+    if any(
+        str(entry.get("type") or "").upper() == attendance_type
+        for entry in attendance
+    ):
+        item["attendance"] = attendance
+        return
+    attendance.append({
+        "date": day_key,
+        "type": attendance_type,
+        "source": source,
+    })
+    item["attendance"] = attendance
+
+
+def _empty_timeline_day(day_key: str) -> dict:
+    return {
+        "date": day_key,
+        "has_snapshot": False,
+        "daily_progress_percent": 0,
+        "weekly_progress_percent": 0,
+        "planned_count": 0,
+        "completed_count": 0,
+        "weekly_planned_count": 0,
+        "weekly_completed_count": 0,
+        "additional_count": 0,
+        "attendance": [],
+        "tasks": [],
+    }
+
+
+def _away_person_result(
+    period: RealizationPeriod, *, user_id: uuid.UUID, status: str
+) -> RealizationPersonResult:
+    """A presentation-only row for someone absent the whole period.
+
+    It is never added to the session: there is nothing to calculate for a week
+    somebody did not work, only something to state.
+    """
+    now = datetime.now(timezone.utc)
+    row = RealizationPersonResult(
+        id=uuid.uuid4(),
+        period_id=period.id,
+        user_id=user_id,
+        department_id=period.department_id,
+        facts_json={"availability_status": status},
+        created_at=now,
+        updated_at=now,
+        ai_analysis_stale=True,
+    )
+    # The counters carry a server default, so an unflushed row leaves them unset
+    # and the response schema would reject them.
+    for column in RealizationPersonResult.__table__.columns:
+        if getattr(row, column.name, None) is not None:
+            continue
+        try:
+            is_count = column.type.python_type is int
+        except NotImplementedError:
+            is_count = False
+        if is_count:
+            setattr(row, column.name, 0)
+    return row
+
+
 def _task_uuid(task: dict) -> uuid.UUID | None:
     try:
         return uuid.UUID(str(task.get("task_id")))
@@ -484,11 +555,7 @@ async def _weekly_response(
         if _is_working_day(current_day):
             working_days.add(current_day)
         current_day += timedelta(days=1)
-    excluded_on_full_leave = full_period_leave_user_ids(
-        common_leave,
-        working_days=working_days,
-    )
-    eligible_user_ids = active_user_ids - excluded_on_full_leave
+    eligible_user_ids = active_user_ids
     if user.role == UserRole.STAFF:
         eligible_user_ids &= {user.id}
     rows = [row for row in raw_rows if row.user_id in eligible_user_ids]
@@ -603,6 +670,23 @@ async def _weekly_response(
             continue
         visible.append(daily_result)
         visible_user_ids.add(person_id)
+    # Somebody on leave for the whole week has neither a weekly nor a daily
+    # result, so the week used to drop them silently. An empty row is the wrong
+    # answer too: the week has to say they were away, not that they did nothing.
+    away_statuses = full_period_availability_statuses(
+        common_leave, working_days=working_days
+    )
+    for person_id, status in away_statuses.items():
+        if person_id in visible_user_ids or person_id not in eligible_user_ids:
+            continue
+        if not can_view_person_result(
+            user,
+            subject_user_id=person_id,
+            subject_department_id=period.department_id,
+        ):
+            continue
+        visible.append(_away_person_result(period, user_id=person_id, status=status))
+        visible_user_ids.add(person_id)
     names = {
         row.id: row.full_name
         for row in (
@@ -664,7 +748,8 @@ async def _weekly_response(
     # never reach the week. Re-read every working day live so the week
     # classifies exactly the obligations the daily view shows.
     live_user_ids = {row.user_id for row in visible}
-    if live_user_ids and period.department_id is not None:
+    live_availability: dict[uuid.UUID, dict[date, str]] = {}
+    if period.department_id is not None:
         for current_day in sorted(working_days):
             day_key = current_day.isoformat()
             live_day = await build_live_daily_realization(
@@ -674,6 +759,10 @@ async def _weekly_response(
                 try:
                     person_id = uuid.UUID(str(person.get("user_id")))
                 except (TypeError, ValueError):
+                    continue
+                live_status = person.get("availability_status")
+                if live_status:
+                    live_availability.setdefault(person_id, {})[current_day] = str(live_status)
                     continue
                 live_tasks = [dict(task) for task in person.get("tasks") or []]
                 if person_id not in live_user_ids or not live_tasks:
@@ -704,6 +793,31 @@ async def _weekly_response(
                     task_key = str(task.get("task_id") or task.get("match_key") or "")
                     if task_key:
                         daily_tasks_by_user.setdefault(person_id, {})[task_key] = task
+    for person_id, by_day in live_availability.items():
+        live_status = availability_status_from_days(by_day, working_days=working_days)
+        if live_status:
+            away_statuses[person_id] = live_status
+    for person_id, status in away_statuses.items():
+        if person_id in visible_user_ids or person_id not in eligible_user_ids:
+            continue
+        if not can_view_person_result(
+            user,
+            subject_user_id=person_id,
+            subject_department_id=period.department_id,
+        ):
+            continue
+        visible.append(_away_person_result(period, user_id=person_id, status=status))
+        visible_user_ids.add(person_id)
+    missing_name_ids = [item.user_id for item in visible if item.user_id not in names]
+    if missing_name_ids:
+        names.update(
+            {
+                row.id: row.full_name
+                for row in (
+                    await db.execute(select(User).where(User.id.in_(missing_name_ids)))
+                ).scalars().all()
+            }
+        )
 
     close_events = (
         (
@@ -962,11 +1076,18 @@ async def _weekly_response(
     for row in visible:
         timeline = daily_by_user.setdefault(row.user_id, [])
         timeline_by_date = {item["date"]: item for item in timeline}
-        leave_days = (
-            common_leave[row.user_id].days
-            if row.user_id in common_leave
-            else frozenset()
-        )
+        coverage = common_leave.get(row.user_id)
+        pv_days = set(coverage.days) if coverage else set()
+        absence_days = set(coverage.absence_days) if coverage else set()
+        full_day_absence_days = set(coverage.full_day_absence_days) if coverage else set()
+        delay_days = set(coverage.delay_days) if coverage else set()
+        for live_day, live_status in live_availability.get(row.user_id, {}).items():
+            status = str(live_status).upper()
+            if status == "PV":
+                pv_days.add(live_day)
+            elif status == "MUNGESE":
+                absence_days.add(live_day)
+                full_day_absence_days.add(live_day)
         current_day = period.start_date
         while current_day <= period.end_date:
             if _is_working_day(current_day):
@@ -974,21 +1095,9 @@ async def _weekly_response(
                 planned_tasks = planned_tasks_by_user_day.get(row.user_id, {}).get(day_key, [])
                 scheduled_system_tasks = system_tasks_by_user_day.get(row.user_id, {}).get(day_key, [])
                 item = timeline_by_date.get(day_key)
-                if current_day in leave_days:
+                if current_day in pv_days:
                     if item is None:
-                        item = {
-                            "date": day_key,
-                            "has_snapshot": False,
-                            "daily_progress_percent": 0,
-                            "weekly_progress_percent": 0,
-                            "planned_count": 0,
-                            "completed_count": 0,
-                            "weekly_planned_count": 0,
-                            "weekly_completed_count": 0,
-                            "additional_count": 0,
-                            "attendance": [],
-                            "tasks": [],
-                        }
+                        item = _empty_timeline_day(day_key)
                         timeline.append(item)
                         timeline_by_date[day_key] = item
                     item["planned_count"] = 0
@@ -996,18 +1105,36 @@ async def _weekly_response(
                     item["daily_progress_percent"] = 0
                     item["tasks"] = []
                     item["on_leave"] = True
-                    attendance = list(item.get("attendance") or [])
-                    if not any(
-                        str(entry.get("type") or "").upper() == "PUSHIM_VJETOR"
-                        for entry in attendance
-                        if isinstance(entry, dict)
-                    ):
-                        attendance.append({
-                            "date": day_key,
-                            "type": "PUSHIM_VJETOR",
-                            "source": "common_leave",
-                        })
-                    item["attendance"] = attendance
+                    _append_timeline_attendance(
+                        item,
+                        day_key=day_key,
+                        attendance_type="PUSHIM_VJETOR",
+                        source="common_leave",
+                    )
+                    current_day += timedelta(days=1)
+                    continue
+                if current_day in full_day_absence_days:
+                    if item is None:
+                        item = _empty_timeline_day(day_key)
+                        timeline.append(item)
+                        timeline_by_date[day_key] = item
+                    item["planned_count"] = 0
+                    item["completed_count"] = 0
+                    item["daily_progress_percent"] = 0
+                    item["tasks"] = []
+                    _append_timeline_attendance(
+                        item,
+                        day_key=day_key,
+                        attendance_type="MUNGESE",
+                        source="common_view",
+                    )
+                    if current_day in delay_days:
+                        _append_timeline_attendance(
+                            item,
+                            day_key=day_key,
+                            attendance_type="VONESE",
+                            source="common_view",
+                        )
                     current_day += timedelta(days=1)
                     continue
                 if item is None:
@@ -1071,6 +1198,20 @@ async def _weekly_response(
                         # carries the planner attribution. Keep both.
                         merged_tasks[index] = {**system_task, **merged_tasks[index]}
                     item["tasks"] = _dedupe_timeline_tasks(merged_tasks)
+                if current_day in absence_days:
+                    _append_timeline_attendance(
+                        item,
+                        day_key=day_key,
+                        attendance_type="MUNGESE",
+                        source="common_view",
+                    )
+                if current_day in delay_days:
+                    _append_timeline_attendance(
+                        item,
+                        day_key=day_key,
+                        attendance_type="VONESE",
+                        source="common_view",
+                    )
             current_day += timedelta(days=1)
         timeline.sort(key=lambda item: item["date"])
 
@@ -1338,6 +1479,12 @@ async def _weekly_response(
             )
         )
         facts.update(build_weekly_question_metrics(facts["daily_timeline"]))
+        # The live weekly read never set this, so leave only ever surfaced in a
+        # calculated week. Those need a FINAL snapshot, which is why PV never
+        # showed up in practice.
+        away_status = away_statuses.get(row.user_id)
+        if away_status:
+            facts["availability_status"] = away_status
         facts["question_scope"] = "WEEKLY"
         facts["observations"] = live_by_user.get(row.user_id, [])
         pulse_history = [
@@ -1369,9 +1516,9 @@ async def _weekly_response(
             key: _answer_payload(answer, answerer_names.get(answer.answered_by))
             for key, answer in answers_by_user.get(row.user_id, {}).items()
         }
-        # Old FINAL snapshots may still classify meetings as automatic.
+        # Old FINAL snapshots may still classify manager questions as automatic.
         for question in facts.get("questions") or []:
-            if question.get("key") == "respected_meetings":
+            if question.get("key") in {"respected_meetings", "approved_postponement"}:
                 question["source_status"] = "MANUAL_UNANSWERED"
         apply_checklist_answers(facts, direct_answers=direct_answers)
         facts["manager_review_comment"] = row.manager_comment
@@ -1499,9 +1646,7 @@ async def export_realization_excel(
             start_date=start,
             end_date=end,
         )
-        eligible_ids = {active_user.id for active_user in active_users} - (
-            full_period_leave_user_ids(common_leave, working_days=working_days)
-        )
+        eligible_ids = {active_user.id for active_user in active_users}
         eligible_by_period[period.id] = eligible_ids
         eligible_by_department[period.department_id] = eligible_ids
     weekly_results = [
@@ -2852,10 +2997,19 @@ async def get_monthly_realization(
         )
     ]
     user_ids = {result.user_id for result, _ in visible_rows}
+    monthly_users = list((
+        await db.execute(select(User).where(User.id.in_(user_ids)))
+    ).scalars().all()) if user_ids else []
+    monthly_users = [row for row in monthly_users if not is_realization_excluded_user(row)]
+    visible_user_ids = {row.id for row in monthly_users}
+    visible_rows = [
+        (result, period) for result, period in visible_rows
+        if result.user_id in visible_user_ids
+    ]
     names = {
         row.id: row.full_name
-        for row in (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
-    } if user_ids else {}
+        for row in monthly_users
+    }
     weekly_by_user: dict[uuid.UUID, list[dict]] = {}
     departments: dict[uuid.UUID, uuid.UUID | None] = {}
     for result, period in visible_rows:

@@ -74,6 +74,7 @@ REPORT_QUESTION_SECTIONS = [
 ]
 
 MANUAL_BOOLEAN_QUESTION_KEYS = {
+    "approved_postponement",
     "respected_meetings",
     "requested_extra_tasks",
     "helped_colleague",
@@ -237,12 +238,45 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
         if str(item.get("type") or "").upper() == "MUNGESE"
     ]
     verified_absences = category(verified, "ABSENCE")
-    unexcused_absences = [
-        item
-        for item in verified_absences
-        if str((item.get("evidence_json") or {}).get("classification") or "").upper()
-        == "UNEXCUSED"
-    ]
+
+    def _day_key(value: object) -> str | None:
+        if value is None:
+            return None
+        isoformat = getattr(value, "isoformat", None)
+        if callable(isoformat):
+            try:
+                return str(isoformat())[:10]
+            except TypeError:
+                return None
+        text = str(value).strip()
+        return text[:10] if text else None
+
+    excused_days: set[str] = set()
+    unexcused_observation_days: set[str] = set()
+    for item in verified_absences:
+        classification = str(
+            (item.get("evidence_json") or {}).get("classification") or ""
+        ).upper()
+        evidence = item.get("evidence_json") or {}
+        day_key = _day_key(
+            evidence.get("date") or evidence.get("occurrence_date") or item.get("relevant_date")
+        )
+        if not day_key:
+            continue
+        if classification in {"APPROVED_PERSONAL", "ANNUAL_LEAVE"}:
+            excused_days.add(day_key)
+        elif classification == "UNEXCUSED":
+            unexcused_observation_days.add(day_key)
+    attendance_absence_days = {
+        day_key
+        for item in raw_absences
+        if (day_key := _day_key(item.get("date")))
+    }
+    undated_absences = sum(1 for item in raw_absences if not _day_key(item.get("date")))
+    unexpected_absences = (
+        len((attendance_absence_days | unexcused_observation_days) - excused_days)
+        + undated_absences
+    )
     requested = [
         item
         for item in category(positive, "EXTRA_TASK")
@@ -321,27 +355,14 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
             evidence_ids=added_ids,
             answer_type="object",
         ),
-        _question(
+        _manual_question(
             "approved_postponement",
             {
                 "approved": len(approved),
                 "unapproved": len(unapproved),
             },
-            # Only ambiguous postponements (present but not yet marked
-            # approved/unapproved) need a manager's call — no postponements
-            # at all, or ones already resolved, are a confident AUTO answer.
-            source_status=(
-                "AUTO_NEEDS_CONFIRMATION"
-                if len(postponements) > len(approved) + len(unapproved)
-                else "AUTO"
-            ),
             evidence_ids=postponement_ids,
-            explanation=(
-                "Ka shtyrje pa aprovim/refuzim të shënuar; kërkon konfirmim nga menaxheri."
-                if len(postponements) > len(approved) + len(unapproved)
-                else ""
-            ),
-            answer_type="object",
+            explanation="Numrat e aprovuar dhe pa aprovim janë fakte automatike; përgjigjja Po/Jo jepet nga menaxheri.",
         ),
         _manual_question(
             "requested_extra_tasks",
@@ -405,16 +426,11 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         _question(
             "unexpected_absences",
-            len(unexcused_absences) if not raw_absences or verified_absences else None,
-            source_status=(
-                "AUTO" if not raw_absences or verified_absences else "AUTO_NEEDS_CONFIRMATION"
-            ),
-            evidence_ids=ids(verified_absences),
-            explanation=(
-                "Mungesa duhet klasifikuar si e arsyetuar ose e papritur."
-                if raw_absences and not verified_absences
-                else ""
-            ),
+            unexpected_absences,
+            evidence_ids=[
+                *[str(item.get("id")) for item in raw_absences if item.get("id")],
+                *ids(verified_absences),
+            ],
             answer_type="integer",
         ),
         _manual_question(
@@ -508,6 +524,8 @@ def build_daily_questions_from_live(
         "daily_planned_count": counters["planned_count"],
         "daily_completed_count": counters["completed_count"],
     }
+    if live_person.get("attendance"):
+        live_facts["attendance"] = live_person["attendance"]
     fresh_questions = build_live_questions(live_facts)
     saved_manual = {
         str(question.get("key")): question
@@ -632,20 +650,15 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
             evidence_ids=additional_ids,
             answer_type="object",
         ),
-        _question(
+        _manual_question(
             "approved_postponement",
             {
                 "approved": c.get("approved_postponement_count", 0),
                 "unapproved": c.get("unapproved_postponement_count", 0),
                 "needs_review": c.get("postponement_needs_review_count", 0),
             },
-            source_status=(
-                "AUTO_NEEDS_CONFIRMATION"
-                if c.get("postponement_needs_review_count", 0)
-                else "AUTO"
-            ),
             evidence_ids=postponement_evidence_ids,
-            answer_type="object",
+            explanation="Numrat e aprovuar dhe pa aprovim janë fakte automatike; përgjigjja Po/Jo jepet nga menaxheri.",
         ),
         _manual_question(
             "requested_extra_tasks",
@@ -889,6 +902,35 @@ async def calculate_weekly_period(
     for user_id_raw, person in sorted(evidence["people"].items()):
         user_id = uuid.UUID(user_id_raw)
         result = existing.get(user_id)
+        if person.get("availability_status"):
+            if result is None:
+                result = RealizationPersonResult(
+                    period_id=period.id,
+                    user_id=user_id,
+                    department_id=period.department_id,
+                )
+                db.add(result)
+            person["questions"] = []
+            person["weekly_progress_percent"] = 0.0
+            person["project_progress"] = []
+            result.facts_json = person
+            for _, model_key in COUNTER_FIELDS.items():
+                setattr(result, model_key, 0)
+            result.system_task_count = 0
+            result.system_task_completed_count = 0
+            result.meeting_missed_count = 0
+            result.suggested_level = None
+            result.suggested_symbol = None
+            result.suggested_bonus = None
+            result.auto_narrative = (
+                "Pushim vjetor gjatë gjithë javës."
+                if person["availability_status"] == "PV"
+                else "Mungesë gjatë gjithë javës."
+                if person["availability_status"] == "MUNGESE"
+                else "PV / Mungesë gjatë gjithë javës."
+            )
+            results.append(result)
+            continue
         if result is not None and result.reviewed_at is not None:
             # A manager's review is a final decision for this person this
             # week — recalculating (e.g. because a colleague's evidence

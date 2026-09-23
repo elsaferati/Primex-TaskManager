@@ -10,6 +10,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.models.attendance_log import AttendanceLog
 from app.models.audit_log import AuditLog
 from app.models.daily_plan_adjustment import DailyPlanAdjustment
 from app.models.daily_planner_snapshot import DailyPlannerSnapshot
@@ -22,6 +23,7 @@ from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.task_strike_event import TaskStrikeEvent
 from app.models.user import User
+from app.models.enums import AttendanceType
 from app.services.daily_realization_classifier import (
     DailyClassificationInput, EXCEPTION_CLASSIFICATIONS, classify_daily_task,
 )
@@ -31,7 +33,11 @@ from app.services.daily_realization_events import semantic_local_day
 from app.services.daily_realization_explanation import requires_daily_explanation
 from app.services.daily_realization_close_state import resolve_daily_close_state
 from app.services.one_h_slots import effective_slot_date
-from app.services.realization_people import load_active_users_and_common_leave
+from app.services.realization_people import (
+    availability_status_on_day,
+    is_realization_excluded_user,
+    load_active_users_and_common_leave,
+)
 
 
 def local_day(value: datetime | None) -> date | None:
@@ -256,10 +262,43 @@ async def build_live_daily_realization(
     department_users, common_leave = await load_active_users_and_common_leave(
         db, department_id=department_id, start_date=day, end_date=day,
     )
-    excluded_on_leave = {
-        person_id for person_id, leave in common_leave.items() if day in leave.days
-    }
     department_user_ids = {row.id for row in department_users}
+    availability_by_user = {
+        person_id: status
+        for person_id, coverage in common_leave.items()
+        if (status := availability_status_on_day(coverage, day)) is not None
+    }
+    attendance_rows = list((await db.execute(select(AttendanceLog).where(
+        AttendanceLog.user_id.in_(department_user_ids),
+        AttendanceLog.date == day,
+        AttendanceLog.type.in_({AttendanceType.PUSHIM_VJETOR, AttendanceType.MUNGESE}),
+    ))).scalars().all()) if department_user_ids else []
+    for attendance in attendance_rows:
+        if attendance.user_id is None:
+            continue
+        if attendance.type == AttendanceType.PUSHIM_VJETOR:
+            availability_by_user[attendance.user_id] = "PV"
+        elif attendance.user_id not in availability_by_user:
+            availability_by_user[attendance.user_id] = "MUNGESE"
+
+    def common_view_attendance_for(person_id: uuid.UUID) -> list[dict]:
+        coverage = common_leave.get(person_id)
+        if coverage is None:
+            return []
+        rows: list[dict] = []
+        if day in coverage.delay_days:
+            rows.append({
+                "date": day.isoformat(),
+                "type": "VONESE",
+                "source": "common_view",
+            })
+        if day in coverage.absence_days:
+            rows.append({
+                "date": day.isoformat(),
+                "type": "MUNGESE",
+                "source": "common_view",
+            })
+        return rows
 
     scoped_task_ids = set(task_ids)
     if department_user_ids:
@@ -353,6 +392,10 @@ async def build_live_daily_realization(
     actor_ids = {event.actor_user_id for event in events if event.actor_user_id}
     all_visible_user_ids = person_ids | actor_ids
     users = {row.id: row for row in (await db.execute(select(User).where(User.id.in_(all_visible_user_ids)))).scalars().all()} if all_visible_user_ids else {}
+    person_ids = {
+        person_id for person_id in person_ids
+        if person_id not in users or not is_realization_excluded_user(users[person_id])
+    }
     project_ids = {task.project_id for task in tasks.values() if task.project_id}
     projects = {row.id: row for row in (await db.execute(select(Project).where(Project.id.in_(project_ids)))).scalars().all()} if project_ids else {}
     states = {(row.user_id, row.task_id): row for row in (await db.execute(select(TaskDailyRlzState).where(
@@ -375,8 +418,18 @@ async def build_live_daily_realization(
     people = []
     department_metric_rows: list[dict] = []
     for person_id in sorted(person_ids, key=lambda value: ((users.get(value).full_name if users.get(value) else ""), str(value))):
-        # Full-day PV is outside this person's obligations and department totals.
-        if person_id in excluded_on_leave:
+        availability_status = availability_by_user.get(person_id)
+        if availability_status:
+            user = users.get(person_id)
+            people.append({
+                "user_id": str(person_id),
+                "user_name": user.full_name if user else next((p.get("user_name") for p in baseline_people if p.get("user_id") == str(person_id)), str(person_id)),
+                "department_id": str(department_id),
+                "tasks": [],
+                "metrics": calculate_daily_metrics([]),
+                "availability_status": availability_status,
+                "attendance": common_view_attendance_for(person_id),
+            })
             continue
         candidate_ids = candidate_task_ids_for_person(
             person_id, baseline_by_user=baseline_by_user,
@@ -579,6 +632,7 @@ async def build_live_daily_realization(
         people.append({
             "user_id": str(person_id), "user_name": user.full_name if user else next((p.get("user_name") for p in baseline_people if p.get("user_id") == str(person_id)), str(person_id)),
             "department_id": str(department_id), "tasks": rows, "metrics": metrics,
+            "attendance": common_view_attendance_for(person_id),
         })
 
     department_metrics = calculate_daily_metrics(department_metric_rows)
@@ -596,6 +650,10 @@ async def build_live_daily_realization(
     } if close_actor_ids else {}
     from app.services.daily_rlz_compliance import is_editable_day
     for person in people:
+        if person.get("availability_status"):
+            person["close_state"] = "NOT_SAVED"
+            person["close_state_details"] = {"status": "NOT_SAVED"}
+            continue
         close = close_by_user.get(person["user_id"])
         latest_change = max((datetime.fromisoformat(row["last_change"]) for row in person["tasks"] if row.get("last_change")), default=None)
         person["close_state"], _, _ = resolve_daily_close_state(

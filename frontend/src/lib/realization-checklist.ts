@@ -1,10 +1,12 @@
 export const manualChecklistBooleanKeys = new Set([
+  "approved_postponement",
   "requested_extra_tasks", "helped_colleague", "gave_proposal",
   "respected_meetings", "week_positive", "week_problems", "affected_other_plan", "repeated_after_clarification",
 ])
 
 // One answer per question per week; the manager may record it on any day.
 export const weeklyChecklistLabels: Record<string, string> = {
+  approved_postponement: "A ka ndryshuar prioriteti ose ka shtyrje me konfirmim?",
   requested_extra_tasks: "A kërkoi detyra shtesë këtë javë?",
   helped_colleague: "A ndihmoi ndonjë koleg këtë javë?",
   gave_proposal: "A dha propozim për përmirësim këtë javë?",
@@ -16,6 +18,7 @@ export const weeklyChecklistLabels: Record<string, string> = {
 }
 
 export const checklistAnswerOptions: Record<string, { value: string; label: string }[]> = {
+  approved_postponement: [{ value: "YES", label: "Po" }, { value: "NO", label: "Jo" }],
   requested_extra_tasks: [{ value: "YES", label: "Po" }, { value: "NO", label: "Jo" }],
   helped_colleague: [{ value: "YES", label: "Po" }, { value: "NO", label: "Jo" }],
   gave_proposal: [{ value: "YES", label: "Po" }, { value: "NO", label: "Jo" }],

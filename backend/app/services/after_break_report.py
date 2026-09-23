@@ -392,7 +392,7 @@ def _waiting_client_task_rows(
         entered_at = _as_timezone((entry_dates or {}).get(task.id), timezone or ZoneInfo("Europe/Tirane"))
         known_date = entered_at is not None and entered_at.date() <= report_day
         return (
-            entered_at.timestamp() if known_date else float("inf"),
+            -entered_at.timestamp() if known_date else float("inf"),
             common_view_task_sort_key(task, names, assignee_ids_by_task),
         )
 

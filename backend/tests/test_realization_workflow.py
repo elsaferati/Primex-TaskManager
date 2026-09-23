@@ -10,8 +10,12 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 
 from app.models.enums import RealizationLevel, RealizationPeriodStatus
-from app.api.routers.realization import _can_capture_current_week_final
-from app.services.realization_calculator import build_questions
+from app.api.routers.realization import _away_person_result, _can_capture_current_week_final
+from app.services.common_leave import (
+    is_common_view_full_day_absence,
+    parse_common_view_entry_day,
+)
+from app.services.realization_calculator import build_live_questions, build_questions
 from app.services.realization_daily import (
     _include_nonplanned_weekly_task,
     _include_task_in_daily_facts,
@@ -31,8 +35,13 @@ from app.services.realization_periods import (
     weekly_end,
 )
 from app.services.realization_people import (
+    CommonLeaveCoverage,
+    availability_status_from_days,
+    availability_status_on_day,
     build_common_leave_coverage,
+    full_period_availability_statuses,
     full_period_leave_user_ids,
+    is_realization_excluded_user,
 )
 from app.services.realization_policy import evaluate_policy
 
@@ -307,6 +316,173 @@ class TestWorkflow(unittest.TestCase):
 
 
 class TestRealizationPeopleEligibility(unittest.TestCase):
+    def test_full_week_availability_distinguishes_pv_and_absence(self) -> None:
+        pv_user = uuid.uuid4()
+        absent_user = uuid.uuid4()
+        mixed_user = uuid.uuid4()
+        working_days = {date(2026, 8, day) for day in range(3, 8)}
+        statuses = full_period_availability_statuses(
+            {
+                pv_user: CommonLeaveCoverage(frozenset(working_days), ()),
+                absent_user: CommonLeaveCoverage(
+                    frozenset(), (),
+                    absence_days=frozenset(working_days),
+                    full_day_absence_days=frozenset(working_days),
+                ),
+                mixed_user: CommonLeaveCoverage(
+                    frozenset(sorted(working_days)[:2]), (),
+                    absence_days=frozenset(sorted(working_days)[2:]),
+                    full_day_absence_days=frozenset(sorted(working_days)[2:]),
+                ),
+            },
+            working_days=working_days,
+        )
+        self.assertEqual(statuses[pv_user], "PV")
+        self.assertEqual(statuses[absent_user], "MUNGESE")
+        self.assertEqual(statuses[mixed_user], "PV_MUNGESE")
+
+    def test_partial_common_view_absence_does_not_hide_the_day(self) -> None:
+        day = date(2026, 9, 22)
+        partial = CommonLeaveCoverage(
+            frozenset(),
+            (),
+            absence_days=frozenset({day}),
+            delay_days=frozenset({day}),
+        )
+        full = CommonLeaveCoverage(
+            frozenset(),
+            (),
+            absence_days=frozenset({day}),
+            full_day_absence_days=frozenset({day}),
+        )
+        self.assertIsNone(availability_status_on_day(partial, day))
+        self.assertEqual(availability_status_on_day(full, day), "MUNGESE")
+
+    def test_common_view_entry_day_and_full_day_gap(self) -> None:
+        created = datetime(2026, 9, 21, tzinfo=timezone.utc)
+        timed = SimpleNamespace(
+            description="Date: 2026-09-22 From: 10:00 - To: 15:00",
+            entry_date=date(2026, 9, 21),
+            created_at=created,
+        )
+        full = SimpleNamespace(
+            description="Date: 2026-09-22 From: 08:00 - To: 16:00",
+            entry_date=date(2026, 9, 22),
+            created_at=created,
+        )
+        self.assertEqual(parse_common_view_entry_day(timed), date(2026, 9, 22))
+        self.assertFalse(is_common_view_full_day_absence(timed))
+        self.assertTrue(is_common_view_full_day_absence(full))
+
+    def test_live_questions_count_common_view_delay_and_absence(self) -> None:
+        questions = {
+            row["key"]: row
+            for row in build_live_questions(
+                {
+                    "question_scope": "WEEKLY",
+                    "daily_timeline": [
+                        {
+                            "date": "2026-09-22",
+                            "attendance": [
+                                {
+                                    "date": "2026-09-22",
+                                    "type": "VONESE",
+                                    "source": "common_view",
+                                },
+                                {
+                                    "date": "2026-09-22",
+                                    "type": "MUNGESE",
+                                    "source": "common_view",
+                                },
+                            ],
+                        }
+                    ],
+                    "tasks": [],
+                    "observations": [],
+                }
+            )
+        }
+        self.assertEqual(questions["frequent_delays"]["auto_value"]["attendance_tardiness"], 1)
+        self.assertEqual(questions["unexpected_absences"]["auto_value"], 1)
+        self.assertEqual(questions["unexpected_absences"]["source_status"], "AUTO")
+
+    def test_approved_absence_does_not_count_as_unexpected(self) -> None:
+        questions = {
+            row["key"]: row
+            for row in build_live_questions(
+                {
+                    "question_scope": "WEEKLY",
+                    "daily_timeline": [
+                        {
+                            "date": "2026-09-22",
+                            "attendance": [
+                                {"date": "2026-09-22", "type": "MUNGESE"},
+                            ],
+                        }
+                    ],
+                    "tasks": [],
+                    "observations": [
+                        {
+                            "id": "obs-1",
+                            "verified": True,
+                            "marker": "NEGATIVE",
+                            "category": "ABSENCE",
+                            "evidence_json": {
+                                "date": "2026-09-22",
+                                "classification": "APPROVED_PERSONAL",
+                            },
+                        }
+                    ],
+                }
+            )
+        }
+        self.assertEqual(questions["unexpected_absences"]["auto_value"], 0)
+
+    def test_week_is_pv_only_when_every_working_day_was_away(self) -> None:
+        working_days = {date(2026, 9, day) for day in range(21, 26)}
+        self.assertEqual(
+            availability_status_from_days(
+                {day: "PV" for day in working_days},
+                working_days=working_days,
+            ),
+            "PV",
+        )
+        self.assertIsNone(
+            availability_status_from_days(
+                {date(2026, 9, 21): "PV", date(2026, 9, 22): "PV"},
+                working_days=working_days,
+            )
+        )
+        mixed_days = {day: "MUNGESE" for day in working_days}
+        mixed_days[date(2026, 9, 21)] = "PV"
+        self.assertEqual(
+            availability_status_from_days(mixed_days, working_days=working_days),
+            "PV_MUNGESE",
+        )
+
+    def test_an_away_week_row_can_be_returned_without_being_saved(self) -> None:
+        from app.schemas.realization import RealizationPersonResultOut
+
+        period = SimpleNamespace(id=uuid.uuid4(), department_id=uuid.uuid4())
+        row = _away_person_result(period, user_id=uuid.uuid4(), status="PV")
+        payload = RealizationPersonResultOut.model_validate(row)
+        self.assertEqual(payload.facts_json["availability_status"], "PV")
+        self.assertEqual(payload.planned_count, 0)
+
+    def test_gent_arifaj_is_excluded_from_realization(self) -> None:
+        self.assertTrue(is_realization_excluded_user(SimpleNamespace(
+            full_name="Gent Arifaj", username=None, email="other@example.com"
+        )))
+        self.assertTrue(is_realization_excluded_user(SimpleNamespace(
+            full_name="Another Name", username="gent.arifaj", email="other@example.com"
+        )))
+        self.assertTrue(is_realization_excluded_user(SimpleNamespace(
+            full_name="Genti Arifaj", username=None, email="other@example.com"
+        )))
+        self.assertFalse(is_realization_excluded_user(SimpleNamespace(
+            full_name="Gane Arifaj", username="gane.arifaj", email="gane@example.com"
+        )))
+
     def test_full_week_common_view_leave_excludes_only_covered_user(self) -> None:
         covered_user = uuid.uuid4()
         working_user = uuid.uuid4()

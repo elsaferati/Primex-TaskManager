@@ -84,6 +84,15 @@ export function DailyStaffTable({ people, filterPeople, departments, departmentI
             const completePlan = metrics.original_planned_count + metrics.additional_count
             const realization = metrics.raw_plan_realization == null ? null : Math.min(100, metrics.raw_plan_realization)
             const department = departments.find(item => item.id === person.department_id)
+            if (person.availability_status) {
+              const statusLabel = person.availability_status === "PV" ? "PV · Pushim vjetor" : person.availability_status === "MUNGESE" ? "Mungesë" : "PV / Mungesë"
+              return <TableRow key={`${person.department_id}:${person.user_id}`} className="bg-slate-50/80 align-middle">
+                <TableCell className="text-center tabular-nums text-slate-500">{index + 1}</TableCell>
+                <TableCell><span className="block whitespace-nowrap text-[15px] font-bold leading-5 text-slate-800">{person.user_name}</span></TableCell>
+                <TableCell className="text-center text-xs font-bold uppercase text-slate-600" title={department?.name}>{realizationDepartmentTag(department)}</TableCell>
+                <TableCell colSpan={7} className="bg-slate-100/80 text-center"><span className="inline-flex rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-bold text-slate-700">{statusLabel}</span></TableCell>
+              </TableRow>
+            }
             return <TableRow key={`${person.department_id}:${person.user_id}`} className="align-middle hover:bg-slate-50/70">
               <TableCell className="text-center tabular-nums text-slate-500">{index + 1}</TableCell>
               <TableCell>

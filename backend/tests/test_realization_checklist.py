@@ -54,6 +54,11 @@ def test_daily_automatic_questions_use_the_same_metrics_as_the_live_table():
         "todo": 2,
         "postponed": 0,
     }
+    assert questions["approved_postponement"]["source_status"] == "MANUAL_UNANSWERED"
+    assert questions["approved_postponement"]["auto_value"] == {
+        "approved": 0,
+        "unapproved": 0,
+    }
     assert questions["extra_engagement"]["source_status"] == "AUTO"
     assert questions["extra_engagement"]["auto_value"] == {
         "answer": True,
@@ -95,12 +100,12 @@ class TestWeeklyChecklistAnswers(unittest.TestCase):
         self.assertIn("helped_colleague", facts["manual_question_completeness"]["missing_keys"])
         self.assertNotIn("helped_colleague", facts["manual_answers"])
 
-    def test_all_eight_answers_satisfy_weekly_review(self):
+    def test_all_manual_answers_satisfy_weekly_review(self):
         facts = {"questions": build_live_questions({})}
         apply_checklist_answers(facts, direct_answers={
             key: {"value": False, "comment": None} for key in MANDATORY_MANUAL_QUESTION_KEYS
         })
-        self.assertEqual(facts["manual_question_completeness"]["answered"], 8)
+        self.assertEqual(facts["manual_question_completeness"]["answered"], 9)
         self.assertTrue(facts["manual_question_completeness"]["complete"])
 
     def test_automatic_questions_are_never_overwritten_by_manual_answers(self):

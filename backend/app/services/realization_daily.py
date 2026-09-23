@@ -602,7 +602,33 @@ async def calculate_daily_period(
             person["counters"]["annual_leave_days"] += 1
             person["counters"]["approved_absence_days"] += 1
         elif row.type == AttendanceType.MUNGESE:
-            person["counters"]["absence_needs_review_count"] += 1
+            person["counters"]["unexcused_absence_days"] += 1
+
+    for user_id, person in people.items():
+        coverage = common_leave.get(user_id)
+        if coverage is None:
+            continue
+        types = {
+            str(item.get("type") or "").upper()
+            for item in person["attendance"]
+            if isinstance(item, dict)
+        }
+        if day in coverage.delay_days and "VONESE" not in types:
+            person["attendance"].append({
+                "date": day.isoformat(),
+                "type": AttendanceType.VONESE.value,
+                "details": "Common View Vonesë",
+                "source": "common_view",
+            })
+            person["counters"]["tardiness_count"] += 1
+        if day in coverage.absence_days and "MUNGESE" not in types:
+            person["attendance"].append({
+                "date": day.isoformat(),
+                "type": AttendanceType.MUNGESE.value,
+                "details": "Common View Mungesë",
+                "source": "common_view",
+            })
+            person["counters"]["unexcused_absence_days"] += 1
 
     # M3 and RLZ share these normalized source records. We never parse report text.
     relevant_task_ids = {

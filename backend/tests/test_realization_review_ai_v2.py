@@ -202,7 +202,7 @@ class TestManualQuestionPhilosophy(unittest.TestCase):
         missing = missing_manual_question_keys({"requested_extra_tasks", "helped_colleague"})
         self.assertEqual(len(missing), len(MANDATORY_MANUAL_QUESTION_KEYS) - 2)
         self.assertIn("respected_meetings", missing)
-        self.assertEqual(len(MANDATORY_MANUAL_QUESTION_KEYS), 8)
+        self.assertEqual(len(MANDATORY_MANUAL_QUESTION_KEYS), 9)
 
     def test_append_only_answer_model_has_audit_chain(self) -> None:
         columns = RealizationQuestionAnswer.__table__.columns

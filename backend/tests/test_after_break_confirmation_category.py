@@ -475,7 +475,7 @@ class WaitingClientTaskRowsTests(unittest.TestCase):
     def test_dt_wfe_uses_waiting_client_gold_tone(self) -> None:
         self.assertEqual(_table_tone_from_label("DT WFE:"), "waiting-client")
 
-    def test_dt_wfe_sorts_by_full_entry_date_oldest_first_unknown_last(self) -> None:
+    def test_dt_wfe_sorts_by_full_entry_date_newest_first_unknown_last(self) -> None:
         entry_dates = {
             "Today": datetime(2026, 9, 18, 8, 0),
             "Yesterday": datetime(2026, 9, 17, 8, 0),
@@ -488,7 +488,7 @@ class WaitingClientTaskRowsTests(unittest.TestCase):
             tasks, {}, {}, date(2026, 9, 18), entry_dates=entry_dates,
         )
         self.assertEqual([row[6] for row in rows], [
-            "Previous year", "Previous month", "This month", "Yesterday", "Today", "Unknown",
+            "Today", "Yesterday", "This month", "Previous month", "Previous year", "Unknown",
         ])
         self.assertEqual([row[0] for row in rows], ["1", "2", "3", "4", "5", "6"])
 
