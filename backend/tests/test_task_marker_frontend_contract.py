@@ -107,8 +107,26 @@ def test_client_urgent_symbol_is_available_in_editors_legends_and_reports():
         assert "!!!" in source, relative_path
 
 
+def test_f_bz1n1_and_ga_symbols_are_available_everywhere():
+    paths = (
+        "frontend/src/components/task-one-h-marker-editor.tsx",
+        "frontend/src/components/task-one-h-marker-legend.tsx",
+        "frontend/src/app/(app)/common/page.tsx",
+        "frontend/src/app/(app)/ga-ka-notes/page.tsx",
+        "frontend/src/app/(app)/tomorrow-print-report/page.tsx",
+        "backend/app/services/primeflow_report.py",
+        "backend/app/services/tomorrow_print_report.py",
+    )
+    for relative_path in paths:
+        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert "BZ1N1" in source, relative_path
+        assert "DET FIZIKISHT" in source or 'label: "F"' in source, relative_path
+        assert "⚑" not in source, relative_path
+        assert "GA" in source, relative_path
+
+
 def test_marker_dropdowns_and_legends_use_the_requested_order():
-    ordered_tokens = ("QUESTION", "EXCLAMATION", "M2", "M3", "M2_M3", "GENT", "KA", "FLAG")
+    ordered_tokens = ("QUESTION", "EXCLAMATION", "M2", "M3", "M2_M3", "GENT", "KA", "FLAG", "F", "BZ1N1")
     dropdown_paths = (
         "frontend/src/components/task-one-h-marker-editor.tsx",
         "frontend/src/app/(app)/common/page.tsx",
@@ -121,7 +139,7 @@ def test_marker_dropdowns_and_legends_use_the_requested_order():
         assert positions == sorted(positions), relative_path
 
     legend = (ROOT / "frontend/src/components/task-one-h-marker-legend.tsx").read_text(encoding="utf-8")
-    legend_tokens = ('["?"', '["!"', '["M2"', '["M3"', '["M2/3"', '["GENT"', '["KA"', '["⚑"')
+    legend_tokens = ('["?"', '["!"', '["M2"', '["M3"', '["M2/3"', '["GENT"', '["KA"', '["GA"', '["F"', '["BZ1N1"')
     positions = [legend.index(token) for token in legend_tokens]
     assert positions == sorted(positions)
 

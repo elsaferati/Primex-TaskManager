@@ -33,8 +33,10 @@ def test_task_marker_legend_explains_the_report_symbols() -> None:
     assert 'data-task-marker-legend="true"' in legend_html
     assert "PAQARTESI" in legend_html
     assert "KËRKON MONITORIM NGA DIKUSH TJETËR" in legend_html
-    assert "⚑" in legend_html
+    assert "⚑" not in legend_html
     assert "GA" in legend_html
+    assert "F</strong> - DET FIZIKISHT" in legend_html
+    assert "BZ1N1</strong>" in legend_html
     assert "color:#0F2A5F" in legend_html
     assert "color:#DC2626" in legend_html
     assert "background:#EFF6FF" in legend_html
@@ -43,13 +45,13 @@ def test_task_marker_legend_explains_the_report_symbols() -> None:
     assert "!!!</strong> - KLIENT/URGJENT" in legend_html
     assert "👁</strong> - KËRKON" in legend_html
     assert "X</strong> - MBYLL DETYREN" in legend_html
-    assert "⚑</strong> - PYETJE/SQARIM ME GA" in legend_html
+    assert "GA</strong> - PYETJE/SQARIM ME GA" in legend_html
     assert "KA</strong> - PYETJE/SQARIM ME KA" in legend_html
     assert "GENT</strong> - PYETJE/SQARIM ME GENTIN" in legend_html
     assert "M2</strong> - DOREZIM DERI NE PAUZE" in legend_html
     assert "M3</strong> - DOREZIM DERI NE FUND TE DITES" in legend_html
     assert "M2/3</strong> - DOREZIM EDHE NE M2 EDHE M3" in legend_html
-    assert legend_html.count('aria-hidden="true"') == 10
+    assert legend_html.count('aria-hidden="true"') == 12
 
 
 def test_missing_one_h_users_exclude_leave_admin_and_management_initials() -> None:
@@ -294,18 +296,28 @@ def test_html_table_keeps_grid_styles_inline_for_email_clients() -> None:
     assert '<style>' not in report_html
 
 
-def test_task_title_text_is_slightly_larger_without_changing_cell_layout() -> None:
+def test_task_title_text_is_larger_and_sits_lower_without_changing_cell_layout() -> None:
     report_html = _html_table(
         [("1H 10:00", [{"title": "GA: A task", "finishPeriod": "AM"}], False)]
     )
 
     assert (
-        '<span data-task-title-text="true" style="font-size:17px">'
+        '<span data-task-title-text="true" style="display:inline-block;font-size:17px;line-height:1.25;padding-top:4px">'
         '1. A task</span>'
     ) in report_html
     assert '<col width="2.5%"><col width="10.5%"><col width="14.5%" span="6">' in report_html
     assert 'border:1px solid #000;padding:5px;vertical-align:top;text-align:left' in report_html
     assert 'vertical-align:bottom;height:25px' in report_html
+
+
+def test_meeting_titles_are_larger_and_sit_lower_in_print_tables() -> None:
+    report_html = _html_table(
+        [("TAK EXT", [{"title": "Client meeting", "time": "10:00"}], False)],
+        meeting=True,
+    )
+
+    assert "font-size:14px;line-height:1.3;padding-top:8px" in report_html
+    assert "1. Client meeting 10:00" in report_html
 
 
 def test_task_grid_uses_light_dividers_inside_a_slot_and_bold_slot_labels() -> None:
@@ -621,7 +633,7 @@ def test_one_h_marker_is_a_separate_badge_next_to_am_pm() -> None:
 
     assert report_html.count('data-task-badge="finish-period"') == 3
     assert report_html.count('data-task-badge="one-h-marker"') == 3
-    assert '>⚑</span>' in report_html
+    assert '>GA</span>' in report_html
     assert '>(?)</span>' in report_html
     assert 'data-task-badge="finish-period"' in report_html
     assert 'data-task-badge="one-h-marker"' in report_html
@@ -633,7 +645,7 @@ def test_one_h_marker_is_a_separate_badge_next_to_am_pm() -> None:
         [("1H 10:00", tasks, False)], [], date(2026, 8, 14)
     )
     sheet = load_workbook(BytesIO(content)).active
-    assert "[AM] [⚑]\n" in sheet["C7"].value
+    assert "[AM] [GA]\n" in sheet["C7"].value
     assert "[PM] [👁]\n" in sheet["D7"].value
     assert "KOMENT SIMBOLI: Check again with KA" in sheet["D7"].value
     assert "[AM] (?)\n" in sheet["E7"].value

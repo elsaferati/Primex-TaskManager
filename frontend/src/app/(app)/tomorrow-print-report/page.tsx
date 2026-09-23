@@ -37,7 +37,7 @@ type Preview = {
   generated_at: string | null
   generated_by: string | null
 }
-type TaskMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
+type TaskMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "F" | "BZ1N1" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
 type TaskMarkerFilter = "all" | "with" | "none" | TaskMarker
 type TaskDueDateFilter = "all" | "today"
 
@@ -52,7 +52,9 @@ const taskMarkerOptions: Array<{ value: TaskMarker; label: string }> = [
   { value: "M2_M3", label: "M2/3" },
   { value: "GENT", label: "GENT" },
   { value: "KA", label: "KA" },
-  { value: "FLAG", label: "⚑" },
+  { value: "FLAG", label: "GA" },
+  { value: "F", label: "F" },
+  { value: "BZ1N1", label: "BZ1N1" },
 ]
 
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]

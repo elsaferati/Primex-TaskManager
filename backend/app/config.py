@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     REDIS_ENABLED: bool = True
     REDIS_URL: str = "redis://localhost:6379/0"
     APP_TIMEZONE: str = "Europe/Budapest"
+    MEETING_REMINDER_SCHEDULER_ENABLED: bool = True
+    MEETING_REMINDER_POLL_SECONDS: int = 30
     SYSTEM_TASK_SCHEDULER_ENABLED: bool = True
     TOMORROW_PRINT_REPORT_SCHEDULER_ENABLED: bool = True
     TODAY_PRINT_REPORT_SCHEDULER_ENABLED: bool = True

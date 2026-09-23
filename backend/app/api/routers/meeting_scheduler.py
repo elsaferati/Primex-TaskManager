@@ -375,7 +375,12 @@ async def _provision_request(
     db.add(meeting)
     await db.flush()
     for participant_id in participant_ids:
-        db.add(MeetingParticipant(meeting_id=meeting.id, user_id=participant_id))
+        db.add(MeetingParticipant(
+            meeting_id=meeting.id,
+            user_id=participant_id,
+            assignment_source="manual",
+            assigned_by_user_id=row.created_by_user_id,
+        ))
     row.final_meeting_id = meeting.id
     row.status = "CREATED"
     row.last_error = None

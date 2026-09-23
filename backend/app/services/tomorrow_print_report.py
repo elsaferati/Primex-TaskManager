@@ -150,7 +150,8 @@ PERSONAL_ROW_LABEL_STYLE = (
     "overflow-wrap:normal;word-break:normal"
 )
 PERSONAL_TIME_STYLE = "font-size:13px;line-height:1.2;font-weight:800;white-space:nowrap"
-TASK_TITLE_TEXT_STYLE = "font-size:17px"
+TASK_TITLE_TEXT_STYLE = "display:inline-block;font-size:17px;line-height:1.25;padding-top:4px"
+MEETING_TITLE_TEXT_STYLE = "font-size:14px;line-height:1.3;padding-top:8px"
 DEADLINE_COLOR = "#DC2626"
 EIGHT_AM_BORDER_COLOR = "#DC2626"
 NON_ROUTINE_MEETING_BORDER_COLOR = "#2563EB"
@@ -265,12 +266,14 @@ def _task_marker_label(item: dict[str, Any]) -> str:
         "QUESTION": "?",
         "KA": "KA",
         "GENT": "GENT",
+        "F": "F",
+        "BZ1N1": "BZ1N1",
         "M2": "M2",
         "M3": "M3",
         "M2_M3": "M2/3",
         "MONITOR": "👁",
         "CLOSE": "X",
-        "FLAG": "⚑",
+        "FLAG": "GA",
     }.get(raw, "")
     marker_by_ga = _task_marker_was_set_by_ga(item)
     return f"({label})" if label and marker_by_ga else label
@@ -302,7 +305,8 @@ def _task_marker_legend_text() -> str:
         "M3 - DOREZIM DERI NE FUND TE DITES / "
         "M2/3 - DOREZIM EDHE NE M2 EDHE M3 / "
         "GENT - PYETJE/SQARIM ME GENTIN / "
-        "KA - PYETJE/SQARIM ME KA / ⚑ - PYETJE/SQARIM ME GA"
+        "KA - PYETJE/SQARIM ME KA / GA - PYETJE/SQARIM ME GA / "
+        "F - DET FIZIKISHT / BZ1N1"
     )
 
 
@@ -1192,7 +1196,9 @@ def _task_marker_legend_html() -> str:
         ("M2/3", "DOREZIM EDHE NE M2 EDHE M3"),
         ("GENT", "PYETJE/SQARIM ME GENTIN"),
         ("KA", "PYETJE/SQARIM ME KA"),
-        ("⚑", "PYETJE/SQARIM ME GA"),
+        ("GA", "PYETJE/SQARIM ME GA"),
+        ("F", "DET FIZIKISHT"),
+        ("BZ1N1", ""),
     )
     separator = (
         '<span aria-hidden="true" style="display:inline-block;margin:0 14px;'
@@ -1200,8 +1206,8 @@ def _task_marker_legend_html() -> str:
     )
     content = separator.join(
         '<span style="display:inline-block;margin:2px 16px 2px 0;white-space:nowrap;">'
-        f'<strong style="color:#DC2626;font-size:{"12px" if symbol in {"KA", "GENT", "M2", "M3", "M2/3"} else "17px"};font-weight:900;">{symbol}</strong> - '
-        f'{html.escape(description)}</span>'
+        f'<strong style="color:#DC2626;font-size:{"12px" if symbol in {"KA", "GA", "GENT", "BZ1N1", "M2", "M3", "M2/3"} else "17px"};font-weight:900;">{symbol}</strong>'
+        f'{f" - {html.escape(description)}" if description else ""}</span>'
         for symbol, description in items
     )
     return (
@@ -1331,7 +1337,7 @@ def _html_table(
                         f"{CELL_STYLE};border:2px solid {NON_ROUTINE_MEETING_BORDER_COLOR}"
                         if _is_non_routine_meeting(item) else CELL_STYLE
                     )
-                    cell_style = f"{cell_style};background-color:{color}"
+                    cell_style = f"{cell_style};background-color:{color};{MEETING_TITLE_TEXT_STYLE}"
                 else:
                     cell_style, color = _task_cell_style(
                         item, personal=personal, report_date=report_date
@@ -1441,7 +1447,7 @@ def _dated_meetings_html(
             f'{html.escape(meeting_time)}{calendar_badge}{manual_badge}</td>'
             f'<td data-meeting-users="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};'
             f'white-space:nowrap;font-weight:700{text_color}">{meeting_users_html}</td>'
-            f'<td data-meeting-cell="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};'
+            f'<td data-meeting-cell="true"{background} style="{CELL_STYLE}{highlight};{divider};background-color:{color};{MEETING_TITLE_TEXT_STYLE};'
             f'{"font-weight:800" if meeting_type == "external" or manual_badge else ""}{text_color}">'
             f"{index}. {html.escape(value)}</td>"
         )
@@ -3259,7 +3265,8 @@ async def _build_print_report(
         "👁 - KËRKON MONITORIM NGA DIKUSH TJETËR / X - MBYLL DETYREN / "
         "M2 - DOREZIM DERI NE PAUZE / M3 - DOREZIM DERI NE FUND TE DITES / "
         "M2/3 - DOREZIM EDHE NE M2 EDHE M3 / "
-        "GENT - PYETJE/SQARIM ME GENTIN / KA - PYETJE/SQARIM ME KA / ⚑ - PYETJE/SQARIM ME GA",
+        "GENT - PYETJE/SQARIM ME GENTIN / KA - PYETJE/SQARIM ME KA / "
+        "GA - PYETJE/SQARIM ME GA / F - DET FIZIKISHT / BZ1N1",
         "",
         "TASKS",
     ])

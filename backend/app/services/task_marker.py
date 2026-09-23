@@ -17,10 +17,12 @@ ONE_H_MARKER_SYMBOLS = {
     "QUESTION": "?",
     "KA": "KA",
     "GENT": "GENT",
+    "F": "F",
+    "BZ1N1": "BZ1N1",
     "M2": "M2",
     "M3": "M3",
     "M2_M3": "M2/3",
-    "FLAG": "⚑",
+    "FLAG": "GA",
     "MONITOR": "👁",
     "CLOSE": "X",
 }

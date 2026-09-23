@@ -65,6 +65,24 @@ class PlanNoteTaskBundleSchemaTests(unittest.TestCase):
         self.assertEqual(payload.one_h_marker, "FLAG")
         self.assertEqual(payload.assignee_states[0].one_h_marker, "QUESTION")
 
+    def test_new_f_and_bz1n1_symbols_are_validated(self) -> None:
+        for marker in ("F", "BZ1N1"):
+            payload = PlanNoteTaskBundleUpdate.model_validate(
+                {
+                    "one_h_marker": marker,
+                    "assignee_states": [
+                        {
+                            "assignee_id": str(uuid.uuid4()),
+                            "status": "TODO",
+                            "one_h_marker": marker,
+                        }
+                    ],
+                }
+            )
+
+            self.assertEqual(payload.one_h_marker, marker)
+            self.assertEqual(payload.assignee_states[0].one_h_marker, marker)
+
 
 if __name__ == "__main__":
     unittest.main()

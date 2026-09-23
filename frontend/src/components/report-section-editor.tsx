@@ -175,7 +175,7 @@ function previewTableCell(value: string, header: string) {
 }
 
 function splitLeadingTaskMarker(value: string) {
-  const match = value.match(/^(\(?\s*(?:!!!|GENT|M2\/M3|M2|M3|KA|👁|◉|⚑|X|!|\?)\s*\)?)\s+(.+)$/)
+  const match = value.match(/^(\(?\s*(?:BZ1N1|GENT|M2\/M3|M2|M3|GA|KA|F|!!!|👁|◉|⚑|X|!|\?)\s*\)?)\s+(.+)$/)
   return match ? { marker: match[1], text: match[2] } : null
 }
 

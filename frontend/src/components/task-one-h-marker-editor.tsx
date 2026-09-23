@@ -17,7 +17,8 @@ const OPTIONS: Array<{ value: TaskMarker; label: string }> = [
   { value: "CLIENT_URGENT", label: "!!!" },
   { value: "MONITOR", label: "👁" }, { value: "CLOSE", label: "X" },
   { value: "M2", label: "M2" }, { value: "M3", label: "M3" }, { value: "M2_M3", label: "M2/3" },
-  { value: "GENT", label: "GENT" }, { value: "KA", label: "KA" }, { value: "FLAG", label: "⚑" },
+  { value: "GENT", label: "GENT" }, { value: "KA", label: "KA" }, { value: "FLAG", label: "GA" },
+  { value: "F", label: "F" }, { value: "BZ1N1", label: "BZ1N1" },
 ]
 
 export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment, className }: {

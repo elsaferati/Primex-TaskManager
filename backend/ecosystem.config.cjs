@@ -16,6 +16,10 @@ const sharedEnv = {
   REDIS_ENABLED: String(redisEnabled),
   REDIS_URL: redisUrl,
   APP_TIMEZONE: appTimezone,
+  MEETING_REMINDER_SCHEDULER_ENABLED:
+    process.env.MEETING_REMINDER_SCHEDULER_ENABLED ?? "true",
+  MEETING_REMINDER_POLL_SECONDS:
+    process.env.MEETING_REMINDER_POLL_SECONDS ?? "30",
   APP_BUILD_SHA: process.env.APP_BUILD_SHA ?? "unknown",
   WEEKLY_PLANNING_AUDIT_ENABLED: process.env.WEEKLY_PLANNING_AUDIT_ENABLED ?? "true",
   WEEKLY_PLANNING_AUDIT_TIMEZONE: process.env.WEEKLY_PLANNING_AUDIT_TIMEZONE ?? "Europe/Tirane",
@@ -85,6 +89,8 @@ module.exports = {
         STD_FEEDBACK_SYNC_ENABLED: "false",
         // The primary API exclusively owns the shared Outlook calendar sync.
         MS_CALENDAR_SYNC_ENABLED: "false",
+        // The primary API exclusively owns the meeting reminder loop.
+        MEETING_REMINDER_SCHEDULER_ENABLED: "false",
         // The primary API exclusively owns the daily 1H SHTYPI delivery loop.
         TOMORROW_PRINT_REPORT_SCHEDULER_ENABLED: "false",
         TODAY_PRINT_REPORT_SCHEDULER_ENABLED: "false",

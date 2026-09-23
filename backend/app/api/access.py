@@ -53,3 +53,14 @@ def ensure_meeting_editor(user: User, meeting: "Meeting") -> None:
     if meeting.created_by and meeting.created_by == user.id:
         return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+def ensure_meeting_participant_editor(user: User, meeting: "Meeting") -> None:
+    """Allow participant management within the user's operational scope."""
+    if user.role in (UserRole.ADMIN, UserRole.MANAGER):
+        return
+    if meeting.created_by == user.id:
+        return
+    if user.department_id is not None and user.department_id == meeting.department_id:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")

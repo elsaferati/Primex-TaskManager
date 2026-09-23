@@ -221,6 +221,30 @@ jobs:
           }
           Write-Host "Alembic migrations completed at $expectedHead."
 
+      - name: Ensure Redis Notification Service
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $service = Get-Service -Name Memurai -ErrorAction Stop
+          if ($service.Status -ne "Running") {
+            Write-Host "Starting Memurai for realtime browser notifications..."
+            Start-Service -Name Memurai
+          }
+
+          $ready = $false
+          for ($i = 0; $i -lt 15; $i++) {
+            $connection = Test-NetConnection -ComputerName 127.0.0.1 -Port 6379 -WarningAction SilentlyContinue
+            if ($connection.TcpTestSucceeded) {
+              $ready = $true
+              break
+            }
+            Start-Sleep -Seconds 1
+          }
+          if (-not $ready) {
+            throw "Memurai is not accepting Redis connections on 127.0.0.1:6379."
+          }
+          Write-Host "Redis notification service is ready."
+
       - name: Restart Backend Services
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: cmd
@@ -418,7 +442,9 @@ jobs:
               Stop-Process -Id $_ -Force
             }
 
-          $env:REDIS_ENABLED = "false"
+          # The public API terminates browser WebSocket connections and must
+          # consume Redis notification events for realtime alerts and sounds.
+          $env:REDIS_ENABLED = "true"
           $env:REDIS_URL = "redis://127.0.0.1:6379/0"
           $env:APP_TIMEZONE = "Europe/Budapest"
           # The primary API on port 8000 exclusively owns the shared Outlook

@@ -28,6 +28,13 @@ class _ListResult:
     def all(self):
         return list(self.values)
 
+    def scalar_one_or_none(self):
+        if not self.values:
+            return None
+        if len(self.values) != 1:
+            raise AssertionError(f"Expected at most one value, received {len(self.values)}")
+        return self.values[0]
+
 
 class _FakeDb:
     def __init__(self, valid_user_ids: list[uuid.UUID] | None = None):
@@ -123,6 +130,61 @@ class TestMeetingCreation(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(result.paired_internal_meeting)
         self.assertEqual(result.paired_internal_meeting.starts_at, internal_starts_at)
         self.assertEqual(result.paired_internal_meeting.participant_ids, [participant_id])
+
+    async def test_linked_internal_creation_includes_external_and_direct_participants(self) -> None:
+        inherited_user_id = uuid.uuid4()
+        direct_user_id = uuid.uuid4()
+        external = Meeting(
+            id=uuid.uuid4(),
+            title="Customer review",
+            meeting_type="external",
+            department_id=uuid.uuid4(),
+            created_by=uuid.uuid4(),
+        )
+
+        class _LinkedFakeDb(_FakeDb):
+            def __init__(self):
+                super().__init__(valid_user_ids=[inherited_user_id, direct_user_id])
+                self.lookup_count = 0
+
+            async def execute(self, statement):
+                meetings = [value for value in self.added if isinstance(value, Meeting)]
+                if meetings:
+                    return await super().execute(statement)
+                self.lookup_count += 1
+                if self.lookup_count == 1:
+                    return _ListResult([external])
+                if self.lookup_count == 2:
+                    return _ListResult([])
+                if self.lookup_count == 3:
+                    return _ListResult([(external.id, inherited_user_id)])
+                if self.lookup_count == 4:
+                    return _ListResult([
+                        SimpleNamespace(id=inherited_user_id),
+                        SimpleNamespace(id=direct_user_id),
+                    ])
+                raise AssertionError("Unexpected database query")
+
+        payload = MeetingCreate(
+            title="Customer review preparation",
+            meeting_type="internal",
+            department_id=external.department_id,
+            participant_ids=[direct_user_id],
+            paired_external_meeting_id=external.id,
+        )
+        db = _LinkedFakeDb()
+
+        result = await create_meeting(
+            payload=payload,
+            db=db,
+            user=SimpleNamespace(id=uuid.uuid4(), role=UserRole.ADMIN, department_id=None),
+        )
+
+        self.assertEqual(set(result.participant_ids), {inherited_user_id, direct_user_id})
+        self.assertEqual(
+            {value.user_id for value in db.added if isinstance(value, MeetingParticipant)},
+            {inherited_user_id, direct_user_id},
+        )
 
     async def test_global_one_h_conflict_requires_explicit_override(self) -> None:
         department_id = uuid.uuid4()
