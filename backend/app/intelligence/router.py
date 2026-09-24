@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import and_, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, require_admin
 from app.db import get_db
 from app.intelligence.collection import check_source, linkedin_configured
 from app.intelligence.linkedin_adapter import LinkedInCollectionError
-from app.intelligence.models import NewsAnalysis, NewsItem, NewsSource
+from app.intelligence.models import NewsAnalysis, NewsItem, NewsSource, NewsUserState
 from app.intelligence.schemas import IntelligenceStatusOut, NewsFeedOut, NewsSourceCreate, NewsSourceOut, NewsSourceUpdate, SourceCheckOut
 from app.intelligence.website_adapter import source_kind
 from app.models.user import User
@@ -30,18 +32,31 @@ async def intelligence_status(_: User = Depends(require_admin)) -> IntelligenceS
 
 
 @router.get("/items", response_model=NewsFeedOut)
-async def list_items(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> NewsFeedOut:
+async def list_items(
+    read_state: Literal["all", "unread", "read"] = "all",
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> NewsFeedOut:
     source_rows = (await db.execute(select(NewsSource.type, NewsSource.url).where(
         NewsSource.type.in_(["LINKEDIN", "WEBSITE"]),
     ))).all()
     has_live_sources = any(kind == "LINKEDIN" or (kind == "WEBSITE" and source_kind(url)) for kind, url in source_rows)
-    rows = (await db.execute(
-        select(NewsItem, NewsSource, NewsAnalysis)
+    query = (
+        select(NewsItem, NewsSource, NewsAnalysis, NewsUserState.read_at)
         .join(NewsSource, NewsSource.id == NewsItem.source_id)
         .join(NewsAnalysis, NewsAnalysis.news_item_id == NewsItem.id)
+        .outerjoin(NewsUserState, and_(
+            NewsUserState.news_item_id == NewsItem.id,
+            NewsUserState.user_id == user.id,
+        ))
         .order_by(NewsItem.published_at.desc().nullslast(), NewsItem.created_at.desc())
         .limit(200)
-    )).all()
+    )
+    if read_state == "unread":
+        query = query.where(NewsUserState.read_at.is_(None))
+    elif read_state == "read":
+        query = query.where(NewsUserState.read_at.is_not(None))
+    rows = (await db.execute(query)).all()
     return NewsFeedOut(hasLiveSources=has_live_sources, items=[{
         "id": str(item.id), "sourceId": str(source.id), "sourceName": source.name,
         "sourceType": source.type, "externalId": item.external_id,
@@ -49,6 +64,7 @@ async def list_items(db: AsyncSession = Depends(get_db), _: User = Depends(get_c
         "publishedAt": (item.published_at or item.created_at).isoformat(),
         "imageUrl": item.image_url, "contentHash": item.content_hash,
         "createdAt": item.created_at.isoformat(), "location": None,
+        "readAt": read_at.isoformat() if read_at else None,
         "priority": "HIGH" if source.priority == "HIGH" else "NORMAL",
         "analysis": {
             "summary": analysis.summary, "category": analysis.category,
@@ -58,7 +74,40 @@ async def list_items(db: AsyncSession = Depends(get_db), _: User = Depends(get_c
             "fundingAmount": analysis.funding_amount, "eligibility": analysis.eligibility,
             "opportunityType": analysis.opportunity_type, "tags": analysis.tags,
         },
-    } for item, source, analysis in rows])
+    } for item, source, analysis, read_at in rows])
+
+
+@router.put("/items/{item_id}/read", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_item_read(
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    if await db.get(NewsItem, item_id) is None:
+        raise HTTPException(status_code=404, detail="Update not found")
+    statement = pg_insert(NewsUserState).values(
+        user_id=user.id, news_item_id=item_id, read_at=func.now(),
+    ).on_conflict_do_update(
+        index_elements=[NewsUserState.user_id, NewsUserState.news_item_id],
+        set_={"read_at": func.now()},
+    )
+    await db.execute(statement)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/items/{item_id}/read", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_item_unread(
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    await db.execute(update(NewsUserState).where(
+        NewsUserState.user_id == user.id,
+        NewsUserState.news_item_id == item_id,
+    ).values(read_at=None))
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/sources", response_model=list[NewsSourceOut])

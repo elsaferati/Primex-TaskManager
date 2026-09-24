@@ -120,6 +120,7 @@ class FeedItemOut(BaseModel):
     imageUrl: str | None
     contentHash: str | None
     createdAt: str
+    readAt: str | None
     location: str | None
     priority: Literal["HIGH", "NORMAL"]
     analysis: FeedAnalysisOut

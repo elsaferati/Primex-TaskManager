@@ -30,6 +30,7 @@ export interface NewsEntry {
   imageUrl: string | null
   contentHash: string | null
   createdAt: string
+  readAt?: string | null
   location: string | null
   priority: NewsPriority
   analysis: NewsAnalysis

@@ -20,4 +20,6 @@ The LinkedIn connector discovers provider-accessible public posts. It does not p
 
 Four official website lists are collected directly on the server: KIESA News, KIESA Announcements, European Commission Digital Funding, and European Commission Digital News. The `website_adapter.py` connector accepts only these exact listing URLs and follows article links on the same official host. It reads the first page of each list hourly, imports recent articles and still-open funding calls, and stores direct item links. New items are analyzed with the existing server-side OpenAI configuration. Other Website, RSS, Facebook, API, and Other source URLs remain configuration-only until their connectors are added.
 
+Reading status uses the existing `intelligence_user_states.read_at` column per user and item. The feed supports `read_state=unread|read|all`; opening a direct article or marking it read updates the status through the authenticated API. Marking an item unread clears only `read_at`, leaving any bookmark state intact.
+
 Provider API references: [LinkedIn data collection](https://brightdata.com/solutions/data-collection/linkedin), [async trigger](https://docs.brightdata.com/api-reference/web-scraper-api/asynchronous-requests), [snapshot progress](https://docs.brightdata.com/api-reference/web-scraper-api/management-apis/monitor-progress).

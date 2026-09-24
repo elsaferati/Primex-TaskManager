@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { toast } from "sonner"
 import { AlertCircle, ArrowUpRight, Bookmark, CalendarDays, ChevronRight, Filter, RefreshCw, Search, SlidersHorizontal, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -21,6 +22,7 @@ const tabs: { value: IntelligenceView; label: string; href: string }[] = [
   { value: "saved", label: "Saved", href: "/intelligence/saved" },
 ]
 const SAVED_PREFIX = "primex-intelligence-saved:"
+const DEMO_READ_PREFIX = "primex-intelligence-demo-read:"
 const opportunityCategories = new Set(["GRANT", "TENDER", "BUSINESS", "PARTNERSHIP"])
 
 function matchFilter(item: NewsEntry, filter: NewsFilter) {
@@ -42,8 +44,10 @@ function FeedSkeleton() {
   return <div aria-label="Loading intelligence updates" role="status" className="space-y-3">{[0, 1, 2].map((index) => <div key={index} className="animate-pulse rounded-xl border border-[#e8eae7] bg-white p-6"><div className="h-3 w-24 rounded bg-[#e9eee9]"/><div className="mt-5 h-5 w-2/3 rounded bg-[#e9eee9]"/><div className="mt-3 h-3 w-full rounded bg-[#f0f2f0]"/><div className="mt-2 h-3 w-4/5 rounded bg-[#f0f2f0]"/><div className="mt-7 h-3 w-1/3 rounded bg-[#f0f2f0]"/></div>)}</div>
 }
 
-function FeedEmptyState({ saved, liveEmpty, filter, onReset }: { saved: boolean; liveEmpty: boolean; filter: NewsFilter; onReset: () => void }) {
-  return <div className="rounded-xl border border-dashed border-[#dce5dc] bg-white px-6 py-12 text-center"><SlidersHorizontal className="mx-auto size-6 text-[#a1b1a3]" /><h3 className="mt-3 font-semibold">{saved ? "Nothing saved yet." : liveEmpty ? "No posts collected yet." : "No relevant updates found."}</h3><p className="mt-1 text-sm text-[#839087]">{saved ? "Bookmark an update to keep it here." : liveEmpty ? "Posts will appear after a connected source completes its first check." : "Try adjusting your filters or search."}</p>{!liveEmpty && filter !== "All" ? <Button variant="ghost" size="sm" className="mt-4 text-[#4d7457]" onClick={onReset}>Show all updates</Button> : null}</div>
+function FeedEmptyState({ view, readMode, narrowed, onReset }: { view: IntelligenceView; readMode: "unread" | "read"; narrowed: boolean; onReset: () => void }) {
+  const title = narrowed ? "No matching updates found." : view === "saved" ? "Nothing saved yet." : readMode === "read" ? "Nothing read yet." : "No unread updates."
+  const description = narrowed ? "Try adjusting your filters or search." : view === "saved" ? "Bookmark an update to keep it here." : readMode === "read" ? "Updates you open or mark as read will appear here." : "New updates will appear here after the next source check."
+  return <div className="rounded-xl border border-dashed border-[#dce5dc] bg-white px-6 py-12 text-center"><SlidersHorizontal className="mx-auto size-6 text-[#a1b1a3]" /><h3 className="mt-3 font-semibold">{title}</h3><p className="mt-1 text-sm text-[#839087]">{description}</p>{narrowed ? <Button variant="ghost" size="sm" className="mt-4 text-[#4d7457]" onClick={onReset}>Clear filters</Button> : null}</div>
 }
 
 export function IntelligencePage({ view }: { view: IntelligenceView }) {
@@ -51,7 +55,7 @@ export function IntelligencePage({ view }: { view: IntelligenceView }) {
   return <IntelligenceWorkspace view={view} user={user} apiFetch={apiFetch} />
 }
 
-export function IntelligenceWorkspace({ view, user, apiFetch }: { view: IntelligenceView; user: Pick<User, "id" | "role"> | null; apiFetch: (path: string) => Promise<Response> }) {
+export function IntelligenceWorkspace({ view, user, apiFetch }: { view: IntelligenceView; user: Pick<User, "id" | "role"> | null; apiFetch: (path: string, init?: RequestInit) => Promise<Response> }) {
   const [items, setItems] = React.useState<NewsEntry[]>([])
   const [brief, setBrief] = React.useState<DailyBrief | null>(null)
   const [loading, setLoading] = React.useState(true)
@@ -60,6 +64,8 @@ export function IntelligenceWorkspace({ view, user, apiFetch }: { view: Intellig
   const [filter, setFilter] = React.useState<NewsFilter>(view === "overview" ? "For You" : "All")
   const [query, setQuery] = React.useState("")
   const [savedIds, setSavedIds] = React.useState<string[]>([])
+  const [demoReadIds, setDemoReadIds] = React.useState<string[]>([])
+  const [readMode, setReadMode] = React.useState<"unread" | "read">("unread")
   const searchRef = React.useRef<HTMLInputElement>(null)
   const filterRef = React.useRef<HTMLDivElement>(null)
 
@@ -67,18 +73,19 @@ export function IntelligenceWorkspace({ view, user, apiFetch }: { view: Intellig
     setLoading(true)
     setError(false)
     try {
-      const feed = await intelligenceFeedService.getFeed(apiFetch)
+      const feed = await intelligenceFeedService.getFeed(apiFetch, view === "saved" ? "all" : readMode)
       setItems(feed.items)
       setBrief(feed.brief)
       setIsDemo(feed.isDemo)
     } catch { setError(true) }
     finally { setLoading(false) }
-  }, [apiFetch])
+  }, [apiFetch, readMode, view])
   React.useEffect(() => { void loadFeed() }, [loadFeed])
 
   React.useEffect(() => {
     if (!user?.id) return
     try { setSavedIds(JSON.parse(localStorage.getItem(`${SAVED_PREFIX}${user.id}`) || "[]")) } catch { setSavedIds([]) }
+    try { setDemoReadIds(JSON.parse(localStorage.getItem(`${DEMO_READ_PREFIX}${user.id}`) || "[]")) } catch { setDemoReadIds([]) }
   }, [user?.id])
 
   const toggleSaved = (id: string) => {
@@ -89,16 +96,43 @@ export function IntelligenceWorkspace({ view, user, apiFetch }: { view: Intellig
     })
   }
 
+  const setRead = (id: string, read: boolean) => {
+    if (!user?.id) return
+    if (isDemo) {
+      setDemoReadIds((current) => {
+        const next = read ? [...new Set([...current, id])] : current.filter((value) => value !== id)
+        localStorage.setItem(`${DEMO_READ_PREFIX}${user.id}`, JSON.stringify(next))
+        return next
+      })
+      return
+    }
+    const previous = items.find((item) => item.id === id)?.readAt || null
+    setItems((current) => current.map((item) => item.id === id ? { ...item, readAt: read ? new Date().toISOString() : null } : item))
+    void (async () => {
+      try {
+        const response = await apiFetch(`/intelligence/items/${id}/read`, { method: read ? "PUT" : "DELETE" })
+        if (!response.ok) throw new Error("Could not update reading status.")
+      } catch {
+        setItems((current) => current.map((item) => item.id === id ? { ...item, readAt: previous } : item))
+        toast.error("Could not update reading status. Please try again.")
+      }
+    })()
+  }
+
   const visibleItems = React.useMemo(() => {
     const needle = query.trim().toLowerCase()
     return items.filter((item) => {
       if (view === "saved" && !savedIds.includes(item.id)) return false
+      if (view !== "saved") {
+        const isRead = isDemo ? demoReadIds.includes(item.id) : Boolean(item.readAt)
+        if (readMode === "read" ? !isRead : isRead) return false
+      }
       if (view === "opportunities" && !opportunityCategories.has(item.analysis.category)) return false
       if (!matchFilter(item, filter)) return false
       if (!needle) return true
       return [item.title, item.analysis.summary, item.sourceName, ...item.analysis.tags].some((value) => value.toLowerCase().includes(needle))
     })
-  }, [items, view, savedIds, filter, query])
+  }, [items, view, savedIds, demoReadIds, isDemo, readMode, filter, query])
 
   const opportunities = items.filter((item) => opportunityCategories.has(item.analysis.category)).length
   const upcoming = items.filter((item) => item.analysis.deadline).sort((a, b) => (a.analysis.deadline || "").localeCompare(b.analysis.deadline || "")).slice(0, 3)
@@ -117,15 +151,16 @@ export function IntelligenceWorkspace({ view, user, apiFetch }: { view: Intellig
 
       <div className="mt-8 grid gap-9 xl:grid-cols-[minmax(0,1fr)_280px] xl:gap-10">
         <section id="intelligence-feed" className="min-w-0">
-          <div className="flex flex-wrap items-end justify-between gap-3"><div><div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#83958a]"><span className="size-1.5 rounded-full bg-[#8ab397]" /> Curated feed</div><h2 className="mt-1 text-xl font-semibold tracking-tight">{view === "saved" ? "Your saved updates" : view === "opportunities" ? "Opportunity watch" : "Latest signals"}</h2></div><span className="text-xs text-[#8c978e]">{loading ? "Loading…" : `${visibleItems.length} ${visibleItems.length === 1 ? "update" : "updates"}`}</span></div>
+          <div className="flex flex-wrap items-end justify-between gap-3"><div><div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#83958a]"><span className="size-1.5 rounded-full bg-[#8ab397]" /> Curated feed</div><h2 className="mt-1 text-xl font-semibold tracking-tight">{view === "saved" ? "Your saved updates" : readMode === "read" ? "Read updates" : view === "opportunities" ? "Opportunity watch" : "Latest signals"}</h2></div><span className="text-xs text-[#8c978e]">{loading ? "Loading…" : `${visibleItems.length} ${visibleItems.length === 1 ? "update" : "updates"}`}</span></div>
+          {view !== "saved" ? <div role="group" aria-label="Reading status" className="mt-4 inline-flex rounded-lg bg-[#edf1ec] p-0.5 text-xs font-medium">{(["unread", "read"] as const).map((mode) => <button key={mode} type="button" aria-pressed={readMode === mode} onClick={() => setReadMode(mode)} className={cn("rounded-md px-3.5 py-1.5 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5e806c]", readMode === mode ? "bg-white text-[#2c4533] shadow-sm" : "text-[#76857a] hover:text-[#2c4533]")}>{mode === "unread" ? "Unread" : "Read"}</button>)}</div> : null}
           <div ref={filterRef} className="mt-5"><NewsFilters value={filter} onChange={setFilter} /></div>
           <div className="relative mt-4"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#9ca9a0]"/><Input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search topics, sources, or keywords" aria-label="Search intelligence updates" className="h-10 border-[#e4eae3] bg-white pl-9 shadow-none focus-visible:ring-[#acc7b1]/40" /></div>
-          <div className="mt-5 space-y-3">{loading ? <FeedSkeleton /> : error ? <div role="alert" className="rounded-xl border border-[#e8eae7] bg-white px-6 py-10 text-center"><AlertCircle className="mx-auto size-6 text-[#89998b]" /><h3 className="mt-3 font-semibold">Updates could not be loaded.</h3><p className="mt-1 text-sm text-[#7f8a80]">Please refresh the page and try again.</p></div> : visibleItems.length ? visibleItems.map((item) => <NewsCard key={item.id} item={item} saved={savedIds.includes(item.id)} onToggleSaved={toggleSaved} />) : <FeedEmptyState saved={view === "saved" && savedIds.length === 0} liveEmpty={!isDemo && items.length === 0} filter={filter} onReset={() => { setFilter("All"); setQuery("") }} />}</div>
+          <div className="mt-5 space-y-3">{loading ? <FeedSkeleton /> : error ? <div role="alert" className="rounded-xl border border-[#e8eae7] bg-white px-6 py-10 text-center"><AlertCircle className="mx-auto size-6 text-[#89998b]" /><h3 className="mt-3 font-semibold">Updates could not be loaded.</h3><p className="mt-1 text-sm text-[#7f8a80]">Please refresh the page and try again.</p></div> : visibleItems.length ? visibleItems.map((item) => <NewsCard key={item.id} item={item} saved={savedIds.includes(item.id)} read={isDemo ? demoReadIds.includes(item.id) : Boolean(item.readAt)} onToggleSaved={toggleSaved} onSetRead={setRead} />) : <FeedEmptyState view={view} readMode={readMode} narrowed={Boolean(query.trim()) || filter !== "All" && !(view === "overview" && filter === "For You")} onReset={() => { setFilter("All"); setQuery("") }} />}</div>
         </section>
         <aside className="space-y-6 xl:pt-1" aria-label="Intelligence highlights">
           <div className="rounded-xl border border-[#e8ece7] bg-white p-5"><div className="flex items-center gap-2 text-[#5e8067]"><Sparkles className="size-4" /><span className="text-[11px] font-semibold uppercase tracking-[0.12em]">At a glance</span></div><div className="mt-5 grid grid-cols-2 gap-4"><div><div className="text-2xl font-semibold tracking-tight">{items.filter((item) => item.priority === "HIGH").length}</div><div className="mt-1 text-xs text-[#89958a]">High priority</div></div><div><div className="text-2xl font-semibold tracking-tight">{opportunities}</div><div className="mt-1 text-xs text-[#89958a]">Opportunities</div></div></div><p className="mt-5 border-t border-[#eef1ed] pt-4 text-xs leading-5 text-[#91a096]">{isDemo ? "A preview of how your intelligence workspace will summarize incoming sources." : "Based on the posts collected from your sources."}</p></div>
           {upcoming.length ? <div className="px-1"><div className="flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-semibold"><CalendarDays className="size-4 text-[#7f9b85]" /> Dates to watch</h3>{isDemo ? <span className="text-[11px] text-[#a0aaa2]">Sample</span> : null}</div><div className="mt-4 space-y-0">{upcoming.map((item) => <div key={item.id} className="flex items-start gap-3 border-b border-[#e8ece7] py-3"><span className="min-w-11 text-xs font-semibold text-[#5d7964]">{new Date(`${item.analysis.deadline}T12:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</span><div className="min-w-0"><div className="text-xs font-medium leading-5 text-[#36473b]">{item.title}</div><div className="mt-0.5 text-[11px] text-[#9aa69c]">{item.sourceName}</div></div></div>)}</div></div> : null}
-          <div className="rounded-xl bg-[#eff3ee] p-5"><h3 className="text-sm font-semibold">Build your source list</h3><p className="mt-1 text-xs leading-5 text-[#728176]">Admins can add LinkedIn profiles and company pages to monitor public posts.</p>{user?.role === "ADMIN" ? <Link href="/intelligence/sources" className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-[#3e6950] hover:underline">Manage sources <ArrowUpRight className="size-3.5" /></Link> : <span className="mt-4 inline-flex items-center gap-1 text-xs text-[#819085]">Managed by admins <ChevronRight className="size-3.5" /></span>}</div>
+          <div className="rounded-xl bg-[#eff3ee] p-5"><h3 className="text-sm font-semibold">Build your source list</h3><p className="mt-1 text-xs leading-5 text-[#728176]">Admins can manage connected LinkedIn accounts and supported official news pages.</p>{user?.role === "ADMIN" ? <Link href="/intelligence/sources" className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-[#3e6950] hover:underline">Manage sources <ArrowUpRight className="size-3.5" /></Link> : <span className="mt-4 inline-flex items-center gap-1 text-xs text-[#819085]">Managed by admins <ChevronRight className="size-3.5" /></span>}</div>
         </aside>
       </div>
     </div>
