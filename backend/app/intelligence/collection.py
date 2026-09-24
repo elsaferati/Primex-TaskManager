@@ -18,10 +18,17 @@ from app.intelligence.linkedin_adapter import BrightDataLinkedInAdapter, LinkedI
 from app.intelligence.models import NewsAnalysis, NewsItem, NewsSource
 
 logger = logging.getLogger(__name__)
+INITIAL_LOOKBACK_DAYS = 60
 
 
 def linkedin_configured() -> bool:
     return bool(settings.BRIGHTDATA_API_TOKEN)
+
+
+def collection_start_date(last_checked_at: datetime | None, now: datetime) -> str:
+    if last_checked_at is None:
+        return (now.date() - timedelta(days=INITIAL_LOOKBACK_DAYS)).isoformat()
+    return (last_checked_at.date() - timedelta(days=1)).isoformat()
 
 
 async def check_source(db: AsyncSession, source_id: uuid.UUID, *, force: bool = False) -> str:
@@ -90,8 +97,11 @@ async def check_source(db: AsyncSession, source_id: uuid.UUID, *, force: bool = 
         minimum_interval = 5 if force else source.fetch_interval_minutes
         if source.last_started_at and source.last_started_at > now - timedelta(minutes=minimum_interval):
             return "pending"
-        start_date = (source.last_checked_at or now - timedelta(days=1)).date() - timedelta(days=1)
-        snapshot = await adapter.trigger(source, start_date=start_date.isoformat(), end_date=now.date().isoformat())
+        snapshot = await adapter.trigger(
+            source,
+            start_date=collection_start_date(source.last_checked_at, now),
+            end_date=now.date().isoformat(),
+        )
         source.pending_snapshot_id = snapshot
         source.last_started_at = now
         source.last_error = None

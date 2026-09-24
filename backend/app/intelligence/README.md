@@ -12,6 +12,8 @@ Optional server configuration:
 - `BRIGHTDATA_LINKEDIN_POSTS_DATASET_ID`: defaults to Bright Data's LinkedIn Posts dataset ID used by this connector.
 - `INTELLIGENCE_AI_MODEL`: defaults to `gpt-5.4-nano`.
 
+The first LinkedIn check looks back 60 days. Later checks overlap the previous check by one day so delayed posts can still be collected. Stored posts are deduplicated by their direct URL and provider ID.
+
 Admin users can start a check from **Intelligence → Sources**. A new active LinkedIn source starts a first check automatically when the provider token is configured. Results are asynchronous and normally appear after a later Beat tick. **Refresh feed** reloads posts already stored in the database; it does not start a new provider request.
 
 This connector discovers provider-accessible public posts. It does not promise complete coverage of every LinkedIn post, and it does not monitor likes, comments, or private activity. Website, RSS, Facebook, API, and Other sources remain configuration-only.

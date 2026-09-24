@@ -1,9 +1,11 @@
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import httpx
 import pytest
 
+from app.intelligence.collection import collection_start_date
 from app.intelligence.linkedin_adapter import BrightDataLinkedInAdapter, LinkedInCollectionError, parse_posts
 from app.intelligence.schemas import NewsSourceCreate
 
@@ -58,3 +60,9 @@ def test_provider_trigger_uses_profile_discovery_and_snapshot_flow():
 def test_provider_rejects_results_without_post_links():
     with pytest.raises(LinkedInCollectionError):
         parse_posts([{"url": "https://www.linkedin.com/in/example/"}], SimpleNamespace(name="Example"))
+
+
+def test_first_check_covers_recent_posts_then_uses_incremental_window():
+    now = datetime(2026, 9, 24, 9, 0, tzinfo=timezone.utc)
+    assert collection_start_date(None, now) == "2026-07-26"
+    assert collection_start_date(datetime(2026, 9, 20, tzinfo=timezone.utc), now) == "2026-09-19"
