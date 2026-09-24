@@ -150,7 +150,9 @@ export function IntelligenceWorkspace({ view, user, apiFetch }: { view: Intellig
   }, [items, view, savedIds, demoReadIds, isDemo, readMode, filter, query])
 
   const opportunities = items.filter((item) => opportunityCategories.has(item.analysis.category)).length
-  const upcoming = items.filter((item) => item.analysis.deadline).sort((a, b) => (a.analysis.deadline || "").localeCompare(b.analysis.deadline || "")).slice(0, 3)
+  const today = new Date()
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()
+  const upcoming = items.filter((item) => item.analysis.deadline && new Date(`${item.analysis.deadline}T12:00:00`).getTime() >= todayStart).sort((a, b) => (a.analysis.deadline || "").localeCompare(b.analysis.deadline || "")).slice(0, 3)
   const pageHeading = view === "overview" ? "Intelligence" : tabs.find((tab) => tab.value === view)?.label || "Intelligence"
 
   return <div className="-m-4 min-h-[calc(100vh-5rem)] bg-[#fafbf9] px-4 pb-16 pt-6 text-[#1d2b23] sm:px-7 lg:px-10 lg:pt-9">
