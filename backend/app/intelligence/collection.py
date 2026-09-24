@@ -99,7 +99,7 @@ async def check_source(db: AsyncSession, source_id: uuid.UUID, *, force: bool = 
             return "pending"
         snapshot = await adapter.trigger(
             source,
-            start_date=collection_start_date(source.last_checked_at, now),
+            start_date=collection_start_date(None if force else source.last_checked_at, now),
             end_date=now.date().isoformat(),
         )
         source.pending_snapshot_id = snapshot

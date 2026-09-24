@@ -12,7 +12,7 @@ Optional server configuration:
 - `BRIGHTDATA_LINKEDIN_POSTS_DATASET_ID`: defaults to Bright Data's LinkedIn Posts dataset ID used by this connector.
 - `INTELLIGENCE_AI_MODEL`: defaults to `gpt-5.4-nano`.
 
-The first LinkedIn check looks back 60 days. Later checks overlap the previous check by one day so delayed posts can still be collected. Stored posts are deduplicated by their direct URL and provider ID.
+The first LinkedIn check looks back 60 days. Scheduled checks overlap the previous check by one day so delayed posts can still be collected. An admin's **Check last 60 days** action reruns the longer window to backfill posts. Stored posts are deduplicated by their direct URL and provider ID. For personal profiles, discovery results are filtered by the post author's profile ID; the provider may also return posts by other people. Locale-specific LinkedIn post URLs are normalized to direct `www.linkedin.com/posts/...` links.
 
 Admin users can start a check from **Intelligence → Sources**. A new active LinkedIn source starts a first check automatically when the provider token is configured. Results are asynchronous and normally appear after a later Beat tick. **Refresh feed** reloads posts already stored in the database; it does not start a new provider request.
 

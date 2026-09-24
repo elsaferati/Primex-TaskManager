@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 
@@ -24,11 +24,29 @@ def _post_url(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     parsed = urlparse(value)
-    if parsed.scheme != "https" or parsed.hostname not in {"linkedin.com", "www.linkedin.com"}:
+    if parsed.scheme != "https" or not parsed.hostname or not (
+        parsed.hostname == "linkedin.com" or parsed.hostname.endswith(".linkedin.com")
+    ):
         return None
     if not (parsed.path.startswith("/posts/") or parsed.path.startswith("/feed/update/")):
         return None
-    return value[:2000]
+    return urlunparse(("https", "www.linkedin.com", parsed.path, "", "", ""))[:2000]
+
+
+def _belongs_to_source(record: dict, source: NewsSource) -> bool:
+    source_path = urlparse(getattr(source, "url", "")).path.strip("/").split("/")
+    if len(source_path) < 2 or source_path[0] != "in":
+        return True
+    profile_id = source_path[1].casefold()
+    author_id = record.get("user_id")
+    if isinstance(author_id, str) and author_id:
+        return author_id.casefold() == profile_id
+    author_url = record.get("use_url") or record.get("user_url")
+    if isinstance(author_url, str):
+        author_path = urlparse(author_url).path.strip("/").split("/")
+        if len(author_path) >= 2 and author_path[0] == "in":
+            return author_path[1].casefold() == profile_id
+    return False
 
 
 def _published(value: object) -> datetime | None:
@@ -52,7 +70,7 @@ def parse_posts(records: object, source: NewsSource) -> list[CollectedNewsItem]:
         if not isinstance(record, dict) or record.get("error"):
             continue
         url = _post_url(record.get("url") or record.get("post_url"))
-        if not url:
+        if not url or not _belongs_to_source(record, source):
             continue
         body = record.get("post_text") or record.get("text") or record.get("headline") or ""
         body = " ".join(body.split()) if isinstance(body, str) else ""
