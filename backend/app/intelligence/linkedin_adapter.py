@@ -81,13 +81,24 @@ class BrightDataLinkedInAdapter:
             headers={"Authorization": f"Bearer {self.token}", "Accept": "application/json"},
         )
 
-    @staticmethod
-    def _json(response: httpx.Response) -> object:
+    def _json(self, response: httpx.Response) -> object:
         try:
             response.raise_for_status()
             return response.json()
-        except (httpx.HTTPStatusError, ValueError) as exc:
-            raise LinkedInCollectionError(f"Provider request failed (HTTP {response.status_code}).") from exc
+        except httpx.HTTPStatusError as exc:
+            detail = ""
+            try:
+                payload = response.json()
+                if isinstance(payload, dict):
+                    value = payload.get("error") or payload.get("message")
+                    if isinstance(value, str):
+                        detail = value.replace(self.token, "[redacted]")[:250]
+            except ValueError:
+                pass
+            suffix = f" {detail}" if detail else ""
+            raise LinkedInCollectionError(f"Provider request failed (HTTP {response.status_code}).{suffix}") from exc
+        except ValueError as exc:
+            raise LinkedInCollectionError("Provider returned invalid JSON.") from exc
 
     async def trigger(self, source: NewsSource, *, start_date: str, end_date: str) -> str:
         discovery = "company_url" if urlparse(source.url).path.startswith("/company/") else "profile_url"

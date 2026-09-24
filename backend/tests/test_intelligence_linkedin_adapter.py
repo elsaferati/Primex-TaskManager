@@ -62,6 +62,17 @@ def test_provider_rejects_results_without_post_links():
         parse_posts([{"url": "https://www.linkedin.com/in/example/"}], SimpleNamespace(name="Example"))
 
 
+def test_provider_error_keeps_actionable_message_without_echoing_token():
+    adapter = BrightDataLinkedInAdapter("private-token", "test-dataset")
+    response = httpx.Response(
+        400,
+        json={"error": "Invalid input for private-token"},
+        request=httpx.Request("POST", "https://api.brightdata.com/datasets/v3/trigger"),
+    )
+    with pytest.raises(LinkedInCollectionError, match=r"HTTP 400.*Invalid input for \[redacted\]"):
+        adapter._json(response)
+
+
 def test_first_check_covers_recent_posts_then_uses_incremental_window():
     now = datetime(2026, 9, 24, 9, 0, tzinfo=timezone.utc)
     assert collection_start_date(None, now) == "2026-07-26"
