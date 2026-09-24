@@ -22,7 +22,8 @@ export interface NewsEntry {
   sourceName: string
   sourceType: string
   externalId: string | null
-  url: string
+  // The original article/call URL. Demo-only illustrative entries may have none.
+  url: string | null
   title: string
   originalText: string | null
   publishedAt: string
