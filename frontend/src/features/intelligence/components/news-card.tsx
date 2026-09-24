@@ -22,8 +22,8 @@ export function NewsCard({ item, saved, onToggleSaved }: { item: NewsEntry; save
         </div>
         <button type="button" onClick={() => onToggleSaved(item.id)} aria-label={saved ? `Remove ${item.title} from saved` : `Save ${item.title}`} aria-pressed={saved} title={saved ? "Remove from saved" : "Save item"} className={cn("-mr-2 -mt-2 rounded-lg p-2 text-[#87918b] transition-colors hover:bg-[#f3f5f2] hover:text-[#293e32] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5e806c]", saved && "text-[#4d715d]")}><Bookmark className={cn("size-[18px]", saved && "fill-current")} /></button>
       </div>
-      <h3 className="mt-2 max-w-3xl text-[17px] font-semibold leading-snug tracking-[-0.02em] text-[#1e2a25] sm:text-[18px]">{item.title}</h3>
-      <p className="mt-2 max-w-3xl text-sm leading-6 text-[#66716a]">{analysis.summary}</p>
+      <h3 className="mt-2 line-clamp-2 max-w-3xl text-[17px] font-semibold leading-snug tracking-[-0.02em] text-[#1e2a25] sm:text-[18px]" title={item.title}>{item.title}</h3>
+      <p className="mt-2 line-clamp-3 max-w-3xl text-sm leading-6 text-[#66716a]">{analysis.summary}</p>
       {isOpportunity && (analysis.fundingAmount || analysis.deadline || analysis.eligibility || item.location) ? (
         <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 rounded-lg bg-[#f6f8f5] px-3.5 py-3 text-xs text-[#55635a]">
           {analysis.fundingAmount ? <span className="flex items-center gap-1.5"><CircleDollarSign className="size-3.5 text-[#789180]" /><strong className="font-medium text-[#2d3c32]">Funding</strong> {analysis.fundingAmount}</span> : null}
