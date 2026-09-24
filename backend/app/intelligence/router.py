@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import smtplib
 import uuid
 from datetime import datetime, timezone
 from typing import Literal
@@ -119,7 +120,13 @@ async def email_item(
     except Exception as exc:
         await db.rollback()
         logger.exception("Could not email Intelligence update %s", item_id)
-        raise HTTPException(status_code=502, detail="Could not send this update. Please try again.") from exc
+        if isinstance(exc, smtplib.SMTPAuthenticationError):
+            detail = "Email account authentication failed. Ask an admin to check the SMTP credentials."
+        elif isinstance(exc, (TimeoutError, ConnectionError, OSError)):
+            detail = "The SMTP server could not be reached. Please try again later."
+        else:
+            detail = f"Email delivery failed ({type(exc).__name__}). Please try again."
+        raise HTTPException(status_code=502, detail=detail) from exc
     user_state.emailed_at = datetime.now(timezone.utc)
     await db.commit()
     return EmailShareOut(recipient=INTELLIGENCE_RECIPIENT, sentAt=user_state.emailed_at, alreadySent=False)

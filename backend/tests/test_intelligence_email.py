@@ -1,8 +1,12 @@
 import asyncio
+import smtplib
 import uuid
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
+import pytest
+from fastapi import HTTPException
 
 from app.intelligence.email_service import INTELLIGENCE_RECIPIENT, news_email_content, send_news_email
 from app.intelligence.priority import news_priority
@@ -80,3 +84,24 @@ def test_repeated_click_does_not_send_the_same_item_again(monkeypatch):
     assert first.sentAt == second.sentAt
     send.assert_awaited_once_with(item, source, analysis)
     db.commit.assert_awaited_once()
+
+
+def test_smtp_auth_failure_is_reported_without_exposing_credentials(monkeypatch):
+    item, source, analysis = _news()
+    state = SimpleNamespace(emailed_at=None)
+    monkeypatch.setattr("app.intelligence.router.send_news_email", AsyncMock(side_effect=smtplib.SMTPAuthenticationError(535, b"Secret server response")))
+    db = SimpleNamespace(
+        execute=AsyncMock(side_effect=[
+            SimpleNamespace(one_or_none=lambda: (item, source, analysis)),
+            None,
+            SimpleNamespace(scalar_one=lambda: state),
+        ]),
+        commit=AsyncMock(), rollback=AsyncMock(),
+    )
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(email_item(uuid.uuid4(), db, SimpleNamespace(id=uuid.uuid4())))
+    assert error.value.status_code == 502
+    assert "authentication failed" in error.value.detail
+    assert "Secret server response" not in error.value.detail
+    db.rollback.assert_awaited_once()
+    db.commit.assert_not_awaited()
