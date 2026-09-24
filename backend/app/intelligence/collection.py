@@ -16,6 +16,7 @@ from app.db import SessionLocal
 from app.intelligence.ai_service import analyze_news_item
 from app.intelligence.linkedin_adapter import BrightDataLinkedInAdapter, LinkedInCollectionError
 from app.intelligence.models import NewsAnalysis, NewsItem, NewsSource
+from app.intelligence.rss_adapter import RSSAdapter, RSSCollectionError, rss_url_is_supported
 from app.intelligence.services import CollectedNewsItem
 from app.intelligence.website_adapter import OfficialWebsiteAdapter, WebsiteCollectionError, WebsiteEntry, source_kind
 
@@ -96,13 +97,29 @@ async def _check_website_source(db: AsyncSession, source: NewsSource, now: datet
     return "completed"
 
 
+async def _check_rss_source(db: AsyncSession, source: NewsSource, now: datetime, force: bool) -> str:
+    minimum_interval = 5 if force else source.fetch_interval_minutes
+    if source.last_started_at and source.last_started_at > now - timedelta(minutes=minimum_interval):
+        return "pending"
+    cutoff = now - timedelta(days=60)
+    for post in await RSSAdapter(source.url).collect():
+        if post.published_at and post.published_at < cutoff:
+            continue
+        await _store_post(db, source, post)
+    source.last_started_at = now
+    source.last_checked_at = now
+    source.last_error = None
+    await db.commit()
+    return "completed"
+
+
 async def check_source(db: AsyncSession, source_id: uuid.UUID, *, force: bool = False) -> str:
     source = (await db.execute(
         select(NewsSource).where(NewsSource.id == source_id).with_for_update(skip_locked=True)
     )).scalar_one_or_none()
     if source is None:
         return "pending"
-    if source.type not in {"LINKEDIN", "WEBSITE"} or (source.type == "WEBSITE" and not source_kind(source.url)):
+    if source.type not in {"LINKEDIN", "WEBSITE", "RSS"} or (source.type == "WEBSITE" and not source_kind(source.url)) or (source.type == "RSS" and not rss_url_is_supported(source.url)):
         raise LinkedInCollectionError("No collector is available for this source URL yet.")
     if source.status != "ACTIVE":
         raise LinkedInCollectionError("Activate this source before checking it.")
@@ -111,6 +128,8 @@ async def check_source(db: AsyncSession, source_id: uuid.UUID, *, force: bool = 
     try:
         if source.type == "WEBSITE":
             return await _check_website_source(db, source, now, force)
+        if source.type == "RSS":
+            return await _check_rss_source(db, source, now, force)
         if not settings.BRIGHTDATA_API_TOKEN:
             return "unavailable"
         adapter = BrightDataLinkedInAdapter(settings.BRIGHTDATA_API_TOKEN, settings.BRIGHTDATA_LINKEDIN_POSTS_DATASET_ID)
@@ -153,7 +172,7 @@ async def check_source(db: AsyncSession, source_id: uuid.UUID, *, force: bool = 
         source.last_error = None
         await db.commit()
         return "started"
-    except (LinkedInCollectionError, WebsiteCollectionError, httpx.HTTPError) as exc:
+    except (LinkedInCollectionError, WebsiteCollectionError, RSSCollectionError, httpx.HTTPError) as exc:
         await db.rollback()
         source = await db.get(NewsSource, source_id)
         if source is None:
@@ -168,11 +187,12 @@ async def check_source(db: AsyncSession, source_id: uuid.UUID, *, force: bool = 
 async def check_due_sources() -> dict[str, int]:
     async with SessionLocal() as db:
         sources = list((await db.execute(select(NewsSource).where(
-            NewsSource.type.in_(["LINKEDIN", "WEBSITE"]), NewsSource.status == "ACTIVE",
+            NewsSource.type.in_(["LINKEDIN", "WEBSITE", "RSS"]), NewsSource.status == "ACTIVE",
         ))).scalars().all())
     ids = [source.id for source in sources if
            (source.type == "LINKEDIN" and linkedin_configured()) or
-           (source.type == "WEBSITE" and source_kind(source.url))]
+           (source.type == "WEBSITE" and source_kind(source.url)) or
+           (source.type == "RSS" and rss_url_is_supported(source.url))]
     checked = 0
     for source_id in ids:
         try:

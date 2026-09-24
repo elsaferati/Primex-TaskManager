@@ -13,6 +13,7 @@ from app.db import get_db
 from app.intelligence.collection import check_source, linkedin_configured
 from app.intelligence.linkedin_adapter import LinkedInCollectionError
 from app.intelligence.models import NewsAnalysis, NewsItem, NewsSource, NewsUserState
+from app.intelligence.rss_adapter import rss_url_is_supported
 from app.intelligence.schemas import IntelligenceStatusOut, NewsFeedOut, NewsSourceCreate, NewsSourceOut, NewsSourceUpdate, SourceCheckOut
 from app.intelligence.website_adapter import source_kind
 from app.models.user import User
@@ -22,7 +23,7 @@ router = APIRouter()
 
 def _source_out(source: NewsSource) -> NewsSourceOut:
     output = NewsSourceOut.model_validate(source)
-    output.collection_supported = source.type == "LINKEDIN" or (source.type == "WEBSITE" and bool(source_kind(source.url)))
+    output.collection_supported = source.type == "LINKEDIN" or (source.type == "WEBSITE" and bool(source_kind(source.url))) or (source.type == "RSS" and rss_url_is_supported(source.url))
     return output
 
 
@@ -38,9 +39,9 @@ async def list_items(
     user: User = Depends(get_current_user),
 ) -> NewsFeedOut:
     source_rows = (await db.execute(select(NewsSource.type, NewsSource.url).where(
-        NewsSource.type.in_(["LINKEDIN", "WEBSITE"]),
+        NewsSource.type.in_(["LINKEDIN", "WEBSITE", "RSS"]),
     ))).all()
-    has_live_sources = any(kind == "LINKEDIN" or (kind == "WEBSITE" and source_kind(url)) for kind, url in source_rows)
+    has_live_sources = any(kind == "LINKEDIN" or (kind == "WEBSITE" and source_kind(url)) or (kind == "RSS" and rss_url_is_supported(url)) for kind, url in source_rows)
     query = (
         select(NewsItem, NewsSource, NewsAnalysis, NewsUserState.read_at)
         .join(NewsSource, NewsSource.id == NewsItem.source_id)
@@ -118,6 +119,8 @@ async def list_sources(db: AsyncSession = Depends(get_db), _: User = Depends(req
 
 @router.post("/sources", response_model=NewsSourceOut, status_code=status.HTTP_201_CREATED)
 async def create_source(payload: NewsSourceCreate, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)) -> NewsSourceOut:
+    if payload.type == "RSS" and not rss_url_is_supported(payload.url):
+        raise HTTPException(status_code=422, detail="Use a public HTTP or HTTPS RSS feed URL without credentials or a custom port.")
     source = NewsSource(**payload.model_dump())
     db.add(source)
     await db.commit()
@@ -133,11 +136,13 @@ async def _get_source(db: AsyncSession, source_id: uuid.UUID) -> NewsSource:
 
 
 @router.post("/sources/{source_id}/check", response_model=SourceCheckOut)
-async def check_linkedin_source(source_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)) -> SourceCheckOut:
+async def check_source_now(source_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)) -> SourceCheckOut:
     source = await _get_source(db, source_id)
-    if source.type == "WEBSITE":
-        if not source_kind(source.url):
+    if source.type in {"WEBSITE", "RSS"}:
+        if source.type == "WEBSITE" and not source_kind(source.url):
             raise HTTPException(status_code=422, detail="No collector is available for this website URL yet.")
+        if source.type == "RSS" and not rss_url_is_supported(source.url):
+            raise HTTPException(status_code=422, detail="Use a public HTTP or HTTPS RSS feed URL.")
         if source.status != "ACTIVE":
             raise HTTPException(status_code=422, detail="Activate this source before checking it.")
         from app.celery_tasks import check_intelligence_source
@@ -158,6 +163,8 @@ async def check_linkedin_source(source_id: uuid.UUID, db: AsyncSession = Depends
 
 @router.put("/sources/{source_id}", response_model=NewsSourceOut)
 async def update_source(source_id: uuid.UUID, payload: NewsSourceUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)) -> NewsSourceOut:
+    if payload.type == "RSS" and not rss_url_is_supported(payload.url):
+        raise HTTPException(status_code=422, detail="Use a public HTTP or HTTPS RSS feed URL without credentials or a custom port.")
     source = await _get_source(db, source_id)
     if source.url != payload.url or source.type != payload.type:
         source.pending_snapshot_id = None
