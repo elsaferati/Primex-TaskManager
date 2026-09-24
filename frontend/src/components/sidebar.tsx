@@ -70,6 +70,7 @@ type NavGroup = {
   icon: LucideIcon
   items: NavItem[]
   subgroups?: NavSubgroup[]
+  itemsFirst?: boolean
 }
 
 const primaryItems: NavItem[] = [
@@ -94,11 +95,6 @@ const primaryItems: NavItem[] = [
     icon: CalendarClock,
   },
   {
-    href: "/admin-tasks",
-    label: "Admin Tasks",
-    icon: ClipboardCheck,
-  },
-  {
     href: "/waiting-confirmation-ga",
     label: "WFC",
     icon: Clock3,
@@ -107,15 +103,24 @@ const primaryItems: NavItem[] = [
 
 const navGroups: NavGroup[] = [
   {
-    id: "intelligence",
-    label: "Intelligence",
-    icon: Sparkles,
-    items: [
-      { href: "/intelligence", label: "Overview", icon: Sparkles, exact: true },
-      { href: "/intelligence/news", label: "News", icon: Newspaper },
-      { href: "/intelligence/opportunities", label: "Opportunities", icon: Lightbulb },
-      { href: "/intelligence/saved", label: "Saved", icon: Bookmark },
-      { href: "/intelligence/sources", label: "Sources", icon: Rss, roles: ["ADMIN"] },
+    id: "admin-workspace",
+    label: "Admin Tasks",
+    icon: ClipboardCheck,
+    itemsFirst: true,
+    items: [{ href: "/admin-tasks", label: "Open Admin Tasks", icon: ClipboardCheck }],
+    subgroups: [
+      {
+        id: "intelligence",
+        label: "Intelligence",
+        icon: Sparkles,
+        items: [
+          { href: "/intelligence", label: "Overview", icon: Sparkles, exact: true },
+          { href: "/intelligence/news", label: "News", icon: Newspaper },
+          { href: "/intelligence/opportunities", label: "Opportunities", icon: Lightbulb },
+          { href: "/intelligence/saved", label: "Saved", icon: Bookmark },
+          { href: "/intelligence/sources", label: "Sources", icon: Rss, roles: ["ADMIN"] },
+        ],
+      },
     ],
   },
   {
@@ -541,6 +546,7 @@ export function Sidebar({ role }: { role: UserRole }) {
 
               {isExpanded && (
                 <div id={`sidebar-group-${group.id}`} className="mt-1 space-y-1">
+                  {group.itemsFirst ? group.items.map((item) => renderNavItem(item, true)) : null}
                   {(group.subgroups || []).map((subgroup) => {
                     const subgroupExpanded = openSubgroupId === subgroup.id
                     const subgroupActive = subgroup.items.some(isItemActive)
@@ -617,7 +623,7 @@ export function Sidebar({ role }: { role: UserRole }) {
                       </div>
                     )
                   })}
-                  {group.items.map((item) => renderNavItem(item, true))}
+                  {!group.itemsFirst ? group.items.map((item) => renderNavItem(item, true)) : null}
                 </div>
               )}
             </div>
