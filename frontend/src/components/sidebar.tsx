@@ -34,6 +34,11 @@ import {
   ScrollText,
   TicketCheck,
   BrainCircuit,
+  Newspaper,
+  Bookmark,
+  Sparkles,
+  Lightbulb,
+  Rss,
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -101,6 +106,18 @@ const primaryItems: NavItem[] = [
 ]
 
 const navGroups: NavGroup[] = [
+  {
+    id: "intelligence",
+    label: "Intelligence",
+    icon: Sparkles,
+    items: [
+      { href: "/intelligence", label: "Overview", icon: Sparkles, exact: true },
+      { href: "/intelligence/news", label: "News", icon: Newspaper },
+      { href: "/intelligence/opportunities", label: "Opportunities", icon: Lightbulb },
+      { href: "/intelligence/saved", label: "Saved", icon: Bookmark },
+      { href: "/intelligence/sources", label: "Sources", icon: Rss, roles: ["ADMIN"] },
+    ],
+  },
   {
     id: "team",
     label: "Ekipi",
