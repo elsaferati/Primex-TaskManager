@@ -8,6 +8,7 @@ from typing import TypeVar
 from app.celery_app import celery_app
 from app.config import settings
 from app.db import engine
+from app.intelligence.collection import check_due_sources as _check_due_intelligence_sources
 from app.jobs.carryover import run_carryover as _run_carryover
 from app.jobs.ga_notes_cleanup import cleanup_old_closed_ga_notes as _cleanup_old_closed_ga_notes
 from app.jobs.internal_notes_cleanup import cleanup_old_done_internal_notes as _cleanup_old_done_internal_notes
@@ -52,6 +53,11 @@ def _run_async(awaitable: Awaitable[T]) -> T:
             await engine.dispose()
 
     return asyncio.run(_run_with_fresh_pool())
+
+
+@celery_app.task(name="app.celery_tasks.check_intelligence_linkedin_sources")
+def check_intelligence_linkedin_sources() -> dict[str, int]:
+    return _run_async(_check_due_intelligence_sources())
 
 
 @celery_app.task(name="app.celery_tasks.generate_system_tasks")

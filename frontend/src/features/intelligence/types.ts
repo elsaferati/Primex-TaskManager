@@ -57,6 +57,9 @@ export interface NewsSource {
   ai_instructions: string | null
   fetch_interval_minutes: number
   last_checked_at: string | null
+  last_started_at: string | null
+  pending_snapshot_id: string | null
+  last_error: string | null
   created_at: string
   updated_at: string
 }

@@ -1,13 +1,16 @@
 import { demoBrief, demoNews } from "./news.mock"
 import type { DailyBrief, NewsEntry } from "../types"
 
-// A single boundary for the demo feed; a future API implementation can replace this.
-export interface IntelligenceFeedService {
-  getFeed(): Promise<NewsEntry[]>
-  getBrief(): Promise<DailyBrief>
-}
+export interface IntelligenceFeed { items: NewsEntry[]; isDemo: boolean; brief: DailyBrief | null }
+export interface IntelligenceFeedService { getFeed(apiFetch: (path: string) => Promise<Response>): Promise<IntelligenceFeed> }
 
 export const intelligenceFeedService: IntelligenceFeedService = {
-  async getFeed() { return demoNews },
-  async getBrief() { return demoBrief },
+  async getFeed(apiFetch) {
+    const response = await apiFetch("/intelligence/items")
+    if (!response.ok) throw new Error("Could not load intelligence updates.")
+    const payload = await response.json() as { items: NewsEntry[]; hasLiveSources: boolean }
+    return payload.hasLiveSources
+      ? { items: payload.items, isDemo: false, brief: null }
+      : { items: demoNews, isDemo: true, brief: demoBrief }
+  },
 }

@@ -5,7 +5,7 @@ from datetime import date, datetime
 from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 SourceType = Literal["WEBSITE", "RSS", "LINKEDIN", "FACEBOOK", "API", "OTHER"]
 SourceStatus = Literal["ACTIVE", "PAUSED"]
@@ -40,14 +40,34 @@ class NewsSourceCreate(BaseModel):
             raise ValueError("Enter a valid http or https URL without credentials")
         return value
 
+    @model_validator(mode="after")
+    def valid_linkedin_profile(self) -> "NewsSourceCreate":
+        if self.type == "LINKEDIN":
+            parsed = urlparse(self.url)
+            segments = [part for part in parsed.path.split("/") if part]
+            if parsed.hostname not in {"linkedin.com", "www.linkedin.com"} or len(segments) != 2 or segments[0] not in {"in", "company"}:
+                raise ValueError("Use a LinkedIn profile or company page URL (linkedin.com/in/... or linkedin.com/company/...).")
+        return self
+
 
 class NewsSourceUpdate(NewsSourceCreate):
     pass
 
 
-class NewsSourceOut(NewsSourceCreate):
+class NewsSourceOut(BaseModel):
     id: uuid.UUID
+    name: str
+    url: str
+    type: SourceType
+    status: SourceStatus
+    priority: SourcePriority
+    categories: list[str]
+    ai_instructions: str | None
+    fetch_interval_minutes: int
     last_checked_at: datetime | None
+    last_started_at: datetime | None
+    pending_snapshot_id: str | None
+    last_error: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -67,3 +87,47 @@ class StructuredNewsAnalysis(BaseModel):
     eligibility: str | None = None
     opportunityType: str | None = None
     tags: list[str] = Field(default_factory=list)
+
+
+class IntelligenceStatusOut(BaseModel):
+    linkedinConfigured: bool
+
+
+class FeedAnalysisOut(BaseModel):
+    summary: str
+    category: NewsCategory
+    importanceScore: int
+    relevanceScore: int
+    whyItMatters: str | None
+    deadline: str | None
+    fundingAmount: str | None
+    eligibility: str | None
+    opportunityType: str | None
+    tags: list[str]
+
+
+class FeedItemOut(BaseModel):
+    id: str
+    sourceId: str
+    sourceName: str
+    sourceType: SourceType
+    externalId: str | None
+    url: str
+    title: str
+    originalText: str | None
+    publishedAt: str
+    imageUrl: str | None
+    contentHash: str | None
+    createdAt: str
+    location: str | None
+    priority: Literal["HIGH", "NORMAL"]
+    analysis: FeedAnalysisOut
+
+
+class NewsFeedOut(BaseModel):
+    items: list[FeedItemOut]
+    hasLiveSources: bool
+
+
+class SourceCheckOut(BaseModel):
+    state: Literal["started", "pending", "completed", "error", "unavailable"]

@@ -23,6 +23,9 @@ class NewsSource(Base):
     ai_instructions: Mapped[str | None] = mapped_column(Text)
     fetch_interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="60")
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pending_snapshot_id: Mapped[str | None] = mapped_column(String(80))
+    last_error: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

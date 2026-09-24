@@ -100,6 +100,9 @@ class Settings(BaseSettings):
     GA_NOTES_MAX_FILE_MB: int = 25
 
     OPENAI_API_KEY: str | None = None
+    INTELLIGENCE_AI_MODEL: str = "gpt-5.4-nano"
+    BRIGHTDATA_API_TOKEN: str | None = None
+    BRIGHTDATA_LINKEDIN_POSTS_DATASET_ID: str = "gd_lyy3tktm25m4avu764"
     SKILLS_AI_MODEL: str = "gpt-5.4-nano"
     SKILLS_AI_TIMEOUT_SECONDS: int = 20
     SPEECH_TRANSCRIBE_MODEL: str = "whisper-1"

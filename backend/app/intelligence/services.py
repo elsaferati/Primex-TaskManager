@@ -1,8 +1,4 @@
-"""Contracts for future ingestion and server-side analysis.
-
-No connector runs in the MVP. Implement adapters independently and persist
-their output as NewsItem before calling the AI service.
-"""
+"""Contracts shared by isolated Intelligence source adapters and analysis."""
 
 from __future__ import annotations
 
