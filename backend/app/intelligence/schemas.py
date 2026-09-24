@@ -68,6 +68,7 @@ class NewsSourceOut(BaseModel):
     last_started_at: datetime | None
     pending_snapshot_id: str | None
     last_error: str | None
+    collection_supported: bool = False
     created_at: datetime
     updated_at: datetime
 

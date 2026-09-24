@@ -60,6 +60,7 @@ export interface NewsSource {
   last_started_at: string | null
   pending_snapshot_id: string | null
   last_error: string | null
+  collection_supported: boolean
   created_at: string
   updated_at: string
 }

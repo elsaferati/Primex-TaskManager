@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, require_admin
@@ -12,9 +12,16 @@ from app.intelligence.collection import check_source, linkedin_configured
 from app.intelligence.linkedin_adapter import LinkedInCollectionError
 from app.intelligence.models import NewsAnalysis, NewsItem, NewsSource
 from app.intelligence.schemas import IntelligenceStatusOut, NewsFeedOut, NewsSourceCreate, NewsSourceOut, NewsSourceUpdate, SourceCheckOut
+from app.intelligence.website_adapter import source_kind
 from app.models.user import User
 
 router = APIRouter()
+
+
+def _source_out(source: NewsSource) -> NewsSourceOut:
+    output = NewsSourceOut.model_validate(source)
+    output.collection_supported = source.type == "LINKEDIN" or (source.type == "WEBSITE" and bool(source_kind(source.url)))
+    return output
 
 
 @router.get("/status", response_model=IntelligenceStatusOut)
@@ -24,7 +31,10 @@ async def intelligence_status(_: User = Depends(require_admin)) -> IntelligenceS
 
 @router.get("/items", response_model=NewsFeedOut)
 async def list_items(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> NewsFeedOut:
-    has_live_sources = bool(await db.scalar(select(func.count()).select_from(NewsSource).where(NewsSource.type == "LINKEDIN")))
+    source_rows = (await db.execute(select(NewsSource.type, NewsSource.url).where(
+        NewsSource.type.in_(["LINKEDIN", "WEBSITE"]),
+    ))).all()
+    has_live_sources = any(kind == "LINKEDIN" or (kind == "WEBSITE" and source_kind(url)) for kind, url in source_rows)
     rows = (await db.execute(
         select(NewsItem, NewsSource, NewsAnalysis)
         .join(NewsSource, NewsSource.id == NewsItem.source_id)
@@ -52,17 +62,18 @@ async def list_items(db: AsyncSession = Depends(get_db), _: User = Depends(get_c
 
 
 @router.get("/sources", response_model=list[NewsSourceOut])
-async def list_sources(db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)) -> list[NewsSource]:
-    return list((await db.execute(select(NewsSource).order_by(NewsSource.created_at.desc()))).scalars().all())
+async def list_sources(db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)) -> list[NewsSourceOut]:
+    sources = (await db.execute(select(NewsSource).order_by(NewsSource.created_at.desc()))).scalars().all()
+    return [_source_out(source) for source in sources]
 
 
 @router.post("/sources", response_model=NewsSourceOut, status_code=status.HTTP_201_CREATED)
-async def create_source(payload: NewsSourceCreate, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)) -> NewsSource:
+async def create_source(payload: NewsSourceCreate, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)) -> NewsSourceOut:
     source = NewsSource(**payload.model_dump())
     db.add(source)
     await db.commit()
     await db.refresh(source)
-    return source
+    return _source_out(source)
 
 
 async def _get_source(db: AsyncSession, source_id: uuid.UUID) -> NewsSource:
@@ -74,7 +85,15 @@ async def _get_source(db: AsyncSession, source_id: uuid.UUID) -> NewsSource:
 
 @router.post("/sources/{source_id}/check", response_model=SourceCheckOut)
 async def check_linkedin_source(source_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)) -> SourceCheckOut:
-    await _get_source(db, source_id)
+    source = await _get_source(db, source_id)
+    if source.type == "WEBSITE":
+        if not source_kind(source.url):
+            raise HTTPException(status_code=422, detail="No collector is available for this website URL yet.")
+        if source.status != "ACTIVE":
+            raise HTTPException(status_code=422, detail="Activate this source before checking it.")
+        from app.celery_tasks import check_intelligence_source
+        check_intelligence_source.delay(str(source_id))
+        return SourceCheckOut(state="started")
     if not linkedin_configured():
         raise HTTPException(status_code=503, detail="LinkedIn collection requires a Bright Data API token on the server.")
     try:
@@ -89,7 +108,7 @@ async def check_linkedin_source(source_id: uuid.UUID, db: AsyncSession = Depends
 
 
 @router.put("/sources/{source_id}", response_model=NewsSourceOut)
-async def update_source(source_id: uuid.UUID, payload: NewsSourceUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)) -> NewsSource:
+async def update_source(source_id: uuid.UUID, payload: NewsSourceUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)) -> NewsSourceOut:
     source = await _get_source(db, source_id)
     if source.url != payload.url or source.type != payload.type:
         source.pending_snapshot_id = None
@@ -100,7 +119,7 @@ async def update_source(source_id: uuid.UUID, payload: NewsSourceUpdate, db: Asy
         setattr(source, field, value)
     await db.commit()
     await db.refresh(source)
-    return source
+    return _source_out(source)
 
 
 @router.delete("/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)

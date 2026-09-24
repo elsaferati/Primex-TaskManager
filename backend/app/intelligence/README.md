@@ -1,4 +1,4 @@
-# LinkedIn collection
+# Source collection
 
 Intelligence keeps the collection code inside `app/intelligence`. Adding a LinkedIn source stores a personal profile (`/in/...`) or company page (`/company/...`) URL. A Celery Beat task runs every five minutes and starts a Bright Data Posts discovery job when the source's check interval has elapsed. Later ticks retrieve completed snapshots and store posts with direct LinkedIn post URLs. Repeated snapshots are deduplicated by post ID and URL.
 
@@ -16,6 +16,8 @@ The first LinkedIn check looks back 60 days. Scheduled checks overlap the previo
 
 Admin users can start a check from **Intelligence → Sources**. A new active LinkedIn source starts a first check automatically when the provider token is configured. Results are asynchronous and normally appear after a later Beat tick. **Refresh feed** reloads posts already stored in the database; it does not start a new provider request.
 
-This connector discovers provider-accessible public posts. It does not promise complete coverage of every LinkedIn post, and it does not monitor likes, comments, or private activity. Website, RSS, Facebook, API, and Other sources remain configuration-only.
+The LinkedIn connector discovers provider-accessible public posts. It does not promise complete coverage of every LinkedIn post, and it does not monitor likes, comments, or private activity.
+
+Four official website lists are collected directly on the server: KIESA News, KIESA Announcements, European Commission Digital Funding, and European Commission Digital News. The `website_adapter.py` connector accepts only these exact listing URLs and follows article links on the same official host. It reads the first page of each list hourly, imports recent articles and still-open funding calls, and stores direct item links. New items are analyzed with the existing server-side OpenAI configuration. Other Website, RSS, Facebook, API, and Other source URLs remain configuration-only until their connectors are added.
 
 Provider API references: [LinkedIn data collection](https://brightdata.com/solutions/data-collection/linkedin), [async trigger](https://docs.brightdata.com/api-reference/web-scraper-api/asynchronous-requests), [snapshot progress](https://docs.brightdata.com/api-reference/web-scraper-api/management-apis/monitor-progress).

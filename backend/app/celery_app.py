@@ -28,8 +28,8 @@ celery_app.conf.result_serializer = "json"
 celery_app.conf.accept_content = ["json"]
 
 celery_app.conf.beat_schedule = {
-    "check-intelligence-linkedin-sources": {
-        "task": "app.celery_tasks.check_intelligence_linkedin_sources",
+    "check-intelligence-sources": {
+        "task": "app.celery_tasks.check_intelligence_sources",
         "schedule": crontab(minute="*/5"),
     },
     "capture-daily-realization-baselines": {
