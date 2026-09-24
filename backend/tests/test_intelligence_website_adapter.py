@@ -1,9 +1,12 @@
+import asyncio
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from app.intelligence.collection import website_entry_is_current
-from app.intelligence.website_adapter import WebsiteCollectionError, WebsiteEntry, parse_article, parse_listing, source_kind
+from app.intelligence.website_adapter import OfficialWebsiteAdapter, WebsiteCollectionError, WebsiteEntry, parse_article, parse_listing, source_kind
 
 
 def test_only_supported_official_listing_urls_are_collected():
@@ -68,3 +71,19 @@ def test_open_funding_call_is_current_even_when_it_opened_months_ago():
     closed_call = WebsiteEntry("https://digital-strategy.ec.europa.eu/en/funding/old", "Old", "Old", datetime(2026, 9, 1, tzinfo=timezone.utc), datetime(2026, 9, 23, tzinfo=timezone.utc))
     assert website_entry_is_current(open_call, now)
     assert not website_entry_is_current(closed_call, now)
+
+
+def test_eu_news_uses_official_listing_when_article_is_rate_limited():
+    adapter = OfficialWebsiteAdapter("https://digital-strategy.ec.europa.eu/en/news")
+    entry = WebsiteEntry(
+        "https://digital-strategy.ec.europa.eu/en/news/example", "Example news",
+        "24 September 2026 Example news. The Commission announced a digital update.",
+        datetime(2026, 9, 24, tzinfo=timezone.utc),
+    )
+    response = httpx.Response(429, request=httpx.Request("GET", entry.url))
+    client = AsyncMock()
+    client.get.return_value = response
+    post = asyncio.run(adapter.article(client, entry))
+    assert post.url == entry.url
+    assert post.original_text == entry.text
+    assert post.published_at == entry.published_at

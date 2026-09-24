@@ -162,8 +162,20 @@ class OfficialWebsiteAdapter:
     async def article(self, client: httpx.AsyncClient, entry: WebsiteEntry) -> CollectedNewsItem:
         if self.kind == "eu_funding":
             # These cards redirect to individual Funding & Tenders Portal topics.
-            return CollectedNewsItem(
-                external_id=entry.url[:500], url=entry.url, title=entry.title,
-                original_text=entry.text, published_at=entry.published_at,
-            )
-        return parse_article(await self._html(client, entry.url), entry)
+            return self._listing_item(entry)
+        try:
+            return parse_article(await self._html(client, entry.url), entry)
+        except httpx.HTTPStatusError as exc:
+            # The Commission rate-limits article reads and redirects some cards
+            # to its press portal. The official listing still has the title,
+            # date, excerpt, and exact article link.
+            if self.kind == "eu_news" and exc.response.status_code in {301, 302, 303, 307, 308, 429}:
+                return self._listing_item(entry)
+            raise
+
+    @staticmethod
+    def _listing_item(entry: WebsiteEntry) -> CollectedNewsItem:
+        return CollectedNewsItem(
+            external_id=entry.url[:500], url=entry.url, title=entry.title,
+            original_text=entry.text, published_at=entry.published_at,
+        )
