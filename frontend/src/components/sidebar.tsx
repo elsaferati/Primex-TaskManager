@@ -35,10 +35,6 @@ import {
   TicketCheck,
   BrainCircuit,
   Newspaper,
-  Bookmark,
-  Sparkles,
-  Lightbulb,
-  Rss,
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -70,7 +66,6 @@ type NavGroup = {
   icon: LucideIcon
   items: NavItem[]
   subgroups?: NavSubgroup[]
-  itemsFirst?: boolean
 }
 
 const primaryItems: NavItem[] = [
@@ -106,21 +101,9 @@ const navGroups: NavGroup[] = [
     id: "admin-workspace",
     label: "Admin Tasks",
     icon: ClipboardCheck,
-    itemsFirst: true,
-    items: [{ href: "/admin-tasks", label: "Open Admin Tasks", icon: ClipboardCheck }],
-    subgroups: [
-      {
-        id: "intelligence",
-        label: "Intelligence",
-        icon: Sparkles,
-        items: [
-          { href: "/intelligence", label: "Overview", icon: Sparkles, exact: true },
-          { href: "/intelligence/news", label: "News", icon: Newspaper },
-          { href: "/intelligence/opportunities", label: "Opportunities", icon: Lightbulb },
-          { href: "/intelligence/saved", label: "Saved", icon: Bookmark },
-          { href: "/intelligence/sources", label: "Sources", icon: Rss, roles: ["ADMIN"] },
-        ],
-      },
+    items: [
+      { href: "/admin-tasks", label: "Tasks", icon: ClipboardCheck },
+      { href: "/intelligence/news", label: "News", icon: Newspaper, match: ["/intelligence"] },
     ],
   },
   {
@@ -546,7 +529,6 @@ export function Sidebar({ role }: { role: UserRole }) {
 
               {isExpanded && (
                 <div id={`sidebar-group-${group.id}`} className="mt-1 space-y-1">
-                  {group.itemsFirst ? group.items.map((item) => renderNavItem(item, true)) : null}
                   {(group.subgroups || []).map((subgroup) => {
                     const subgroupExpanded = openSubgroupId === subgroup.id
                     const subgroupActive = subgroup.items.some(isItemActive)
@@ -623,7 +605,7 @@ export function Sidebar({ role }: { role: UserRole }) {
                       </div>
                     )
                   })}
-                  {!group.itemsFirst ? group.items.map((item) => renderNavItem(item, true)) : null}
+                  {group.items.map((item) => renderNavItem(item, true))}
                 </div>
               )}
             </div>

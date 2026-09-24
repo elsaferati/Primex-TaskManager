@@ -31,6 +31,7 @@ export interface NewsEntry {
   contentHash: string | null
   createdAt: string
   readAt?: string | null
+  emailedAt?: string | null
   location: string | null
   priority: NewsPriority
   analysis: NewsAnalysis

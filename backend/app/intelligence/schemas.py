@@ -121,6 +121,7 @@ class FeedItemOut(BaseModel):
     contentHash: str | None
     createdAt: str
     readAt: str | None
+    emailedAt: str | None
     location: str | None
     priority: Literal["HIGH", "NORMAL"]
     analysis: FeedAnalysisOut
@@ -129,6 +130,12 @@ class FeedItemOut(BaseModel):
 class NewsFeedOut(BaseModel):
     items: list[FeedItemOut]
     hasLiveSources: bool
+
+
+class EmailShareOut(BaseModel):
+    recipient: str
+    sentAt: datetime
+    alreadySent: bool
 
 
 class SourceCheckOut(BaseModel):

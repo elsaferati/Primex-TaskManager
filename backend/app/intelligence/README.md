@@ -24,4 +24,8 @@ Public RSS and Atom feed URLs can be added by admins without a site-specific con
 
 Reading status uses the existing `intelligence_user_states.read_at` column per user and item. The feed supports `read_state=unread|read|all`; opening a direct article or marking it read updates the status through the authenticated API. Marking an item unread clears only `read_at`, leaving any bookmark state intact.
 
+Priority is calculated for each analyzed item. A normal-priority source needs importance >= 80 and relevance >= 70 for a High badge; High sources use 70/60 and Low sources use 90/80. The source setting therefore adjusts the threshold instead of marking every item High. If AI analysis is unavailable, the existing fallback scores are used.
+
+Any authenticated user can email a collected update to the fixed internal address `180primex.eu@gmail.com` from the item card. The server builds the message from the stored title, summary, insight, structured opportunity details, and direct source URL, then uses the application's existing `GmailService` and `EMAIL_USER`/`EMAIL_PASSWORD` configuration. The recipient and content cannot be supplied by the browser. `intelligence_user_states.emailed_at` records a successful send per user and item; later clicks return the original send time without sending again. Demo items cannot be emailed.
+
 Provider API references: [LinkedIn data collection](https://brightdata.com/solutions/data-collection/linkedin), [async trigger](https://docs.brightdata.com/api-reference/web-scraper-api/asynchronous-requests), [snapshot progress](https://docs.brightdata.com/api-reference/web-scraper-api/management-apis/monitor-progress).

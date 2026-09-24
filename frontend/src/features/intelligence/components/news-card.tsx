@@ -1,4 +1,4 @@
-import { ArrowUpRight, Bookmark, CalendarDays, Check, CircleDollarSign, MapPin, RotateCcw } from "lucide-react"
+import { ArrowUpRight, Bookmark, CalendarDays, Check, CircleDollarSign, LoaderCircle, Mail, MapPin, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { NewsEntry } from "../types"
@@ -8,7 +8,7 @@ const categoryLabels: Record<NewsEntry["analysis"]["category"], string> = {
   GRANT: "Grant", TENDER: "Tender", BUSINESS: "Business", TECHNOLOGY: "AI & Tech", EVENT: "Event", REGULATION: "Regulation", PARTNERSHIP: "Partnership", NEWS: "News",
 }
 
-export function NewsCard({ item, saved, read, onToggleSaved, onSetRead }: { item: NewsEntry; saved: boolean; read: boolean; onToggleSaved: (id: string) => void; onSetRead: (id: string, read: boolean) => void }) {
+export function NewsCard({ item, saved, read, canEmail, emailSending, emailBusy, onToggleSaved, onSetRead, onEmail }: { item: NewsEntry; saved: boolean; read: boolean; canEmail: boolean; emailSending: boolean; emailBusy: boolean; onToggleSaved: (id: string) => void; onSetRead: (id: string, read: boolean) => void; onEmail: (id: string) => void }) {
   const analysis = item.analysis
   const isOpportunity = analysis.category === "GRANT" || analysis.category === "TENDER"
   const markFromLink = () => { if (!read) onSetRead(item.id, true) }
@@ -39,6 +39,7 @@ export function NewsCard({ item, saved, read, onToggleSaved, onSetRead }: { item
       <div className="mt-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-t border-[#eef0ed] pt-4">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[#858e88]"><span className="font-medium text-[#55645a]">{item.sourceName}</span><span>·</span><time dateTime={item.publishedAt}>{dateFormat.format(new Date(item.publishedAt))}</time><span className="hidden sm:inline">·</span><span className="hidden sm:inline">{analysis.tags.slice(0, 2).join(" · ")}</span></div>
         <div className="flex items-center gap-1">
+          {canEmail ? <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs text-[#68776b] hover:bg-[#f0f4ef]" disabled={emailBusy || Boolean(item.emailedAt)} onClick={() => onEmail(item.id)} title={item.emailedAt ? "Already sent to 180primex.eu@gmail.com" : "Send to 180primex.eu@gmail.com"} aria-label={item.emailedAt ? `${item.title} sent to 180primex.eu@gmail.com` : `Email ${item.title} to 180primex.eu@gmail.com`}>{emailSending ? <LoaderCircle className="size-3.5 animate-spin" /> : item.emailedAt ? <Check className="size-3.5" /> : <Mail className="size-3.5" />}{emailSending ? "Sending" : item.emailedAt ? "Sent" : "Email"}</Button> : null}
           <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs text-[#68776b] hover:bg-[#f0f4ef]" onClick={() => onSetRead(item.id, !read)}>{read ? <RotateCcw className="size-3.5" /> : <Check className="size-3.5" />}{read ? "Mark unread" : "Mark read"}</Button>
           {item.url ? <Button asChild variant="ghost" size="sm" className="-mr-2 h-7 gap-1 px-2 text-xs text-[#405d4b] hover:bg-[#f0f4ef]"><a href={item.url} target="_blank" rel="noopener noreferrer" onClick={markFromLink} onAuxClick={(event) => { if (event.button === 1) markFromLink() }} aria-label={`Read original ${item.sourceType === "LINKEDIN" ? "post" : "article"}: ${item.title}`}>Read {item.sourceType === "LINKEDIN" ? "post" : "article"} <ArrowUpRight className="size-3.5" /></a></Button> : <span className="text-[11px] text-[#9aa69c]">Illustrative item · no article link</span>}
         </div>

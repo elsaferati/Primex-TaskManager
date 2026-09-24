@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -11,14 +13,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, require_admin
 from app.db import get_db
 from app.intelligence.collection import check_source, linkedin_configured
+from app.intelligence.email_service import INTELLIGENCE_RECIPIENT, send_news_email
 from app.intelligence.linkedin_adapter import LinkedInCollectionError
 from app.intelligence.models import NewsAnalysis, NewsItem, NewsSource, NewsUserState
+from app.intelligence.priority import news_priority
 from app.intelligence.rss_adapter import rss_url_is_supported
-from app.intelligence.schemas import IntelligenceStatusOut, NewsFeedOut, NewsSourceCreate, NewsSourceOut, NewsSourceUpdate, SourceCheckOut
+from app.intelligence.schemas import EmailShareOut, IntelligenceStatusOut, NewsFeedOut, NewsSourceCreate, NewsSourceOut, NewsSourceUpdate, SourceCheckOut
 from app.intelligence.website_adapter import source_kind
 from app.models.user import User
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _source_out(source: NewsSource) -> NewsSourceOut:
@@ -43,7 +48,7 @@ async def list_items(
     ))).all()
     has_live_sources = any(kind == "LINKEDIN" or (kind == "WEBSITE" and source_kind(url)) or (kind == "RSS" and rss_url_is_supported(url)) for kind, url in source_rows)
     query = (
-        select(NewsItem, NewsSource, NewsAnalysis, NewsUserState.read_at)
+        select(NewsItem, NewsSource, NewsAnalysis, NewsUserState.read_at, NewsUserState.emailed_at)
         .join(NewsSource, NewsSource.id == NewsItem.source_id)
         .join(NewsAnalysis, NewsAnalysis.news_item_id == NewsItem.id)
         .outerjoin(NewsUserState, and_(
@@ -66,7 +71,8 @@ async def list_items(
         "imageUrl": item.image_url, "contentHash": item.content_hash,
         "createdAt": item.created_at.isoformat(), "location": None,
         "readAt": read_at.isoformat() if read_at else None,
-        "priority": "HIGH" if source.priority == "HIGH" else "NORMAL",
+        "emailedAt": emailed_at.isoformat() if emailed_at else None,
+        "priority": news_priority(source.priority, analysis.importance_score, analysis.relevance_score),
         "analysis": {
             "summary": analysis.summary, "category": analysis.category,
             "importanceScore": analysis.importance_score, "relevanceScore": analysis.relevance_score,
@@ -75,7 +81,48 @@ async def list_items(
             "fundingAmount": analysis.funding_amount, "eligibility": analysis.eligibility,
             "opportunityType": analysis.opportunity_type, "tags": analysis.tags,
         },
-    } for item, source, analysis, read_at in rows])
+    } for item, source, analysis, read_at, emailed_at in rows])
+
+
+@router.post("/items/{item_id}/email", response_model=EmailShareOut)
+async def email_item(
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> EmailShareOut:
+    result = (await db.execute(
+        select(NewsItem, NewsSource, NewsAnalysis)
+        .join(NewsSource, NewsSource.id == NewsItem.source_id)
+        .join(NewsAnalysis, NewsAnalysis.news_item_id == NewsItem.id)
+        .where(NewsItem.id == item_id)
+    )).one_or_none()
+    if result is None:
+        raise HTTPException(status_code=404, detail="Update not found")
+    item, source, analysis = result
+    await db.execute(pg_insert(NewsUserState).values(
+        user_id=user.id, news_item_id=item_id,
+    ).on_conflict_do_nothing(index_elements=[NewsUserState.user_id, NewsUserState.news_item_id]))
+    user_state = (await db.execute(select(NewsUserState).where(
+        NewsUserState.user_id == user.id,
+        NewsUserState.news_item_id == item_id,
+    ).with_for_update())).scalar_one()
+    if user_state.emailed_at:
+        sent_at = user_state.emailed_at
+        await db.rollback()
+        return EmailShareOut(recipient=INTELLIGENCE_RECIPIENT, sentAt=sent_at, alreadySent=True)
+    try:
+        await send_news_email(item, source, analysis)
+    except ValueError as exc:
+        await db.rollback()
+        logger.warning("Intelligence email configuration unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="Email sending is not configured right now.") from exc
+    except Exception as exc:
+        await db.rollback()
+        logger.exception("Could not email Intelligence update %s", item_id)
+        raise HTTPException(status_code=502, detail="Could not send this update. Please try again.") from exc
+    user_state.emailed_at = datetime.now(timezone.utc)
+    await db.commit()
+    return EmailShareOut(recipient=INTELLIGENCE_RECIPIENT, sentAt=user_state.emailed_at, alreadySent=False)
 
 
 @router.put("/items/{item_id}/read", status_code=status.HTTP_204_NO_CONTENT)
