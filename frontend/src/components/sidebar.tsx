@@ -34,7 +34,6 @@ import {
   ScrollText,
   TicketCheck,
   BrainCircuit,
-  Newspaper,
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -103,7 +102,6 @@ const navGroups: NavGroup[] = [
     icon: ClipboardCheck,
     items: [
       { href: "/admin-tasks", label: "Tasks", icon: ClipboardCheck },
-      { href: "/intelligence/news", label: "News", icon: Newspaper, match: ["/intelligence"] },
     ],
   },
   {

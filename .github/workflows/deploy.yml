@@ -100,7 +100,6 @@ jobs:
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          BRIGHTDATA_API_TOKEN: ${{ secrets.BRIGHTDATA_API_TOKEN }}
           REPORT_STORAGE_DIR: ${{ vars.REPORT_STORAGE_DIR }}
           MS_CLIENT_ID: ${{ vars.MS_CLIENT_ID || secrets.MS_CLIENT_ID }}
           MS_TENANT_ID: ${{ vars.MS_TENANT_ID || secrets.MS_TENANT_ID }}
@@ -150,7 +149,6 @@ jobs:
           echo REPORT_STORAGE_DIR=%REPORT_STORAGE_DIR% >> backend\.env
           echo REPORT_RETENTION_DAYS=90 >> backend\.env
           echo OPENAI_API_KEY=%OPENAI_API_KEY% >> backend\.env
-          echo BRIGHTDATA_API_TOKEN=%BRIGHTDATA_API_TOKEN% >> backend\.env
           echo SKILLS_AI_MODEL=gpt-5.4-nano >> backend\.env
           echo SKILLS_AI_TIMEOUT_SECONDS=20 >> backend\.env
           echo REALIZATION_AI_ENABLED=true >> backend\.env

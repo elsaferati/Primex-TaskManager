@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
 from collections.abc import Awaitable
 from datetime import date
 from typing import TypeVar
 
 from app.celery_app import celery_app
 from app.config import settings
-from app.db import SessionLocal, engine
-from app.intelligence.collection import check_due_sources as _check_due_intelligence_sources, check_source
+from app.db import engine
 from app.jobs.carryover import run_carryover as _run_carryover
 from app.jobs.ga_notes_cleanup import cleanup_old_closed_ga_notes as _cleanup_old_closed_ga_notes
 from app.jobs.internal_notes_cleanup import cleanup_old_done_internal_notes as _cleanup_old_done_internal_notes
@@ -54,19 +52,6 @@ def _run_async(awaitable: Awaitable[T]) -> T:
             await engine.dispose()
 
     return asyncio.run(_run_with_fresh_pool())
-
-
-@celery_app.task(name="app.celery_tasks.check_intelligence_sources")
-def check_intelligence_sources() -> dict[str, int]:
-    return _run_async(_check_due_intelligence_sources())
-
-
-@celery_app.task(name="app.celery_tasks.check_intelligence_source")
-def check_intelligence_source(source_id: str) -> str:
-    async def run() -> str:
-        async with SessionLocal() as db:
-            return await check_source(db, uuid.UUID(source_id), force=True)
-    return _run_async(run())
 
 
 @celery_app.task(name="app.celery_tasks.generate_system_tasks")
