@@ -4007,6 +4007,15 @@ export default function GaKaNotesPage() {
                                     {oneHMarkerLabel(note.one_h_marker, note.one_h_marker_by_ga)}
                                   </button>
                                 ) : null}
+                                {note.knowledge_type === "PROMPT" ? (
+                                  <Link
+                                    href="/knowledge/prompts?view=notes"
+                                    className="inline-flex h-5 shrink-0 items-center rounded-md border border-violet-200 bg-violet-50 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700 hover:bg-violet-100"
+                                    title="Kërkesë për prompt · Knowledge PX"
+                                  >
+                                    Prompt
+                                  </Link>
+                                ) : null}
                                 <span id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
                                   {renderMarkedNoteContent(note.content, canViewStrikeTimestamps)}
                                 </span>

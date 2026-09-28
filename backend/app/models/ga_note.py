@@ -37,6 +37,8 @@ class GaNote(Base):
     one_h_marker_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"))
     department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("departments.id"))
+    # Knowledge PX origin, e.g. "PROMPT" for a Prompt Note. NULL for regular PX Notes.
+    knowledge_type: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

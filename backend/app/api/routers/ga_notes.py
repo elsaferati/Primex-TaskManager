@@ -108,6 +108,7 @@ def _note_out(note: GaNote) -> GaNoteOut:
         one_h_marker_comment=note.one_h_marker_comment if active_one_h_marker(note) else None,
         project_id=note.project_id,
         department_id=note.department_id,
+        knowledge_type=note.knowledge_type,
         created_at=note.created_at,
         updated_at=note.updated_at,
         attachments=[_attachment_out(a) for a in (note.attachments or [])],
