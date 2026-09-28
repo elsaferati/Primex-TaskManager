@@ -6,6 +6,7 @@ import re
 from io import BytesIO
 from datetime import date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from openpyxl import Workbook
 from openpyxl.cell.rich_text import CellRichText, TextBlock
@@ -683,6 +684,22 @@ def _task_start_day(item: dict[str, Any]) -> date | None:
         return None
 
 
+def _task_created_day(item: dict[str, Any]) -> date | None:
+    raw = item.get("created_at") or item.get("createdAt")
+    if isinstance(raw, datetime):
+        created_at = raw
+    elif isinstance(raw, date):
+        return raw
+    else:
+        try:
+            created_at = datetime.fromisoformat(str(raw or "").replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if created_at.tzinfo is not None:
+        created_at = created_at.astimezone(ZoneInfo(settings.APP_TIMEZONE))
+    return created_at.date()
+
+
 def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[str, str]:
     top_badges: list[str] = []
     badge_base = (
@@ -727,6 +744,21 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
     )
     start_day = _task_start_day(item)
     due_day = _task_due_day(item)
+    start_today = (
+        bool(item.get("start_date") or item.get("startDate"))
+        and report_date is not None
+        and _task_created_day(item) == report_date
+        and start_day == report_date
+        and due_day == report_date
+    )
+    start_today_badge = (
+        '<span data-task-badge="start-today" '
+        'style="display:block;width:max-content;margin:0 0 2px 0;padding:2px 5px;'
+        'border:1px solid #60A5FA;border-radius:999px;background-color:#DBEAFE;'
+        'color:#1D4ED8;font-family:Arial,sans-serif;font-size:9px;font-weight:800;'
+        'line-height:1;white-space:nowrap;">START SOT</span>'
+        if start_today else ""
+    )
     due_today = report_date is not None and due_day == report_date
     due_label = "SOT" if due_today else (due_day.strftime("%d.%m.%Y") if due_day else "")
     start_badge = (
@@ -752,7 +784,7 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
         date_badges = (
             '<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" '
             'style="width:100%;border-collapse:collapse;table-layout:fixed;"><tr>'
-            f'<td height="19" valign="bottom" align="left" style="height:19px;padding:0;text-align:left;vertical-align:bottom;white-space:nowrap;">{start_badge}</td>'
+            f'<td valign="bottom" align="left" style="padding:0;text-align:left;vertical-align:bottom;white-space:nowrap;">{start_today_badge}{start_badge}</td>'
             f'<td height="19" valign="bottom" align="right" style="height:19px;padding:0;text-align:right;vertical-align:bottom;white-space:nowrap;">{due_badge}</td>'
             '</tr></table>'
         )

@@ -739,6 +739,20 @@ const isCommonTaskStartingOnDate = (entry: { startDate?: string | null; date?: s
   return Boolean(startDate && targetDate && startDate === targetDate)
 }
 
+const isCommonTaskStartToday = (entry: {
+  createdAt?: string | null
+  startDate?: string | null
+  dueDate?: string | null
+}, targetDate?: string | null) => {
+  const target = normalizeCommonDateOnly(targetDate)
+  return Boolean(
+    target &&
+    normalizeCommonDateOnly(entry.createdAt) === target &&
+    normalizeCommonDateOnly(entry.startDate) === target &&
+    normalizeCommonDateOnly(entry.dueDate) === target
+  )
+}
+
 const isCommonTaskCreatedDayBeforeTarget = (entry: {
   createdAt?: string | null
   date?: string | null
@@ -869,7 +883,7 @@ const renderCommonTaskStatusIndicator = (
 }
 
 type CommonColorFilter = "all" | "pink" | "yellow" | "red" | "green" | "orange" | "gold"
-type CommonTaskFocusFilter = "all" | "new" | "eightAm" | "deadline"
+type CommonTaskFocusFilter = "all" | "new" | "eightAm" | "deadline" | "startToday"
 
 const getCommonTaskColor = (entry: {
   status?: string | null
@@ -4729,6 +4743,7 @@ export default function CommonViewPage() {
       }
       if (taskFocusFilter === "eightAm") return hasEightAmIndicator(entry.title, entry.isSystemTask)
       if (taskFocusFilter === "deadline") return Boolean(entry.isDeadlineImportant)
+      if (taskFocusFilter === "startToday") return isCommonTaskStartToday(entry, entry.date)
       return true
     }
 
@@ -5400,7 +5415,8 @@ export default function CommonViewPage() {
           const label = dueToday ? "SOT" : formatDateHuman(value)
           return `<span class="print-task-date${due ? " due" : ""}${dueToday ? " today" : ""}">${escapePrintHtml(label)}</span>`
         }
-        return `<div class="print-task-dates">${startDate ? chip(startDate) : ""}${dueDate ? chip(dueDate, true) : ""}</div>`
+        const startToday = isCommonTaskStartToday(item, targetIso)
+        return `<div class="print-task-dates">${startDate ? `<span class="print-task-start">${startToday ? '<span class="print-task-badge start-today">START SOT</span>' : ""}${chip(startDate)}</span>` : ""}${dueDate ? chip(dueDate, true) : ""}</div>`
       }
 
       const buildTableRows = (
@@ -5442,10 +5458,11 @@ export default function CommonViewPage() {
                   ? `<div class="print-marker-comment"><strong>KOMENT SIMBOLI:</strong> ${escapePrintHtml((item as PrintTask).oneHMarkerComment || "")}</div>`
                   : ""
                 const taskNumber = chunkIndex * 6 + cellIndex + 1
+                const startToday = !isMeetingTable && isCommonTaskStartToday(item as PrintTask, targetIso)
                 const content = isMeetingTable
                   ? `${taskNumber}. ${escapePrintHtml(title)}`
                   : `${taskBadges}<span class="print-task-title">${taskNumber}. ${commonPrintTitleHtml(title)}</span>${markerComment}`
-                return `<td class="${isMeetingTable ? "print-meeting-cell" : "print-task-cell"}"><div>${content}</div>${isMeetingTable ? "" : printTaskDatesHtml(item as PrintTask)}</td>`
+                return `<td class="${isMeetingTable ? "print-meeting-cell" : `print-task-cell${startToday ? " has-start-today" : ""}`}"><div>${content}</div>${isMeetingTable ? "" : printTaskDatesHtml(item as PrintTask)}</td>`
               }).join("")
               const rowHeaders =
                 chunkIndex === 0
@@ -5491,14 +5508,17 @@ export default function CommonViewPage() {
   tbody th:nth-child(2) { padding-left: 2px; padding-right: 2px; }
   .print-slot-subtext { display: block; white-space: pre; overflow-wrap: normal !important; word-break: normal !important; font-size: 5.2px; font-weight: 400 !important; line-height: 1.05; }
   .print-task-cell { position:relative; padding-top:8px; padding-bottom:27px; }
+  .print-task-cell.has-start-today { padding-bottom:41px; }
   .print-task-title { font-size:17px; line-height:1.25; }
   .print-meeting-cell { padding-top:8px; font-size:13px; line-height:1.3; }
   .print-task-dates { position:absolute; left:5px; right:5px; bottom:4px; display:flex; align-items:flex-end; justify-content:space-between; gap:4px; white-space:nowrap; }
+  .print-task-start { display:inline-flex; flex-direction:column; align-items:flex-start; gap:2px; }
   .print-task-date { display:inline-flex; box-sizing:border-box; height:18px; align-items:center; border:1px solid #93c5fd; border-radius:3px; background:#eff6ff; color:#1d4ed8; padding:1px 4px; font-weight:800; line-height:1; }
   .print-task-date.due { border:3px solid #b91c1c; padding:0 2px; }
   .print-task-date.due.today { height:26px; border:1px solid #991b1b; border-radius:4px; background:#dc2626; color:#fff; padding:3px 9px; font-size:14px; font-weight:900; box-shadow:0 1px 3px rgba(127,29,29,.45); }
   .print-task-badge { display:inline-block; margin:0 4px 3px 0; padding:2px 5px; border-radius:999px; font-size:8px; font-weight:800; line-height:1; white-space:nowrap; }
   .print-task-badge.period { background:#e0f2fe; border:1px solid #bae6fd; color:#0369a1; }
+  .print-task-badge.start-today { margin:0; background:#dbeafe; border:1px solid #60a5fa; color:#1d4ed8; }
   .print-task-badge.wfc { background:#ffedd5; border:1px solid #fb923c; color:#c2410c; }
   .print-task-badge.marker { padding:2px 7px; background:#eff6ff; border:1px solid #93c5fd; color:#dc2626; font-size:14px; font-weight:900; text-shadow:0 0 0 currentColor; }
 </style></head><body>
@@ -6281,6 +6301,7 @@ export default function CommonViewPage() {
 
   const showCard = (type: CommonType, itemCount?: number) => {
     if (taskFocusFilter !== "all" && !isFastTaskRowId(type)) return false
+    if (taskFocusFilter === "startToday" && itemCount === 0) return false
     if (oneHMarkerFilters.size > 0 || kaGentFilterActive) {
       if (!isFastTaskRowId(type)) return false
       if (itemCount === 0) return false
@@ -11208,6 +11229,24 @@ export default function CommonViewPage() {
           font-weight: 900;
           box-shadow: 0 1px 3px rgba(153, 27, 27, 0.3);
         }
+        .swimlane-start-today {
+          display: inline-flex;
+          align-items: center;
+          border: 1px solid #60a5fa;
+          border-radius: 999px;
+          background: #dbeafe;
+          color: #1d4ed8;
+          padding: 2px 6px;
+          font-size: 10px;
+          font-weight: 800;
+          line-height: 1;
+        }
+        .swimlane-task-start {
+          display: inline-flex;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 3px;
+        }
         .swimlane-subtitle {
           font-size: 12px;
           color: var(--swim-muted);
@@ -13365,6 +13404,15 @@ export default function CommonViewPage() {
                 title="Show personal, symbol and WFC tasks for both KA and GENT"
               >
                 KA/GENT
+              </button>
+              <button
+                className={`chip ${taskFocusFilter === "startToday" ? "active" : ""}`}
+                type="button"
+                aria-pressed={taskFocusFilter === "startToday"}
+                onClick={() => setTaskFocusFilter((current) => current === "startToday" ? "all" : "startToday")}
+                title="Detyrat e krijuara sot me start date dhe due date sot"
+              >
+                START SOT
               </button>
             </div>
           </div>
@@ -16965,8 +17013,13 @@ export default function CommonViewPage() {
                                         {showDate && showSeparateTaskDates ? (
                                           <div className="swimlane-task-dates">
                                             {taskStartDate ? (
-                                              <span className="swimlane-task-date start" title="Start date">
-                                                {taskStartDate}
+                                              <span className="swimlane-task-start">
+                                                {isCommonTaskStartToday(cell, cell.entryDate) ? (
+                                                  <span className="swimlane-start-today" title="Created, started and due today">START SOT</span>
+                                                ) : null}
+                                                <span className="swimlane-task-date start" title="Start date">
+                                                  {taskStartDate}
+                                                </span>
                                               </span>
                                             ) : null}
                                             {taskDueDate ? (

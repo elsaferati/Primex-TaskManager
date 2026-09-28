@@ -146,6 +146,13 @@ class UnfinishedPriorityTaskRowsTests(unittest.TestCase):
             "assigned_to": None,
             "fast_task_order": None,
             "department_id": None,
+            "project_id": None,
+            "system_template_origin_id": None,
+            "system_task_slot_id": None,
+            "is_bllok": False,
+            "is_r1": False,
+            "is_1h_report": False,
+            "is_personal": False,
         }
         values.update(overrides)
         return SimpleNamespace(**values)
@@ -181,7 +188,7 @@ class UnfinishedPriorityTaskRowsTests(unittest.TestCase):
         ]
 
         rows = _unfinished_priority_task_rows(tasks, {}, {}, date(2026, 8, 24), cutoff, timezone)
-        rows_by_title = {row[6]: row for row in rows}
+        rows_by_title = {row[7]: row for row in rows}
 
         self.assertEqual(
             set(rows_by_title),
@@ -198,11 +205,35 @@ class UnfinishedPriorityTaskRowsTests(unittest.TestCase):
         self.assertEqual(rows_by_title["Due at eight without marker"][5], "DUE SOT")
         self.assertEqual(rows_by_title["In progress due today"][4], "IN_PROGRESS")
         self.assertEqual(rows_by_title["Done after 08:00"][4], "IN_PROGRESS")
-        self.assertEqual(rows_by_title["Done after 08:00"][7], "SOT")
+        self.assertEqual(rows_by_title["Done after 08:00"][8], "SOT")
         self.assertEqual(
             [row[5] for row in rows],
             ["08:00", "08:00", "08:00", "DEADLINE / 08:00", "DEADLINE", "DEADLINE", "DUE SOT", "DUE SOT", "DUE SOT"],
         )
+
+    def test_unfinished_rows_show_task_kind_separately_from_due_priority(self) -> None:
+        timezone = ZoneInfo("Europe/Tirane")
+        tasks = [
+            self._task("System", 15, system_template_origin_id="template"),
+            self._task("One hour", 15, is_1h_report=True),
+            self._task("Blocked", 15, is_bllok=True),
+            self._task("Personal", 15, is_personal=True),
+            self._task("Project", 15, project_id="project"),
+            self._task("Regular fast", 15),
+        ]
+
+        rows = _unfinished_priority_task_rows(
+            tasks, {}, {}, date(2026, 8, 24),
+            datetime(2026, 8, 24, 13, 20, tzinfo=timezone), timezone,
+        )
+        by_title = {row[7]: row for row in rows}
+
+        self.assertEqual({title: row[6] for title, row in by_title.items()}, {
+            "System": "SYS", "One hour": "1H", "Blocked": "BLL",
+            "Personal": "P", "Project": "PRJK", "Regular fast": "FT",
+        })
+        self.assertTrue(all(row[5] == "DUE SOT" for row in rows))
+        self.assertTrue(all(len(row) == len(UNFINISHED_PRIORITY_COLUMNS) for row in rows))
 
     def test_empty_unfinished_priority_section_keeps_the_full_table(self) -> None:
         rows = _ascii_table(
@@ -213,6 +244,7 @@ class UnfinishedPriorityTaskRowsTests(unittest.TestCase):
         )
 
         self.assertIn("DUE DATE", rows[2])
+        self.assertIn("TIPI", rows[2])
         self.assertTrue(any("(Asnje detyre)" in row for row in rows))
 
     def test_08_rows_use_a_border_while_deadlines_keep_the_red_fill(self) -> None:
@@ -235,9 +267,9 @@ class UnfinishedPriorityTaskRowsTests(unittest.TestCase):
             UNFINISHED_PRIORITY_TABLE_LABEL,
             UNFINISHED_PRIORITY_COLUMNS,
             [
-                ["1", "EF", "DEV", "AM", "TODO", "08:00", "Eight task", "SOT"],
-                ["2", "RA", "DEV", "AM/PM", "IN_PROGRESS", "DEADLINE", "Deadline task", "SOT"],
-                ["3", "DV", "PCM", "AM", "TODO", "DUE SOT", "Due task", "SOT"],
+                ["1", "EF", "DEV", "AM", "TODO", "08:00", "1H", "Eight task", "SOT"],
+                ["2", "RA", "DEV", "AM/PM", "IN_PROGRESS", "DEADLINE", "BLL", "Deadline task", "SOT"],
+                ["3", "DV", "PCM", "AM", "TODO", "DUE SOT", "P", "Due task", "SOT"],
             ],
             show_empty_table=True,
         )

@@ -19,6 +19,7 @@ from app.services.tomorrow_print_report import (
     _one_h_checklists_html,
     _png_table_attachment,
     _task_marker_legend_html,
+    _task_badges_html,
     _task_rows,
     build_today_print_report,
     build_tomorrow_print_report,
@@ -687,6 +688,7 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
         },
         {
             "title": "Morning task", "status": "TODO",
+            "created_at": "2026-08-14T07:00:00+02:00",
             "start_date": "2026-08-14T08:00:00+02:00",
             "due_date": "2026-08-14T08:00:00+02:00",
         },
@@ -698,12 +700,14 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     assert "border:2px solid #DC2626" in report_html
     assert 'data-task-badge="08:00"' in report_html
     assert report_html.count('data-task-badge="start-date"') == 2
+    assert report_html.count('data-task-badge="start-today"') == 1
     assert report_html.count('data-task-badge="due-date"') == 2
     assert 'data-badge-position="bottom-right"' in report_html
     assert 'data-due-today="true"' in report_html
     assert ">13.08.2026</span>" in report_html
     assert report_html.count(">14.08.2026</span>") == 1
     assert report_html.count(">SOT</span>") == 2
+    assert report_html.count(">START SOT</span>") == 1
     assert "DUE TODAY" not in report_html
     assert "background-color:#EFF6FF" in report_html
     assert "border:1px solid #93C5FD" in report_html
@@ -716,6 +720,8 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     assert "font-size:14px" in report_html
     assert "font-weight:900" in report_html
     assert "box-shadow:0 1px 3px rgba(127,29,29,0.45)" in report_html
+
+
     assert 'data-task-card-row="dates"' in report_html
     assert 'height="25" valign="bottom"' in report_html
     assert 'align="left"' in report_html
@@ -733,6 +739,25 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     assert "DUE TODAY" not in sheet["C7"].value
     assert "[08:00]" in sheet["D7"].value
     assert sheet["D7"].border.left.color.rgb.endswith("DC2626")
+
+
+def test_start_today_badge_is_directly_above_start_date() -> None:
+    top_badges, date_badges = _task_badges_html(
+        {"created_at": "2026-08-14T07:00:00+02:00", "start_date": "2026-08-14", "due_date": "2026-08-14"},
+        date(2026, 8, 14),
+    )
+
+    assert 'data-task-badge="start-today"' not in top_badges
+    assert date_badges.index('data-task-badge="start-today"') < date_badges.index('data-task-badge="start-date"')
+    assert '>START SOT</span><span data-task-badge="start-date"' in date_badges
+
+    for task in (
+        {"created_at": "2026-08-13T07:00:00+02:00", "start_date": "2026-08-14", "due_date": "2026-08-14"},
+        {"created_at": "2026-08-14T07:00:00+02:00", "start_date": "2026-08-13", "due_date": "2026-08-14"},
+        {"created_at": "2026-08-14T07:00:00+02:00", "start_date": "2026-08-14", "due_date": "2026-08-15"},
+    ):
+        _, badges = _task_badges_html(task, date(2026, 8, 14))
+        assert 'data-task-badge="start-today"' not in badges
 
 
 def test_ga_personal_purple_overrides_deadline_red_in_email_and_excel() -> None:

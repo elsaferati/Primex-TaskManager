@@ -100,7 +100,7 @@ PERSONAL_COLUMNS = [("NR", 2), ("WHO", 20), ("DEP", 5), ("AM/PM", 5), ("TITLE", 
 SYSTEM_TASK_COLUMNS = [("NR", 2), ("WHO", 20), ("DEP", 5), ("AM/PM", 5), ("TITLE", 56), ("DATA", 10)]
 UNFINISHED_PRIORITY_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("STATUS", 12),
-    ("LLOJI", 18), ("TITULLI", 45), ("DUE DATE", 12),
+    ("LLOJI", 18), ("TIPI", 5), ("TITULLI", 45), ("DUE DATE", 12),
 ]
 DONE_AM_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7), ("TITULLI", 58),
@@ -277,6 +277,7 @@ def _unfinished_priority_task_rows(
             str(getattr(task, "finish_period", None) or "").strip().upper(),
             status,
             task_type,
+            _m3_task_type_label(task),
             _display_title(task.title),
             "SOT",
         ]
