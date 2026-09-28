@@ -8996,10 +8996,10 @@ export default function AdminTasksPage() {
           width: 46px;
         }
         .admin-week-table .ga-time-comment-column {
-          width: 180px;
+          width: 150px;
         }
         .admin-week-table .ga-time-day-column {
-          width: calc((100% - 436px) / 5);
+          width: calc((100% - 376px) / 5);
         }
         .admin-week-table .ga-time-header {
           border: 1px solid #111827;
@@ -9050,8 +9050,8 @@ export default function AdminTasksPage() {
           line-height: 1.15;
         }
         .admin-week-table .ga-time-comment {
-          min-width: 180px;
-          width: 180px;
+          min-width: 150px;
+          width: 150px;
         }
         .admin-week-table .ga-time-special-comment {
           min-width: 0;
@@ -9508,14 +9508,14 @@ export default function AdminTasksPage() {
             width: 4% !important;
           }
           .admin-week-table .ga-time-comment-column {
-            width: 16% !important;
+            width: 14% !important;
           }
           .admin-week-table .ga-time-day-column {
-            width: 12.3% !important;
+            width: 13.1% !important;
           }
           .admin-week-table .ga-time-comment {
             min-width: 0 !important;
-            width: 16% !important;
+            width: 14% !important;
           }
           .admin-week-table .ga-time-special-comment {
             min-width: 0 !important;
