@@ -957,6 +957,7 @@ type SwimlaneRow = {
   badges?: { value: number; className: string; label?: string }[]
   headerBreakdown?: { value: number; label: string; className?: string }[]
   missingOneHUsers?: { id: string; label: string; initials: string }[]
+  missingBlockedUsers?: { id: string; label: string; initials: string }[]
   items: SwimlaneCell[]
 }
 
@@ -8472,6 +8473,25 @@ export default function CommonViewPage() {
           return { id: userEntry.id, label, initials: initials(label) }
         })
     }
+    const missingBlockedUsers = selectedOneHDate
+      ? (() => {
+          const usersWithBlockedTask = new Set<string>()
+          for (const item of commonData.blocked) {
+            if (item.date !== selectedOneHDate || isWaitingClientTask(item)) continue
+            if (item.userId) usersWithBlockedTask.add(item.userId)
+            for (const assignee of entryAssignees(item)) {
+              const assigneeId = oneHUserIdByName.get(assignee.trim().toLowerCase())
+              if (assigneeId) usersWithBlockedTask.add(assigneeId)
+            }
+          }
+          return oneHEligibleUsers
+            .filter((userEntry) => !usersWithBlockedTask.has(userEntry.id))
+            .map((userEntry) => {
+              const label = userEntry.full_name || userEntry.username || userEntry.email || "Unknown"
+              return { id: userEntry.id, label, initials: initials(label) }
+            })
+        })()
+      : []
     const oneHRows = isMultiDate
       ? [
           {
@@ -8581,6 +8601,7 @@ export default function CommonViewPage() {
         headerClass: "swimlane-header blocked",
         badgeClass: "swimlane-badge blocked",
         headerBreakdown: blockedHeaderBreakdown,
+        missingBlockedUsers,
         items: blockedItems,
       },
       ...oneHRows,
@@ -16710,6 +16731,18 @@ export default function CommonViewPage() {
                                     aria-label={`Pa slot ${headerSubtext}: ${row.missingOneHUsers.map((entry) => entry.label).join(", ")}`}
                                   >
                                     {row.missingOneHUsers.map((entry) => (
+                                      <span key={entry.id} className="oneh-missing-user" title={entry.label}>
+                                        {entry.initials}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                {row.missingBlockedUsers?.length ? (
+                                  <div
+                                    className="oneh-missing-users"
+                                    aria-label={`Pa detyrë BLL: ${row.missingBlockedUsers.map((entry) => entry.label).join(", ")}`}
+                                  >
+                                    {row.missingBlockedUsers.map((entry) => (
                                       <span key={entry.id} className="oneh-missing-user" title={entry.label}>
                                         {entry.initials}
                                       </span>
