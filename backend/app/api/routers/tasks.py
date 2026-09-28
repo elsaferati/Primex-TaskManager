@@ -1027,6 +1027,11 @@ def _parse_origin_task_id(internal_notes: str | None) -> uuid.UUID | None:
         return None
 
 
+def _pcm_control_title(title: str) -> str:
+    """Label newly created PCM control tasks without duplicating KO."""
+    return title if re.match(r"^\s*KO(?:\s|$)", title, re.IGNORECASE) else f"KO {title}"
+
+
 async def _project_for_id(db: AsyncSession, project_id: uuid.UUID) -> Project:
     project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
     if project is None:
@@ -1149,7 +1154,7 @@ async def _create_pcm_control_for_product(
     total, _ = _extract_total_and_completed(product_task.daily_products, product_task.internal_notes)
     notes = f"origin_task_id={product_task.id}; total_products={total or 0}; completed_products=0"
     control = Task(
-        title=product_task.title,
+        title=_pcm_control_title(product_task.title),
         description=product_task.description,
         internal_notes=notes,
         project_id=project.id,
@@ -2633,7 +2638,7 @@ async def create_task(
         task_department_id = assignee_dept_map.get(assigned_to_value) or department_id
 
     task = Task(
-        title=payload.title,
+        title=_pcm_control_title(payload.title) if pcm_control_origin is not None else payload.title,
         description=payload.description,
         internal_notes=payload.internal_notes,
         skill_category=payload.skill_category,
