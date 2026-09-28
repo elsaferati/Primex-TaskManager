@@ -350,8 +350,10 @@ def _one_h_slot_from_label(label: str) -> str | None:
     return slot if slot in VALID_1H_SLOTS else None
 
 
-def _missing_one_h_initials(payload: dict[str, Any], target_date: date) -> dict[str, list[str]]:
-    """Return active, present non-admin users missing each scheduled 1H slot."""
+def _missing_task_initials(
+    payload: dict[str, Any], target_date: date, *, bucket: str, slots: tuple[str, ...]
+) -> dict[str, list[str]]:
+    """Return active, present non-admin users missing work in each requested slot."""
     target_iso = target_date.isoformat()
     users = [row for row in payload.get("users") or [] if isinstance(row, dict)]
     items = payload.get("items") or {}
@@ -415,7 +417,7 @@ def _missing_one_h_initials(payload: dict[str, Any], target_date: date) -> dict[
 
     leave_items = [row for row in items.get("leave") or [] if isinstance(row, dict) and covers_target(row)]
     if any(row.get("isAllUsers") or row.get("is_all_users") for row in leave_items):
-        return {slot: [] for slot in VALID_1H_SLOTS}
+        return {slot: [] for slot in slots}
     unavailable_ids = {
         str(row.get("userId") or row.get("user_id"))
         for row in leave_items
@@ -429,13 +431,13 @@ def _missing_one_h_initials(payload: dict[str, Any], target_date: date) -> dict[
             if user_id:
                 unavailable_ids.add(str(user_id))
 
-    users_by_slot = {slot: set() for slot in VALID_1H_SLOTS}
-    for item in items.get("oneH") or []:
+    users_by_slot = {slot: set() for slot in slots}
+    for item in items.get(bucket) or []:
         if not isinstance(item, dict) or _item_date(item) != target_date:
             continue
         if _task_status(item) == "WAITING_CLIENT":
             continue
-        slot = _slot(item)
+        slot = _slot(item) if bucket == "oneH" else "BLL"
         if slot not in users_by_slot:
             continue
         user_id = item.get("userId") or item.get("user_id")
@@ -448,7 +450,7 @@ def _missing_one_h_initials(payload: dict[str, Any], target_date: date) -> dict[
                 users_by_slot[slot].add(resolved_id)
 
     result: dict[str, list[str]] = {}
-    for slot in VALID_1H_SLOTS:
+    for slot in slots:
         seen: set[str] = set()
         result[slot] = []
         for *_, user_id, user_initials in sorted(eligible):
@@ -457,6 +459,16 @@ def _missing_one_h_initials(payload: dict[str, Any], target_date: date) -> dict[
             seen.add(user_initials)
             result[slot].append(user_initials)
     return result
+
+
+def _missing_one_h_initials(payload: dict[str, Any], target_date: date) -> dict[str, list[str]]:
+    return _missing_task_initials(
+        payload, target_date, bucket="oneH", slots=tuple(sorted(VALID_1H_SLOTS))
+    )
+
+
+def _missing_blocked_initials(payload: dict[str, Any], target_date: date) -> list[str]:
+    return _missing_task_initials(payload, target_date, bucket="blocked", slots=("BLL",))["BLL"]
 
 
 def _comment_user_initials(payload: dict[str, Any]) -> list[str]:
@@ -1254,6 +1266,7 @@ def _task_marker_legend_html() -> str:
 def _html_table(
     rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: bool = False,
     report_date: date | None = None, missing_one_h_by_slot: dict[str, list[str]] | None = None,
+    missing_blocked_initials: list[str] | None = None,
 ) -> str:
     header = "MEETING" if meeting else "TASK"
     label_header = "LLOJI" if meeting else "LLOJI DHE SLOTI"
@@ -1267,6 +1280,13 @@ def _html_table(
                 f'{" ".join(escaped_lines[1:])}</span>'
             )
         label_html = "<br>".join(escaped_lines)
+        if label.splitlines()[0].strip().upper() == "BLL" and missing_blocked_initials:
+            missing_html = " &bull; ".join(html.escape(value) for value in missing_blocked_initials)
+            label_html += (
+                '<br><span data-missing-blocked-users="true" '
+                'style="display:inline-block;margin-top:7px;color:#DC2626;font-size:11px;'
+                f'font-weight:800;line-height:1.35;">{missing_html}</span>'
+            )
         slot = _one_h_slot_from_label(label)
         missing = (missing_one_h_by_slot or {}).get(slot or "", [])
         if missing:
@@ -3199,6 +3219,7 @@ async def _build_print_report(
     items = payload.get("items") or {}
     comment_initials = _comment_user_initials(payload)
     missing_one_h_by_slot = _missing_one_h_initials(payload, target_date)
+    missing_blocked_users = _missing_blocked_initials(payload, target_date)
     task_rows = _task_rows(items, target_date)
     meeting_dates = [target_date, next_working_day(target_date)] if include_meetings else []
     next_meeting_payload = payload
@@ -3247,7 +3268,7 @@ async def _build_print_report(
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
 <div data-report-intro="true">
 <div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">{report_title}</div>
-{_one_h_checklists_html(checklist_date)}{_task_marker_legend_html()}</div>{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date, missing_one_h_by_slot=missing_one_h_by_slot)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
+{_one_h_checklists_html(checklist_date)}{_task_marker_legend_html()}</div>{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date, missing_one_h_by_slot=missing_one_h_by_slot, missing_blocked_initials=missing_blocked_users)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
     content_html = (
         '<div data-today-print-report="true" style="margin:18px 0 14px">'
         + re.sub(r"^.*?<body[^>]*>|</body>.*$", "", html_body, flags=re.S)

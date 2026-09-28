@@ -89,6 +89,11 @@ const primaryItems: NavItem[] = [
     icon: StickyNote,
   },
   {
+    href: "/admin-tasks",
+    label: "Admin Tasks",
+    icon: ClipboardCheck,
+  },
+  {
     href: "/next-week-plan",
     label: "PX JAV",
     icon: CalendarClock,
@@ -100,15 +105,17 @@ const primaryItems: NavItem[] = [
   },
 ]
 
+const gaReportItems: NavItem[] = [
+  { href: "/today-print-report", label: "1H SHTYPI Today", icon: MailCheck },
+  { href: "/tomorrow-print-report", label: "1H SHTYPI Tomorrow", icon: MailCheck },
+  { href: "/morning-report", label: "M1 Start of Day", icon: MailCheck },
+  { href: "/after-break-report", label: "M2 Post-Break Summary", icon: MailCheck },
+  { href: "/meetings-report", label: "M3 End of Day", icon: MailCheck },
+]
+
+const gaReportHrefs = new Set(gaReportItems.map((item) => item.href))
+
 const navGroups: NavGroup[] = [
-  {
-    id: "admin-workspace",
-    label: "Admin Tasks",
-    icon: ClipboardCheck,
-    items: [
-      { href: "/admin-tasks", label: "Tasks", icon: ClipboardCheck },
-    ],
-  },
   {
     id: "team",
     label: "Ekipi",
@@ -253,6 +260,8 @@ export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
   const router = useRouter()
   const { apiFetch, prefetchApiFetch, user } = useAuth()
+  const isGaUser = [user?.username, user?.email?.split("@")[0]]
+    .some((value) => value?.trim().toLowerCase() === "gane.arifaj")
   const currentUserId = user?.id
   const { isOpen, isDesktop, setIsOpen } = useSidebar()
   const { count } = useWaitingConfirmationGa()
@@ -382,13 +391,16 @@ export function Sidebar({ role }: { role: UserRole }) {
       navGroups
         .map((group) => ({
           ...group,
-          items: group.items.filter(canViewItem),
+          items: group.items.filter((item) => canViewItem(item) && (!isGaUser || !gaReportHrefs.has(item.href))),
           subgroups: (group.subgroups || [])
-            .map((subgroup) => ({ ...subgroup, items: subgroup.items.filter(canViewItem) }))
+            .map((subgroup) => ({
+              ...subgroup,
+              items: subgroup.items.filter((item) => canViewItem(item) && (!isGaUser || !gaReportHrefs.has(item.href))),
+            }))
             .filter((subgroup) => subgroup.items.length > 0),
         }))
         .filter((group) => group.items.length > 0 || (group.subgroups?.length ?? 0) > 0),
-    [canViewItem]
+    [canViewItem, isGaUser]
   )
 
   const groupHasActiveItem = React.useCallback(
@@ -503,7 +515,10 @@ export function Sidebar({ role }: { role: UserRole }) {
 
       {/* Navigation Links */}
       <nav className="w-64 flex-1 overflow-y-auto py-4 px-3 space-y-1">
-        {primaryItems.filter(canViewItem).map((item) => renderNavItem(item))}
+        {primaryItems
+          .flatMap((item) => isGaUser && item.href === "/admin-tasks" ? [item, ...gaReportItems] : [item])
+          .filter(canViewItem)
+          .map((item) => renderNavItem(item))}
 
         <div className="my-2 border-t border-sidebar-border" />
 

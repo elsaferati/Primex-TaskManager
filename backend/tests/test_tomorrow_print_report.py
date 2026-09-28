@@ -15,6 +15,7 @@ from app.services.tomorrow_print_report import (
     _excel_table_attachment,
     _html_table,
     _meeting_rows,
+    _missing_blocked_initials,
     _missing_one_h_initials,
     _one_h_checklists_html,
     _png_table_attachment,
@@ -97,6 +98,40 @@ def test_missing_one_h_users_render_in_red_below_report_slot() -> None:
     assert 'data-missing-one-h-users="true"' in report_html
     assert "color:#DC2626" in report_html
     assert "EF &bull; RA &bull; AT" in report_html
+
+
+def test_blocked_row_shows_present_users_without_a_blocked_task_in_red() -> None:
+    payload = {
+        "users": [
+            {"id": "ef", "full_name": "Era Fana", "role": "STAFF", "is_active": True},
+            {"id": "ra", "full_name": "Rina Aliu", "role": "STAFF", "is_active": True},
+            {"id": "fg", "full_name": "Fiona Gashi", "role": "STAFF", "is_active": True},
+            {"id": "at", "full_name": "Arta Tafa", "role": "STAFF", "is_active": True},
+            {"id": "admin", "full_name": "Besa Kola", "role": "ADMIN", "is_active": True},
+        ],
+        "items": {
+            "blocked": [{"title": "EF: Blocked work", "date": "2026-09-28", "userId": "ef"}],
+            "leave": [{"startDate": "2026-09-28", "endDate": "2026-09-28", "userId": "at"}],
+            "absent": [],
+        },
+    }
+
+    missing = _missing_blocked_initials(payload, date(2026, 9, 28))
+    report_html = _html_table(
+        [("BLL\n14:30 - 16:00\nRAP 16:10", payload["items"]["blocked"], False)],
+        missing_blocked_initials=missing,
+    )
+
+    assert missing == ["FG", "RA"]
+    assert 'data-missing-blocked-users="true"' in report_html
+    assert "color:#DC2626" in report_html
+    assert "RA" in report_html and "FG" in report_html
+    assert "EF &bull;" not in report_html
+    assert "AT &bull;" not in report_html
+
+    generated = asyncio.run(build_today_print_report(date(2026, 9, 28), payload=payload))
+    assert 'data-missing-blocked-users="true"' in generated["html"]
+    assert "FG &bull; RA" in generated["html"]
 
 
 def test_missing_one_h_users_follow_the_same_department_and_person_order_as_tasks() -> None:
