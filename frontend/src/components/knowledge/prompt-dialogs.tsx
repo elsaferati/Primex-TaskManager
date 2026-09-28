@@ -11,7 +11,6 @@ import {
   FolderOpen,
   Loader2,
   Pencil,
-  Search,
   ShieldCheck,
   Trash2,
   Undo2,
@@ -25,10 +24,8 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
-import type { Department, UserLookup } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 import {
@@ -589,185 +586,6 @@ export function PromptDetailDialog({
             {isManager ? "Aprovimin duhet ta bëjë një menaxher tjetër nga autori dhe testuesi." : "Pret aprovimin e një menaxheri."}
           </p>
         ) : null}
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-/* -------------------------------------------------------------------------- */
-/* Create task from prompt note                                               */
-/* -------------------------------------------------------------------------- */
-
-export function CreateTaskDialog({
-  note,
-  users,
-  departments,
-  onClose,
-  onCreated,
-}: {
-  note: PromptNote | null
-  users: UserLookup[]
-  departments: Department[]
-  onClose: () => void
-  onCreated: () => void
-}) {
-  const { apiFetch, user } = useAuth()
-  const [title, setTitle] = React.useState("")
-  const [description, setDescription] = React.useState("")
-  const [assignees, setAssignees] = React.useState<string[]>([])
-  const [departmentId, setDepartmentId] = React.useState("")
-  const [dueDate, setDueDate] = React.useState("")
-  const [priority, setPriority] = React.useState<"NORMAL" | "HIGH">("NORMAL")
-  const [userQuery, setUserQuery] = React.useState("")
-  const [saving, setSaving] = React.useState(false)
-
-  React.useEffect(() => {
-    if (!note) return
-    const firstLine = note.content.split("\n").map((l) => l.trim()).find(Boolean) || "Prompt"
-    setTitle(`Prompt: ${firstLine}`.slice(0, 200))
-    setDescription(note.content)
-    setAssignees([])
-    setDepartmentId(note.department_id || user?.department_id || "")
-    setDueDate("")
-    setPriority(note.priority === "HIGH" ? "HIGH" : "NORMAL")
-    setUserQuery("")
-  }, [note, user?.department_id])
-
-  const activeUsers = React.useMemo(
-    () =>
-      users
-        .filter((u) => u.is_active)
-        .sort((a, b) => (a.full_name || a.email).localeCompare(b.full_name || b.email)),
-    [users]
-  )
-  const filteredUsers = React.useMemo(() => {
-    const q = userQuery.trim().toLowerCase()
-    if (!q) return activeUsers
-    return activeUsers.filter((u) => `${u.full_name || ""} ${u.username || ""} ${u.email}`.toLowerCase().includes(q))
-  }, [activeUsers, userQuery])
-
-  if (!note) return null
-
-  const toggle = (id: string) =>
-    setAssignees((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
-
-  const create = async () => {
-    if (title.trim().length < 2) return toast.error("Shkruaj titullin e detyrës")
-    if (!assignees.length) return toast.error("Zgjidh të paktën një person")
-    const firstAssignee = users.find((u) => u.id === assignees[0])
-    const dept = departmentId || firstAssignee?.department_id || ""
-    if (!dept) return toast.error("Zgjidh departamentin")
-    setSaving(true)
-    try {
-      const due = dueDate ? new Date(`${dueDate}T16:00:00`).toISOString() : null
-      const res = await apiFetch("/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: title.trim(),
-          description: description.trim() || null,
-          status: "TODO",
-          priority,
-          due_date: due,
-          assigned_to: assignees[0],
-          assignees,
-          ga_note_origin_id: note.id,
-          department_id: dept,
-        }),
-      })
-      if (!res.ok) {
-        toast.error(await readError(res, "Detyra nuk u krijua"))
-        return
-      }
-      toast.success("Detyra u krijua · shfaqet edhe te PX Notes")
-      onCreated()
-      onClose()
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Krijo detyrë nga kërkesa</DialogTitle>
-          <DialogDescription>Detyra lidhet me shënimin, njësoj si te PX Notes.</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="kt-title">Titulli</Label>
-            <Input id="kt-title" value={title} onChange={(e) => setTitle(e.target.value)} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="kt-desc">Përshkrimi</Label>
-            <Textarea id="kt-desc" value={description} onChange={(e) => setDescription(e.target.value)} className="max-h-48 min-h-20" />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="space-y-2">
-              <Label>Departamenti</Label>
-              <Select value={departmentId || undefined} onValueChange={setDepartmentId}>
-                <SelectTrigger className="w-full"><SelectValue placeholder="Zgjidh" /></SelectTrigger>
-                <SelectContent>
-                  {departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="kt-due">Afati</Label>
-              <Input id="kt-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Prioriteti</Label>
-              <Select value={priority} onValueChange={(v) => setPriority(v as "NORMAL" | "HIGH")}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="NORMAL">Normal</SelectItem>
-                  <SelectItem value="HIGH">High</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>Personat ({assignees.length})</Label>
-              {assignees.length ? (
-                <button type="button" className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setAssignees([])}>Pastro</button>
-              ) : null}
-            </div>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={userQuery} onChange={(e) => setUserQuery(e.target.value)} placeholder="Kërko personin…" className="pl-8" />
-            </div>
-            <div className="max-h-52 overflow-y-auto rounded-md border">
-              {filteredUsers.map((u) => {
-                const checked = assignees.includes(u.id)
-                return (
-                  <button
-                    type="button"
-                    key={u.id}
-                    onClick={() => toggle(u.id)}
-                    className={cn("flex w-full items-center gap-2 border-b px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted/50", checked && "bg-primary/5")}
-                  >
-                    <span className={cn("flex h-4 w-4 items-center justify-center rounded border", checked && "border-primary bg-primary text-primary-foreground")}>
-                      {checked ? <Check className="h-3 w-3" /> : null}
-                    </span>
-                    <span className="flex-1 truncate">{u.full_name || u.username || u.email}</span>
-                    <span className="text-xs text-muted-foreground">{departments.find((d) => d.id === u.department_id)?.code || ""}</span>
-                  </button>
-                )
-              })}
-              {!filteredUsers.length ? <p className="p-3 text-sm text-muted-foreground">Asnjë person.</p> : null}
-            </div>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={saving}>Anulo</Button>
-          <Button onClick={() => void create()} disabled={saving}>
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            Krijo detyrën
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   )
