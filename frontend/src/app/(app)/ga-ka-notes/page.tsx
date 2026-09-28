@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Bold, Calendar as CalendarIcon, Check, Clock, Cloud, Image as ImageIcon, List, ListOrdered, ListTodo, Paperclip, Pencil, Printer, Mic, Square, Trash2, Upload } from "lucide-react"
 import { toast } from "sonner"
 
@@ -1163,6 +1163,15 @@ export default function GaKaNotesPage() {
   const canViewStrikeTimestamps = user?.role === "ADMIN"
   const confirm = useConfirm()
   const searchParams = useSearchParams()
+  const router = useRouter()
+  // Deep link from Knowledge PX > Prompts: open this page's task dialog for a note,
+  // then return to the calling page once the task is created or the dialog is closed.
+  const taskForNoteId = searchParams.get("taskFor")
+  const taskReturnTo = React.useMemo(() => {
+    const value = searchParams.get("returnTo")
+    return value && value.startsWith("/") && !value.startsWith("//") ? value : null
+  }, [searchParams])
+  const deepLinkTaskStateRef = React.useRef<"idle" | "open" | "done">("idle")
   const [notes, setNotes] = React.useState<GaNotesTableNote[]>([])
   const notesRef = React.useRef<GaNotesTableNote[]>([])
   notesRef.current = notes
@@ -2508,6 +2517,35 @@ export default function GaKaNotesPage() {
     setTaskSkillAiReason("")
     void requestAiSkillCategory(defaultTitle, note.content || "")
   }
+
+  const openTaskDialogRef = React.useRef(openTaskDialog)
+  openTaskDialogRef.current = openTaskDialog
+
+  React.useEffect(() => {
+    if (!taskForNoteId || deepLinkTaskStateRef.current !== "idle" || loading) return
+    const target = notes.find((n) => n.id === taskForNoteId && n.source !== "PX_JAV")
+    if (!target) {
+      if (notes.length === 0) return
+      deepLinkTaskStateRef.current = "done"
+      toast.error("Shënimi nuk u gjet te PX Notes")
+      if (taskReturnTo) router.push(taskReturnTo)
+      return
+    }
+    if (target.is_converted_to_task) {
+      deepLinkTaskStateRef.current = "done"
+      toast.info("Ky shënim e ka tashmë një detyrë")
+      if (taskReturnTo) router.push(taskReturnTo)
+      return
+    }
+    deepLinkTaskStateRef.current = "open"
+    openTaskDialogRef.current(target)
+  }, [loading, notes, router, taskForNoteId, taskReturnTo])
+
+  React.useEffect(() => {
+    if (deepLinkTaskStateRef.current !== "open" || taskDialogNoteId) return
+    deepLinkTaskStateRef.current = "done"
+    if (taskReturnTo) router.push(taskReturnTo)
+  }, [router, taskDialogNoteId, taskReturnTo])
 
   // Get available priority/type options based on whether a project is selected
   const availablePriorityOptions = React.useMemo<readonly TaskTypeOption[]>(() => {

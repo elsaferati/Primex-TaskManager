@@ -81,10 +81,10 @@ export function promptNoteStage(note: PromptNote): PromptNoteStage {
 
 export const NOTE_STAGE_META: Record<PromptNoteStage, { label: string; className: string }> = {
   NO_TASK: { label: "Pa detyrë", className: "border-slate-200 bg-slate-50 text-slate-700" },
-  TASK_OPEN: { label: "Pending · detyra në proces", className: "border-amber-200 bg-amber-50 text-amber-800" },
-  READY: { label: "Detyra u krye · shto promptin", className: "border-violet-200 bg-violet-50 text-violet-800" },
-  IN_REVIEW: { label: "Prompti në shqyrtim", className: "border-sky-200 bg-sky-50 text-sky-800" },
-  DONE: { label: "Në Prompt Library", className: "border-emerald-200 bg-emerald-50 text-emerald-800" },
+  TASK_OPEN: { label: "Pending", className: "border-amber-200 bg-amber-50 text-amber-800" },
+  READY: { label: "Gati për prompt", className: "border-violet-200 bg-violet-50 text-violet-800" },
+  IN_REVIEW: { label: "Në shqyrtim", className: "border-sky-200 bg-sky-50 text-sky-800" },
+  DONE: { label: "Në librari", className: "border-emerald-200 bg-emerald-50 text-emerald-800" },
   CLOSED: { label: "Mbyllur", className: "border-slate-200 bg-slate-100 text-slate-500" },
 }
 

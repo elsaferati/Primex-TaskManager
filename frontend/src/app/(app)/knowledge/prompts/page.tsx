@@ -1,14 +1,10 @@
 "use client"
 
 import * as React from "react"
-import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
-  ArrowRight,
-  CheckCircle2,
+  BookOpen,
   ClipboardCopy,
-  FileText,
-  FolderOpen,
   ListPlus,
   Loader2,
   Lock,
@@ -16,145 +12,136 @@ import {
   Plus,
   Search,
   Sparkles,
+  Unlock,
   X,
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import {
-  CreateTaskDialog,
-  PromptDetailDialog,
-  PromptFormDialog,
-  PromptStatusBadge,
-  TaskStatusBadge,
-  copyText,
-} from "@/components/knowledge/prompt-dialogs"
-import { Highlight, excerpt, indexPrompts, normalizeText, searchPrompts } from "@/components/knowledge/prompt-search"
+import { PromptDetailDialog, PromptFormDialog, copyText } from "@/components/knowledge/prompt-dialogs"
+import { Highlight, indexPrompts, normalizeText, searchPrompts } from "@/components/knowledge/prompt-search"
 import {
   NOTE_STAGE_META,
+  PROMPT_STATUS_META,
+  TASK_STATUS_META,
   formatDate,
   promptNoteStage,
   type KnowledgePrompt,
+  type KnowledgeUserRef,
   type PromptNote,
   type PromptNoteStage,
   type PromptStatus,
 } from "@/components/knowledge/prompt-types"
 import { useAuth } from "@/lib/auth"
-import type { Department, UserLookup } from "@/lib/types"
-import { fetchUsersLookupCached } from "@/lib/users-cache"
+import type { Department } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-type LibraryFilter = "APPROVED" | "PENDING_TEST" | "PENDING_APPROVAL" | "REJECTED" | "ALL"
-type SortMode = "relevance" | "recent" | "az"
+/* ========================================================================== */
+/* Shared table primitives (same look as the PX Notes table)                  */
+/* ========================================================================== */
 
-const LIBRARY_FILTERS: { id: LibraryFilter; label: string }[] = [
-  { id: "APPROVED", label: "Libraria" },
-  { id: "PENDING_TEST", label: "Në testim" },
-  { id: "PENDING_APPROVAL", label: "Në aprovim" },
-  { id: "REJECTED", label: "Kthyer mbrapa" },
-  { id: "ALL", label: "Të gjitha" },
-]
+const TH = "h-10 border border-slate-600 bg-white px-2 text-left align-bottom text-xs font-semibold uppercase tracking-wide text-foreground whitespace-nowrap"
+const TD = "border border-slate-300 px-2 py-2 align-top text-sm"
+
+function initials(name?: string | null) {
+  if (!name) return "—"
+  const parts = name.trim().split(/\s+/)
+  return ((parts[0]?.[0] || "") + (parts.length > 1 ? parts[parts.length - 1][0] : parts[0]?.[1] || "")).toUpperCase()
+}
+
+function Person({ user }: { user?: KnowledgeUserRef | null }) {
+  if (!user) return <span className="text-muted-foreground">—</span>
+  return (
+    <span
+      title={user.full_name || ""}
+      className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-[11px] font-semibold text-slate-700"
+    >
+      {initials(user.full_name)}
+    </span>
+  )
+}
+
+function Pill({ label, className }: { label: string; className: string }) {
+  return (
+    <span className={cn("inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium", className)}>
+      {label}
+    </span>
+  )
+}
+
+function TableFrame({ children, minWidth }: { children: React.ReactNode; minWidth: number }) {
+  return (
+    <div className="max-h-[72vh] w-full overflow-auto rounded-md border-2 border-slate-700 bg-white">
+      <table className="w-full table-fixed border-collapse text-sm" style={{ minWidth }}>
+        {children}
+      </table>
+    </div>
+  )
+}
+
+function EmptyRow({ colSpan, children }: { colSpan: number; children: React.ReactNode }) {
+  return (
+    <tr>
+      <td colSpan={colSpan} className="border border-slate-300 px-4 py-12 text-center text-sm text-muted-foreground">
+        {children}
+      </td>
+    </tr>
+  )
+}
+
+function Toolbar({ children }: { children: React.ReactNode }) {
+  return <div className="flex flex-col gap-2 md:flex-row md:items-center">{children}</div>
+}
+
+function SearchBox({
+  value,
+  onChange,
+  placeholder,
+  inputRef,
+}: {
+  value: string
+  onChange: (v: string) => void
+  placeholder: string
+  inputRef?: React.Ref<HTMLInputElement>
+}) {
+  return (
+    <div className="relative flex-1">
+      <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        ref={inputRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Escape") onChange("") }}
+        placeholder={placeholder}
+        className="h-9 bg-white pl-8 pr-8"
+        aria-label={placeholder}
+      />
+      {value ? (
+        <button type="button" aria-label="Pastro" onClick={() => onChange("")} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground">
+          <X className="h-4 w-4" />
+        </button>
+      ) : null}
+    </div>
+  )
+}
 
 /* ========================================================================== */
 /* Prompt Library                                                             */
 /* ========================================================================== */
 
-function PromptCard({
-  prompt,
-  query,
-  activeKeywords,
-  onOpen,
-  onKeyword,
-}: {
-  prompt: KnowledgePrompt
-  query: string
-  activeKeywords: string[]
-  onOpen: () => void
-  onKeyword: (kw: string) => void
-}) {
-  const preview = excerpt(prompt.content, query, 260)
-  return (
-    <Card className="group flex flex-col gap-0 py-0 shadow-none transition-colors hover:border-primary/40">
-      <button type="button" onClick={onOpen} className="flex flex-1 flex-col gap-2 p-4 text-left">
-        <div className="flex items-start justify-between gap-2">
-          <h3 className="font-semibold leading-snug">
-            <Highlight text={prompt.title} query={query} />
-          </h3>
-          {prompt.status !== "APPROVED" ? <PromptStatusBadge status={prompt.status} /> : null}
-        </div>
-        {preview ? (
-          <p className="line-clamp-4 whitespace-pre-line font-mono text-[12px] leading-relaxed text-muted-foreground">
-            <Highlight text={preview} query={query} />
-          </p>
-        ) : prompt.file_original_name ? (
-          <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-            <FileText className="h-3.5 w-3.5" />
-            {prompt.file_original_name}
-          </p>
-        ) : null}
-      </button>
-      <div className="space-y-2 border-t px-4 py-3">
-        {prompt.keywords.length ? (
-          <div className="flex flex-wrap gap-1">
-            {prompt.keywords.map((kw) => {
-              const active = activeKeywords.some((a) => normalizeText(a) === normalizeText(kw))
-              return (
-                <button
-                  type="button"
-                  key={kw}
-                  onClick={() => onKeyword(kw)}
-                  className={cn(
-                    "rounded-full border px-2 py-0.5 text-[11px] transition-colors",
-                    active ? "border-primary bg-primary text-primary-foreground" : "bg-secondary/60 hover:bg-secondary"
-                  )}
-                >
-                  #<Highlight text={kw} query={query} />
-                </button>
-              )
-            })}
-          </div>
-        ) : null}
-        {prompt.files_path ? (
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <FolderOpen className="h-3.5 w-3.5 shrink-0" />
-            <code className="min-w-0 flex-1 truncate" title={prompt.files_path}>
-              <Highlight text={prompt.files_path} query={query} />
-            </code>
-            <button
-              type="button"
-              aria-label="Kopjo path"
-              className="rounded p-0.5 hover:bg-muted hover:text-foreground"
-              onClick={() => void copyText(prompt.files_path!, "Path u kopjua")}
-            >
-              <ClipboardCopy className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        ) : null}
-        <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-xs text-muted-foreground">
-            {prompt.created_by?.full_name || "—"} · {formatDate(prompt.approved_at || prompt.updated_at)}
-          </span>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7"
-            disabled={!prompt.content}
-            onClick={() => void copyText(prompt.content, "Prompti u kopjua")}
-          >
-            <ClipboardCopy className="h-3.5 w-3.5" />
-            Kopjo
-          </Button>
-        </div>
-      </div>
-    </Card>
-  )
-}
+type LibraryFilter = PromptStatus | "ALL"
+type SortMode = "relevance" | "recent" | "az"
+
+const LIBRARY_FILTERS: { id: LibraryFilter; label: string }[] = [
+  { id: "APPROVED", label: "Libraria (aprovuar)" },
+  { id: "PENDING_TEST", label: "Në testim" },
+  { id: "PENDING_APPROVAL", label: "Në aprovim" },
+  { id: "REJECTED", label: "Kthyer mbrapa" },
+  { id: "ALL", label: "Të gjitha" },
+]
 
 function PromptLibrary({
   prompts,
@@ -177,8 +164,8 @@ function PromptLibrary({
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null
-      const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+      const t = e.target as HTMLElement | null
+      const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
       if (e.key === "/" && !typing) {
         e.preventDefault()
         searchRef.current?.focus()
@@ -189,47 +176,31 @@ function PromptLibrary({
   }, [])
 
   const isManager = user?.role === "ADMIN" || user?.role === "MANAGER"
-  const counts = React.useMemo(() => {
-    const c: Record<LibraryFilter, number> = { APPROVED: 0, PENDING_TEST: 0, PENDING_APPROVAL: 0, REJECTED: 0, ALL: prompts.length }
-    for (const p of prompts) c[p.status as PromptStatus] += 1
-    return c
-  }, [prompts])
-  const actionable = React.useCallback(
+  const needsMe = React.useCallback(
     (p: KnowledgePrompt) =>
       (p.status === "PENDING_TEST" && p.created_by?.id !== user?.id) ||
       (p.status === "PENDING_APPROVAL" && isManager && p.created_by?.id !== user?.id && p.tested_by?.id !== user?.id),
     [isManager, user?.id]
   )
+  const counts = React.useMemo(() => {
+    const c: Record<LibraryFilter, number> = { APPROVED: 0, PENDING_TEST: 0, PENDING_APPROVAL: 0, REJECTED: 0, ALL: prompts.length }
+    for (const p of prompts) c[p.status] += 1
+    return c
+  }, [prompts])
+  const waitingForMe = prompts.filter(needsMe).length
 
-  const scoped = React.useMemo(
-    () => (filter === "ALL" ? prompts : prompts.filter((p) => p.status === filter)),
-    [prompts, filter]
-  )
+  const scoped = React.useMemo(() => (filter === "ALL" ? prompts : prompts.filter((p) => p.status === filter)), [prompts, filter])
   const index = React.useMemo(() => indexPrompts(scoped), [scoped])
-  const results = React.useMemo(() => {
+  const rows = React.useMemo(() => {
     const hits = searchPrompts(index, deferredQuery, keywords)
-    const hasQuery = deferredQuery.trim().length > 0
-    const effectiveSort: SortMode = sort === "relevance" && !hasQuery ? "recent" : sort
+    const bySort: SortMode = sort === "relevance" && !deferredQuery.trim() ? "recent" : sort
     hits.sort((a, b) => {
-      if (effectiveSort === "relevance" && b.score !== a.score) return b.score - a.score
-      if (effectiveSort === "az") return a.prompt.title.localeCompare(b.prompt.title)
+      if (bySort === "relevance" && b.score !== a.score) return b.score - a.score
+      if (bySort === "az") return a.prompt.title.localeCompare(b.prompt.title)
       return (b.prompt.approved_at || b.prompt.updated_at).localeCompare(a.prompt.approved_at || a.prompt.updated_at)
     })
     return hits.map((h) => h.prompt)
   }, [index, deferredQuery, keywords, sort])
-
-  const topKeywords = React.useMemo(() => {
-    const freq = new Map<string, { label: string; n: number }>()
-    for (const p of scoped) {
-      for (const kw of p.keywords) {
-        const key = normalizeText(kw)
-        const cur = freq.get(key)
-        if (cur) cur.n += 1
-        else freq.set(key, { label: kw, n: 1 })
-      }
-    }
-    return [...freq.values()].sort((a, b) => b.n - a.n || a.label.localeCompare(b.label)).slice(0, 18)
-  }, [scoped])
 
   const toggleKeyword = (kw: string) =>
     setKeywords((prev) =>
@@ -239,140 +210,158 @@ function PromptLibrary({
     )
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-        <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            ref={searchRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Escape") setQuery("") }}
-            placeholder="Kërko prompt sipas titullit, keywords, tekstit ose path…  (#amazon = vetëm keyword)"
-            className="h-11 pl-10 pr-16 text-base"
-            aria-label="Kërko promptet"
-          />
-          {query ? (
-            <button type="button" aria-label="Pastro kërkimin" onClick={() => setQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground">
-              <X className="h-4 w-4" />
-            </button>
-          ) : (
-            <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded border bg-muted px-1.5 text-xs text-muted-foreground">/</kbd>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Select value={sort} onValueChange={(v) => setSort(v as SortMode)}>
-            <SelectTrigger className="h-11 w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="relevance">Më relevantet</SelectItem>
-              <SelectItem value="recent">Më të rejat</SelectItem>
-              <SelectItem value="az">A – Z</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button className="h-11" onClick={onAdd}>
-            <Plus className="h-4 w-4" />
-            Shto prompt
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-3">
+      <Toolbar>
+        <SearchBox
+          value={query}
+          onChange={setQuery}
+          inputRef={searchRef}
+          placeholder="Kërko sipas titullit, keywords, tekstit ose path…  ( / )"
+        />
+        <Select value={filter} onValueChange={(v) => setFilter(v as LibraryFilter)}>
+          <SelectTrigger className="h-9 w-full bg-white md:w-56"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {LIBRARY_FILTERS.map((f) => (
+              <SelectItem key={f.id} value={f.id}>{f.label} ({counts[f.id]})</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={sort} onValueChange={(v) => setSort(v as SortMode)}>
+          <SelectTrigger className="h-9 w-full bg-white md:w-40"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="relevance">Më relevantet</SelectItem>
+            <SelectItem value="recent">Më të rejat</SelectItem>
+            <SelectItem value="az">A – Z</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button className="h-9" onClick={onAdd}>
+          <Plus className="h-4 w-4" /> Shto prompt
+        </Button>
+      </Toolbar>
 
-      <div className="flex flex-wrap items-center gap-2">
-        {LIBRARY_FILTERS.map((f) => {
-          const pendingForMe = f.id !== "ALL" && f.id !== "APPROVED" ? prompts.filter((p) => p.status === f.id && actionable(p)).length : 0
-          return (
+      {waitingForMe > 0 || keywords.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {waitingForMe > 0 ? (
             <button
               type="button"
-              key={f.id}
-              onClick={() => setFilter(f.id)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition-colors",
-                filter === f.id ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted"
-              )}
+              onClick={() => setFilter(isManager && counts.PENDING_APPROVAL ? "PENDING_APPROVAL" : "PENDING_TEST")}
+              className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 font-medium text-amber-800 hover:bg-amber-100"
             >
-              {f.label}
-              <span className={cn("tabular-nums", filter === f.id ? "opacity-80" : "text-muted-foreground")}>{counts[f.id]}</span>
-              {pendingForMe ? (
-                <span className="rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-white" title="Presin veprimin tuaj">{pendingForMe}</span>
-              ) : null}
-            </button>
-          )
-        })}
-      </div>
-
-      {topKeywords.length ? (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="mr-1 text-xs font-medium text-muted-foreground">Keywords:</span>
-          {topKeywords.map(({ label, n }) => {
-            const active = keywords.some((k) => normalizeText(k) === normalizeText(label))
-            return (
-              <button
-                type="button"
-                key={label}
-                onClick={() => toggleKeyword(label)}
-                className={cn(
-                  "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
-                  active ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted"
-                )}
-              >
-                #{label} <span className="opacity-60">{n}</span>
-              </button>
-            )
-          })}
-          {keywords.length ? (
-            <button type="button" onClick={() => setKeywords([])} className="text-xs text-muted-foreground underline-offset-2 hover:underline">
-              pastro
+              {waitingForMe} {waitingForMe === 1 ? "prompt pret" : "prompte presin"} veprimin tënd
             </button>
           ) : null}
+          {keywords.map((kw) => (
+            <button
+              type="button"
+              key={kw}
+              onClick={() => toggleKeyword(kw)}
+              className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 font-medium text-white"
+            >
+              #{kw} <X className="h-3 w-3" />
+            </button>
+          ))}
         </div>
       ) : null}
 
-      {loading ? (
-        <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Promptet po ngarkohen…
-        </div>
-      ) : results.length === 0 ? (
-        <Card className="border-dashed shadow-none">
-          <CardContent className="py-14 text-center">
-            {scoped.length === 0 ? (
-              <>
-                <Sparkles className="mx-auto h-8 w-8 text-muted-foreground" />
-                <p className="mt-3 font-medium">
-                  {filter === "APPROVED" ? "Libraria është ende bosh." : "Asnjë prompt në këtë status."}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Promptet shfaqen këtu pasi testohen dhe aprovohen nga menaxheri.
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="font-medium">Asnjë prompt për “{query || keywords.map((k) => `#${k}`).join(" ")}”.</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Provo më pak fjalë, një keyword tjetër, ose kërko te{" "}
-                  <button type="button" className="underline" onClick={() => setFilter("ALL")}>të gjitha statuset</button>.
-                </p>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      ) : (
-        <>
-          <p className="text-xs text-muted-foreground">
-            {results.length} {results.length === 1 ? "prompt" : "prompte"}
-          </p>
-          <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
-            {results.map((p) => (
-              <PromptCard
-                key={p.id}
-                prompt={p}
-                query={deferredQuery}
-                activeKeywords={keywords}
-                onOpen={() => onOpen(p)}
-                onKeyword={toggleKeyword}
-              />
-            ))}
-          </div>
-        </>
-      )}
+      <TableFrame minWidth={1180}>
+        <thead className="sticky top-0 z-10 bg-white shadow-sm">
+          <tr>
+            <th className={cn(TH, "w-[48px] border-l-2 border-l-slate-800")}>NR</th>
+            <th className={cn(TH, "w-[30%]")}>Titulli / Prompti</th>
+            <th className={cn(TH, "w-[18%]")}>Keywords</th>
+            <th className={cn(TH, "w-[17%]")}>Path në Files PX</th>
+            <th className={cn(TH, "w-[110px]")}>Statusi</th>
+            <th className={cn(TH, "w-[56px]")}>Nga</th>
+            <th className={cn(TH, "w-[64px]")}>Testoi</th>
+            <th className={cn(TH, "w-[72px]")}>Aprovoi</th>
+            <th className={cn(TH, "w-[92px]")}>Data</th>
+            <th className={cn(TH, "w-[100px] border-r-2 border-r-slate-800")}>Kopjo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {loading ? (
+            <EmptyRow colSpan={10}><Loader2 className="mx-auto h-4 w-4 animate-spin" /></EmptyRow>
+          ) : rows.length === 0 ? (
+            <EmptyRow colSpan={10}>
+              {scoped.length === 0
+                ? filter === "APPROVED"
+                  ? "Libraria është ende bosh. Promptet shfaqen këtu pasi testohen dhe aprovohen."
+                  : "Asnjë prompt në këtë status."
+                : "Asnjë prompt nuk përputhet me kërkimin."}
+            </EmptyRow>
+          ) : (
+            rows.map((p, i) => {
+              const meta = PROMPT_STATUS_META[p.status]
+              const mine = needsMe(p)
+              return (
+                <tr key={p.id} className={cn("cursor-pointer hover:bg-slate-50", mine && "bg-amber-50/60")} onClick={() => onOpen(p)}>
+                  <td className={cn(TD, "text-center font-medium tabular-nums text-muted-foreground")}>{i + 1}</td>
+                  <td className={TD}>
+                    <div className="font-semibold leading-snug"><Highlight text={p.title} query={deferredQuery} /></div>
+                    <div className="mt-0.5 line-clamp-2 font-mono text-[11px] leading-snug text-muted-foreground">
+                      {p.content ? <Highlight text={p.content.replace(/\s+/g, " ").slice(0, 220)} query={deferredQuery} /> : p.file_original_name || ""}
+                    </div>
+                  </td>
+                  <td className={TD}>
+                    <div className="flex flex-wrap gap-1">
+                      {p.keywords.map((kw) => (
+                        <button
+                          type="button"
+                          key={kw}
+                          onClick={(e) => { e.stopPropagation(); toggleKeyword(kw) }}
+                          className="rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 text-[11px] hover:border-slate-500"
+                          title="Filtro me këtë keyword"
+                        >
+                          <Highlight text={kw} query={deferredQuery} />
+                        </button>
+                      ))}
+                    </div>
+                  </td>
+                  <td className={TD}>
+                    {p.files_path ? (
+                      <div className="flex items-start gap-1">
+                        <code className="min-w-0 flex-1 break-all text-[11px] leading-snug" title={p.files_path}>
+                          <Highlight text={p.files_path} query={deferredQuery} />
+                        </code>
+                        <button
+                          type="button"
+                          aria-label="Kopjo path"
+                          onClick={(e) => { e.stopPropagation(); void copyText(p.files_path!, "Path u kopjua") }}
+                          className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-slate-100 hover:text-foreground"
+                        >
+                          <ClipboardCopy className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ) : <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className={TD}>
+                    <Pill label={meta.label} className={meta.className} />
+                    {mine ? <div className="mt-1 text-[10px] font-semibold uppercase text-amber-700">Pret ty</div> : null}
+                  </td>
+                  <td className={cn(TD, "text-center")}><Person user={p.created_by} /></td>
+                  <td className={cn(TD, "text-center")}><Person user={p.tested_by} /></td>
+                  <td className={cn(TD, "text-center")}><Person user={p.approved_by} /></td>
+                  <td className={cn(TD, "tabular-nums text-xs")}>{formatDate(p.approved_at || p.updated_at)}</td>
+                  <td className={TD}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2"
+                      disabled={!p.content}
+                      onClick={(e) => { e.stopPropagation(); void copyText(p.content, "Prompti u kopjua") }}
+                    >
+                      <ClipboardCopy className="h-3.5 w-3.5" /> Kopjo
+                    </Button>
+                  </td>
+                </tr>
+              )
+            })
+          )}
+        </tbody>
+      </TableFrame>
+      {!loading && rows.length ? (
+        <p className="text-xs text-muted-foreground">{rows.length} {rows.length === 1 ? "prompt" : "prompte"} · kliko rreshtin për ta hapur</p>
+      ) : null}
     </div>
   )
 }
@@ -381,42 +370,33 @@ function PromptLibrary({
 /* Prompt Notes                                                               */
 /* ========================================================================== */
 
-const STAGE_FILTERS: { id: PromptNoteStage | "ALL" | "ACTIVE"; label: string }[] = [
+type StageFilter = PromptNoteStage | "ALL" | "ACTIVE"
+const STAGE_FILTERS: { id: StageFilter; label: string }[] = [
   { id: "ACTIVE", label: "Aktive" },
   { id: "NO_TASK", label: "Pa detyrë" },
   { id: "TASK_OPEN", label: "Pending" },
   { id: "READY", label: "Gati për prompt" },
   { id: "IN_REVIEW", label: "Në shqyrtim" },
   { id: "DONE", label: "Në librari" },
+  { id: "CLOSED", label: "Mbyllur" },
   { id: "ALL", label: "Të gjitha" },
 ]
 
-const STEP_ORDER: PromptNoteStage[] = ["NO_TASK", "TASK_OPEN", "READY", "IN_REVIEW", "DONE"]
-
-function StageProgress({ stage }: { stage: PromptNoteStage }) {
-  const labels = ["Shënim", "Detyrë", "Prompt", "Test & aprovim", "Librari"]
-  const reached = stage === "CLOSED" ? 0 : STEP_ORDER.indexOf(stage)
-  return (
-    <div className="flex items-center gap-1" aria-label={`Faza: ${NOTE_STAGE_META[stage].label}`}>
-      {labels.map((label, i) => (
-        <div key={label} className="flex items-center gap-1">
-          <span
-            title={label}
-            className={cn(
-              "h-1.5 w-8 rounded-full",
-              i <= reached ? (stage === "DONE" ? "bg-emerald-500" : "bg-primary") : "bg-muted"
-            )}
-          />
-        </div>
-      ))}
-    </div>
-  )
+// Same colours as the SHENIMI cell in PX Notes.
+function noteCellClass(note: PromptNote, stage: PromptNoteStage) {
+  if (stage === "CLOSED" || stage === "DONE") return stage === "DONE" ? "bg-emerald-100" : "bg-slate-200 text-slate-500"
+  if (!note.tasks.length) return ""
+  const statuses = note.tasks.map((t) => t.status)
+  if (statuses.every((s) => s === "DONE")) return "bg-emerald-200"
+  if (statuses.some((s) => s === "IN_PROGRESS")) return "bg-yellow-200"
+  if (statuses.some((s) => s === "WAITING_CLIENT")) return "bg-[#E2C15B] text-[#4F3A00]"
+  if (statuses.some((s) => s === "WAITING_CONFIRMATION")) return "bg-amber-50"
+  return "bg-pink-200"
 }
 
 function PromptNotes({
   notes,
   loading,
-  users,
   departments,
   prompts,
   reload,
@@ -425,7 +405,6 @@ function PromptNotes({
 }: {
   notes: PromptNote[]
   loading: boolean
-  users: UserLookup[]
   departments: Department[]
   prompts: KnowledgePrompt[]
   reload: () => Promise<void>
@@ -433,18 +412,29 @@ function PromptNotes({
   onOpenPrompt: (p: KnowledgePrompt) => void
 }) {
   const { apiFetch, user } = useAuth()
+  const router = useRouter()
   const isManager = user?.role === "ADMIN" || user?.role === "MANAGER"
   const [content, setContent] = React.useState("")
   const [priority, setPriority] = React.useState<"NORMAL" | "HIGH">("NORMAL")
-  const [departmentId, setDepartmentId] = React.useState<string>("")
+  const [departmentId, setDepartmentId] = React.useState("")
   const [posting, setPosting] = React.useState(false)
-  const [filter, setFilter] = React.useState<(typeof STAGE_FILTERS)[number]["id"]>("ACTIVE")
+  const [filter, setFilter] = React.useState<StageFilter>("ACTIVE")
   const [query, setQuery] = React.useState("")
-  const [taskNote, setTaskNote] = React.useState<PromptNote | null>(null)
 
   React.useEffect(() => {
     if (!departmentId && user?.department_id) setDepartmentId(user.department_id)
   }, [departmentId, user?.department_id])
+
+  const deptCode = React.useCallback(
+    (id?: string | null) => departments.find((d) => d.id === id)?.code || "",
+    [departments]
+  )
+
+  // Same "Create Task from Note" dialog as PX Notes; PX Notes sends the user back here.
+  const openPxNotesTaskDialog = (note: PromptNote) => {
+    const params = new URLSearchParams({ taskFor: note.id, returnTo: "/knowledge/prompts?view=notes" })
+    router.push(`/ga-ka-notes?${params.toString()}`)
+  }
 
   const save = async () => {
     if (content.trim().length < 2) return toast.error("Shkruaj kërkesën për prompt")
@@ -487,13 +477,13 @@ function PromptNotes({
 
   const staged = React.useMemo(() => notes.map((n) => ({ note: n, stage: promptNoteStage(n) })), [notes])
   const counts = React.useMemo(() => {
-    const c = new Map<string, number>()
+    const c = new Map<StageFilter, number>()
     for (const { stage } of staged) c.set(stage, (c.get(stage) || 0) + 1)
     c.set("ALL", staged.length)
     c.set("ACTIVE", staged.filter((s) => s.stage !== "DONE" && s.stage !== "CLOSED").length)
     return c
   }, [staged])
-  const visible = React.useMemo(() => {
+  const rows = React.useMemo(() => {
     const q = normalizeText(query.trim())
     return staged.filter(({ note, stage }) => {
       if (filter === "ACTIVE" && (stage === "DONE" || stage === "CLOSED")) return false
@@ -507,23 +497,23 @@ function PromptNotes({
   }, [staged, filter, query])
 
   return (
-    <div className="space-y-4">
-      <Card className="gap-0 py-0 shadow-none">
-        <CardContent className="space-y-3 p-4">
-          <div className="flex items-center gap-2">
-            <NotebookPen className="h-4 w-4 text-muted-foreground" />
-            <p className="text-sm font-semibold">Kërkesë e re për prompt</p>
-          </div>
+    <div className="space-y-3">
+      <div className="rounded-md border bg-white p-3">
+        <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+          <NotebookPen className="h-4 w-4 text-muted-foreground" /> Kërkesë e re për prompt
+        </div>
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-start">
           <Textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) void save() }}
             placeholder="Çfarë prompti na duhet? p.sh. Prompt për krijimin e Amazon bullet points për programet e MST…"
-            className="max-h-60 min-h-20"
+            className="max-h-40 min-h-9 flex-1 bg-white py-1.5"
+            rows={1}
           />
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap gap-2">
             <Select value={priority} onValueChange={(v) => setPriority(v as "NORMAL" | "HIGH")}>
-              <SelectTrigger className="h-9 w-32"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-9 w-28 bg-white"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="NORMAL">Normal</SelectItem>
                 <SelectItem value="HIGH">High</SelectItem>
@@ -531,156 +521,156 @@ function PromptNotes({
             </Select>
             {isManager || !user?.department_id ? (
               <Select value={departmentId || undefined} onValueChange={setDepartmentId}>
-                <SelectTrigger className="h-9 w-48"><SelectValue placeholder="Departamenti" /></SelectTrigger>
+                <SelectTrigger className="h-9 w-44 bg-white"><SelectValue placeholder="Departamenti" /></SelectTrigger>
                 <SelectContent>
                   {departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             ) : null}
-            <span className="flex-1 text-xs text-muted-foreground">Ruhet te Prompt Notes dhe shfaqet automatikisht edhe te PX Notes.</span>
-            <Button onClick={() => void save()} disabled={posting || content.trim().length < 2}>
+            <Button className="h-9" onClick={() => void save()} disabled={posting || content.trim().length < 2}>
               {posting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              Ruaj shënimin
+              Ruaj
             </Button>
           </div>
-        </CardContent>
-      </Card>
-
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-wrap gap-2">
-          {STAGE_FILTERS.map((f) => (
-            <button
-              type="button"
-              key={f.id}
-              onClick={() => setFilter(f.id)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition-colors",
-                filter === f.id ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted"
-              )}
-            >
-              {f.label}
-              <span className={cn("tabular-nums", filter === f.id ? "opacity-80" : "text-muted-foreground")}>{counts.get(f.id) || 0}</span>
-            </button>
-          ))}
         </div>
-        <div className="relative lg:w-72">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Kërko te shënimet…" className="pl-8" />
-        </div>
+        <p className="mt-1.5 text-[11px] text-muted-foreground">Shfaqet automatikisht edhe te PX Notes. Ctrl+Enter për ta ruajtur.</p>
       </div>
 
-      {loading ? (
-        <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Shënimet po ngarkohen…
-        </div>
-      ) : visible.length === 0 ? (
-        <Card className="border-dashed shadow-none">
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            {notes.length === 0 ? "Ende nuk ka kërkesa për prompte. Shkruaj të parën më lart." : "Asnjë shënim për këtë filtër."}
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-3">
-          {visible.map(({ note, stage }) => {
-            const meta = NOTE_STAGE_META[stage]
-            const canAddPrompt = note.tasks.length > 0 && (stage === "READY" || stage === "TASK_OPEN")
-            const canManage = isManager || note.created_by?.id === user?.id
-            return (
-              <Card key={note.id} className={cn("gap-0 py-0 shadow-none", stage === "READY" && "border-violet-300")}>
-                <CardContent className="space-y-3 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" className={cn("font-medium", meta.className)}>{meta.label}</Badge>
-                      {note.priority === "HIGH" ? <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">High</Badge> : null}
-                      <StageProgress stage={stage} />
+      <Toolbar>
+        <SearchBox value={query} onChange={setQuery} placeholder="Kërko te kërkesat, detyrat, personat…" />
+        <Select value={filter} onValueChange={(v) => setFilter(v as StageFilter)}>
+          <SelectTrigger className="h-9 w-full bg-white md:w-56"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {STAGE_FILTERS.map((f) => (
+              <SelectItem key={f.id} value={f.id}>{f.label} ({counts.get(f.id) || 0})</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Toolbar>
+
+      <TableFrame minWidth={1180}>
+        <thead className="sticky top-0 z-10 bg-white shadow-sm">
+          <tr>
+            <th className={cn(TH, "w-[48px] border-l-2 border-l-slate-800")}>NR</th>
+            <th className={cn(TH, "w-[28%]")}>Kërkesa</th>
+            <th className={cn(TH, "w-[20%]")}>Detyra</th>
+            <th className={cn(TH, "w-[56px]")}>Për</th>
+            <th className={cn(TH, "w-[118px]")}>Statusi</th>
+            <th className={cn(TH, "w-[16%]")}>Prompti</th>
+            <th className={cn(TH, "w-[56px]")}>Nga</th>
+            <th className={cn(TH, "w-[56px]")}>Dep</th>
+            <th className={cn(TH, "w-[92px]")}>Data</th>
+            <th className={cn(TH, "w-[150px] border-r-2 border-r-slate-800")}>Veprimi</th>
+          </tr>
+        </thead>
+        <tbody>
+          {loading ? (
+            <EmptyRow colSpan={10}><Loader2 className="mx-auto h-4 w-4 animate-spin" /></EmptyRow>
+          ) : rows.length === 0 ? (
+            <EmptyRow colSpan={10}>
+              {notes.length === 0 ? "Ende nuk ka kërkesa për prompte. Shkruaj të parën më lart." : "Asnjë kërkesë për këtë filtër."}
+            </EmptyRow>
+          ) : (
+            rows.map(({ note, stage }, i) => {
+              const stageMeta = NOTE_STAGE_META[stage]
+              const canManage = isManager || note.created_by?.id === user?.id
+              const canAddPrompt = note.tasks.length > 0 && (stage === "READY" || stage === "TASK_OPEN")
+              return (
+                <tr key={note.id} className="hover:bg-slate-50/60">
+                  <td className={cn(TD, "text-center font-medium tabular-nums text-muted-foreground")}>{i + 1}</td>
+                  <td className={cn(TD, noteCellClass(note, stage))}>
+                    <p className="whitespace-pre-wrap break-words">{note.content}</p>
+                    {note.priority === "HIGH" ? <span className="mt-1 inline-block rounded bg-red-600 px-1.5 text-[10px] font-bold text-white">HIGH</span> : null}
+                  </td>
+                  <td className={TD}>
+                    {note.tasks.length ? (
+                      <ul className="space-y-1">
+                        {note.tasks.map((t) => (
+                          <li key={t.id} className="leading-snug">
+                            {t.title}
+                            {t.due_date ? <span className="block text-[11px] text-muted-foreground">Afati {formatDate(t.due_date)}</span> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className={cn(TD, "text-center")}>
+                    <div className="flex flex-col items-center gap-1">
+                      {note.tasks.length ? note.tasks.map((t) => <Person key={t.id} user={t.assignee} />) : <span className="text-muted-foreground">—</span>}
                     </div>
-                    <span className="text-xs text-muted-foreground">
-                      {note.created_by?.full_name || "—"} · {formatDate(note.created_at)}
-                    </span>
-                  </div>
-
-                  <p className="whitespace-pre-wrap text-sm">{note.content}</p>
-
-                  {note.tasks.length ? (
-                    <div className="space-y-1.5 rounded-lg border bg-muted/30 p-2.5">
-                      {note.tasks.map((t) => (
-                        <div key={t.id} className="flex flex-wrap items-center gap-2 text-sm">
-                          <TaskStatusBadge status={t.status} />
-                          <span className="min-w-0 flex-1 truncate">{t.title}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {t.assignee?.full_name || "—"}
-                            {t.due_date ? ` · afati ${formatDate(t.due_date)}` : ""}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  {note.prompts.length ? (
-                    <div className="flex flex-wrap gap-2">
-                      {note.prompts.map((p) => {
-                        const full = prompts.find((x) => x.id === p.id)
-                        return (
-                          <button
-                            type="button"
-                            key={p.id}
-                            onClick={() => full && onOpenPrompt(full)}
-                            className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm hover:bg-muted/50"
-                          >
-                            <Sparkles className="h-3.5 w-3.5 text-violet-600" />
-                            <span className="font-medium">{p.title}</span>
-                            <PromptStatusBadge status={p.status} />
-                            <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
-                          </button>
-                        )
+                  </td>
+                  <td className={TD}>
+                    <div className="flex flex-col items-start gap-1">
+                      {note.tasks.map((t) => {
+                        const m = TASK_STATUS_META[t.status] ?? { label: t.status, className: "" }
+                        return <Pill key={t.id} label={m.label} className={m.className} />
                       })}
+                      <Pill label={stageMeta.label} className={stageMeta.className} />
                     </div>
-                  ) : null}
-
-                  <div className="flex flex-wrap items-center justify-end gap-2">
-                    {canManage && note.status === "OPEN" && stage !== "DONE" ? (
-                      <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => void setNoteStatus(note, "CLOSED")}>
-                        <Lock className="h-3.5 w-3.5" /> Mbyll
-                      </Button>
-                    ) : null}
-                    {canManage && stage === "CLOSED" ? (
-                      <Button variant="ghost" size="sm" onClick={() => void setNoteStatus(note, "OPEN")}>Rihap</Button>
-                    ) : null}
-                    {stage === "NO_TASK" ? (
-                      <Button size="sm" onClick={() => setTaskNote(note)}>
-                        <ListPlus className="h-4 w-4" /> Krijo detyrë
-                      </Button>
-                    ) : null}
-                    {canAddPrompt ? (
-                      <Button
-                        size="sm"
-                        variant={stage === "READY" ? "default" : "outline"}
-                        className={cn(stage === "READY" && "bg-violet-600 hover:bg-violet-700")}
-                        onClick={() => onAddPrompt(note)}
-                      >
-                        <Sparkles className="h-4 w-4" /> Shto promptin
-                      </Button>
-                    ) : null}
-                    {stage === "DONE" ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700">
-                        <CheckCircle2 className="h-3.5 w-3.5" /> Kërkesa u plotësua
-                      </span>
-                    ) : null}
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })}
-        </div>
-      )}
-
-      <CreateTaskDialog
-        note={taskNote}
-        users={users}
-        departments={departments}
-        onClose={() => setTaskNote(null)}
-        onCreated={() => void reload()}
-      />
+                  </td>
+                  <td className={TD}>
+                    {note.prompts.length ? (
+                      <div className="flex flex-col gap-1">
+                        {note.prompts.map((p) => {
+                          const full = prompts.find((x) => x.id === p.id)
+                          const m = PROMPT_STATUS_META[p.status]
+                          return (
+                            <button
+                              type="button"
+                              key={p.id}
+                              onClick={() => full && onOpenPrompt(full)}
+                              className="text-left leading-snug hover:underline"
+                            >
+                              <span className="font-medium">{p.title}</span>
+                              <span className="mt-0.5 block"><Pill label={m.label} className={m.className} /></span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    ) : <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className={cn(TD, "text-center")}><Person user={note.created_by} /></td>
+                  <td className={cn(TD, "text-center")}>
+                    {deptCode(note.department_id) ? (
+                      <span className="rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">{deptCode(note.department_id)}</span>
+                    ) : "—"}
+                  </td>
+                  <td className={cn(TD, "tabular-nums text-xs")}>{formatDate(note.created_at)}</td>
+                  <td className={TD}>
+                    <div className="flex flex-col items-stretch gap-1">
+                      {stage === "NO_TASK" ? (
+                        <Button size="sm" className="h-7 px-2" onClick={() => openPxNotesTaskDialog(note)}>
+                          <ListPlus className="h-3.5 w-3.5" /> Krijo detyrë
+                        </Button>
+                      ) : null}
+                      {canAddPrompt ? (
+                        <Button
+                          size="sm"
+                          variant={stage === "READY" ? "default" : "outline"}
+                          className={cn("h-7 px-2", stage === "READY" && "bg-violet-600 hover:bg-violet-700")}
+                          onClick={() => onAddPrompt(note)}
+                        >
+                          <Sparkles className="h-3.5 w-3.5" /> Shto promptin
+                        </Button>
+                      ) : null}
+                      {canManage && note.status === "OPEN" && stage !== "DONE" ? (
+                        <Button size="sm" variant="ghost" className="h-7 px-2 text-muted-foreground" onClick={() => void setNoteStatus(note, "CLOSED")}>
+                          <Lock className="h-3.5 w-3.5" /> Mbyll
+                        </Button>
+                      ) : null}
+                      {canManage && stage === "CLOSED" ? (
+                        <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => void setNoteStatus(note, "OPEN")}>
+                          <Unlock className="h-3.5 w-3.5" /> Rihap
+                        </Button>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              )
+            })
+          )}
+        </tbody>
+      </TableFrame>
     </div>
   )
 }
@@ -689,16 +679,64 @@ function PromptNotes({
 /* Page                                                                       */
 /* ========================================================================== */
 
+function ViewSwitch({
+  view,
+  onChange,
+  libraryCount,
+  notesCount,
+  readyCount,
+}: {
+  view: "library" | "notes"
+  onChange: (v: "library" | "notes") => void
+  libraryCount: number
+  notesCount: number
+  readyCount: number
+}) {
+  const item = (id: "library" | "notes", label: string, Icon: typeof BookOpen, count: number, extra?: React.ReactNode) => {
+    const active = view === id
+    return (
+      <button
+        type="button"
+        role="tab"
+        aria-selected={active}
+        onClick={() => onChange(id)}
+        className={cn(
+          "inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-semibold transition-colors",
+          active ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+        )}
+      >
+        <Icon className="h-4 w-4" />
+        {label}
+        <span className={cn("rounded px-1.5 text-xs tabular-nums", active ? "bg-white/20" : "bg-slate-200 text-slate-700")}>{count}</span>
+        {extra}
+      </button>
+    )
+  }
+  return (
+    <div role="tablist" className="inline-flex gap-1 rounded-lg border bg-white p-1">
+      {item("library", "Prompt Library", BookOpen, libraryCount)}
+      {item(
+        "notes",
+        "Notes",
+        NotebookPen,
+        notesCount,
+        readyCount ? (
+          <span className="rounded bg-violet-600 px-1.5 text-[10px] font-bold text-white" title="Gati për prompt">{readyCount}</span>
+        ) : null
+      )}
+    </div>
+  )
+}
+
 function PromptsPageInner() {
   const { apiFetch } = useAuth()
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const view = searchParams.get("view") === "notes" ? "notes" : "library"
+  const view: "library" | "notes" = searchParams.get("view") === "notes" ? "notes" : "library"
 
   const [prompts, setPrompts] = React.useState<KnowledgePrompt[]>([])
   const [notes, setNotes] = React.useState<PromptNote[]>([])
-  const [users, setUsers] = React.useState<UserLookup[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [loadingPrompts, setLoadingPrompts] = React.useState(true)
   const [loadingNotes, setLoadingNotes] = React.useState(true)
@@ -726,11 +764,10 @@ function PromptsPageInner() {
 
   React.useEffect(() => {
     void reloadAll()
-    void fetchUsersLookupCached(apiFetch).then((data) => { if (data) setUsers(data as UserLookup[]) })
     void apiFetch("/departments").then(async (res) => { if (res.ok) setDepartments((await res.json()) as Department[]) })
   }, [apiFetch, reloadAll])
 
-  const setView = (next: string) => {
+  const setView = (next: "library" | "notes") => {
     const params = new URLSearchParams(searchParams.toString())
     if (next === "notes") params.set("view", "notes")
     else params.delete("view")
@@ -745,62 +782,48 @@ function PromptsPageInner() {
   }
 
   const readyCount = notes.filter((n) => promptNoteStage(n) === "READY").length
+  const activeNotes = notes.filter((n) => {
+    const s = promptNoteStage(n)
+    return s !== "DONE" && s !== "CLOSED"
+  }).length
   const approvedCount = prompts.filter((p) => p.status === "APPROVED").length
 
   return (
-    <div className="mx-auto max-w-[1600px] space-y-6">
-      <div className="flex flex-col gap-1">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          <Link href="/knowledge/prompts" className="hover:text-foreground">Knowledge PX</Link>
-        </p>
-        <h1 className="text-2xl font-bold tracking-tight">Prompts</h1>
-        <p className="max-w-3xl text-sm text-muted-foreground">
-          Libraria e prompteve të testuara dhe aprovuara të PrimEx. Kërkesat e reja nisin te Notes, bëhen detyrë,
-          dhe pasi prompti testohet nga një koleg dhe aprovohet nga menaxheri, ruhet këtu.
-        </p>
+    <div className="mx-auto max-w-[1600px] space-y-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Knowledge PX</p>
+          <h1 className="text-2xl font-bold tracking-tight">Prompts</h1>
+        </div>
+        <ViewSwitch
+          view={view}
+          onChange={setView}
+          libraryCount={approvedCount}
+          notesCount={activeNotes}
+          readyCount={readyCount}
+        />
       </div>
 
-      <Tabs value={view} onValueChange={setView}>
-        <TabsList>
-          <TabsTrigger value="library">
-            Prompt Library <span className="ml-1 tabular-nums text-muted-foreground">{approvedCount}</span>
-          </TabsTrigger>
-          <TabsTrigger value="notes">
-            Notes
-            {readyCount ? (
-              <span className="ml-1 rounded-full bg-violet-600 px-1.5 text-[10px] font-bold text-white">{readyCount}</span>
-            ) : null}
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="library" className="mt-5">
-          <PromptLibrary
-            prompts={prompts}
-            loading={loadingPrompts}
-            onOpen={setDetail}
-            onAdd={() => { setEditing(null); setSourceNote(null); setFormOpen(true) }}
-          />
-        </TabsContent>
-        <TabsContent value="notes" className="mt-5">
-          <PromptNotes
-            notes={notes}
-            loading={loadingNotes}
-            users={users}
-            departments={departments}
-            prompts={prompts}
-            reload={reloadAll}
-            onAddPrompt={(note) => { setEditing(null); setSourceNote(note); setFormOpen(true) }}
-            onOpenPrompt={setDetail}
-          />
-        </TabsContent>
-      </Tabs>
+      {view === "library" ? (
+        <PromptLibrary
+          prompts={prompts}
+          loading={loadingPrompts}
+          onOpen={setDetail}
+          onAdd={() => { setEditing(null); setSourceNote(null); setFormOpen(true) }}
+        />
+      ) : (
+        <PromptNotes
+          notes={notes}
+          loading={loadingNotes}
+          departments={departments}
+          prompts={prompts}
+          reload={reloadAll}
+          onAddPrompt={(note) => { setEditing(null); setSourceNote(note); setFormOpen(true) }}
+          onOpenPrompt={setDetail}
+        />
+      )}
 
-      <PromptFormDialog
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        prompt={editing}
-        sourceNote={sourceNote}
-        onSaved={onSaved}
-      />
+      <PromptFormDialog open={formOpen} onOpenChange={setFormOpen} prompt={editing} sourceNote={sourceNote} onSaved={onSaved} />
       <PromptDetailDialog
         prompt={detail}
         onClose={() => setDetail(null)}
