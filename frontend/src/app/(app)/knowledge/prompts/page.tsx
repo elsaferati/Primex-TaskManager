@@ -385,7 +385,7 @@ const STAGE_FILTERS: { id: StageFilter; label: string }[] = [
 // Same colours as the SHENIMI cell in PX Notes.
 function noteCellClass(note: PromptNote, stage: PromptNoteStage) {
   if (stage === "CLOSED" || stage === "DONE") return stage === "DONE" ? "bg-emerald-100" : "bg-slate-200 text-slate-500"
-  if (!note.tasks.length) return ""
+  if (!note.tasks.length) return "bg-sky-200"
   const statuses = note.tasks.map((t) => t.status)
   if (statuses.every((s) => s === "DONE")) return "bg-emerald-200"
   if (statuses.some((s) => s === "IN_PROGRESS")) return "bg-yellow-200"
