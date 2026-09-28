@@ -34,6 +34,11 @@ import {
   ScrollText,
   TicketCheck,
   BrainCircuit,
+  BookOpen,
+  Sparkles,
+  BookA,
+  Scale,
+  GraduationCap,
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -109,6 +114,17 @@ const navGroups: NavGroup[] = [
     label: "Ekipi",
     icon: Users,
     items: [{ href: "/skills", label: "Matrica e Aftësive", icon: BrainCircuit }],
+  },
+  {
+    id: "knowledge-px",
+    label: "Knowledge PX",
+    icon: BookOpen,
+    items: [
+      { href: "/knowledge/prompts", label: "Prompts", icon: Sparkles },
+      { href: "/knowledge/definime", label: "Definime", icon: BookA },
+      { href: "/knowledge/rregullore", label: "Rregullore", icon: Scale },
+      { href: "/knowledge/trajnime", label: "Trajnime", icon: GraduationCap },
+    ],
   },
   {
     id: "tasks",

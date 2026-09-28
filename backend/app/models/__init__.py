@@ -13,6 +13,7 @@ from app.models.file_access_request import FileAccessRequest
 from app.models.feedback_log import FeedbackLog
 from app.models.ga_note import GaNote
 from app.models.ga_note_attachment import GaNoteAttachment
+from app.models.knowledge_prompt import KnowledgePrompt
 from app.models.ga_icloud_sync_connection import GaIcloudSyncConnection
 from app.models.plan_note import PlanNote
 from app.models.plan_note_attachment import PlanNoteAttachment
@@ -122,6 +123,7 @@ __all__ = [
     "FeedbackLog",
     "GaNote",
     "GaNoteAttachment",
+    "KnowledgePrompt",
     "GaIcloudSyncConnection",
     "PlanNote",
     "PlanNoteAttachment",

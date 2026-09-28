@@ -599,6 +599,7 @@ export interface GaNote {
   next_week?: boolean
   project_id?: string | null
   department_id?: string | null
+  knowledge_type?: "PROMPT" | null
   created_at: string
   updated_at: string
   attachments?: GaNoteAttachment[]

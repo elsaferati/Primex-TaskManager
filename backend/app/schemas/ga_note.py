@@ -35,6 +35,7 @@ class GaNoteOut(BaseModel):
     one_h_marker_comment: str | None = None
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
+    knowledge_type: str | None = None
     created_at: datetime
     updated_at: datetime
     attachments: list[GaNoteAttachmentOut] = []

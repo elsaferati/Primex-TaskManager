@@ -47,6 +47,7 @@ from app.api.routers.px_jav_weekly_report import router as px_jav_weekly_report_
 from app.api.routers.standards import router as standards_router
 from app.api.routers.external_tickets import router as external_tickets_router
 from app.api.routers.skills import router as skills_router
+from app.api.routers.knowledge import router as knowledge_router
 
 
 api_router = APIRouter()
@@ -93,6 +94,7 @@ api_router.include_router(tomorrow_print_report_router, prefix="/tomorrow-print-
 api_router.include_router(today_print_report_router, prefix="/today-print-report", tags=["today-print-report"])
 api_router.include_router(realization_router, prefix="/realization", tags=["realization"])
 api_router.include_router(skills_router, prefix="/skills", tags=["skills"])
+api_router.include_router(knowledge_router, prefix="/knowledge", tags=["knowledge"])
 api_router.include_router(
     weekly_planning_audit_router,
     prefix="/reports/weekly-planning-audit",
