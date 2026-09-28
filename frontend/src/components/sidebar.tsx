@@ -89,11 +89,6 @@ const primaryItems: NavItem[] = [
     icon: CalendarClock,
   },
   {
-    href: "/admin-tasks",
-    label: "Admin Tasks",
-    icon: ClipboardCheck,
-  },
-  {
     href: "/waiting-confirmation-ga",
     label: "WFC",
     icon: Clock3,
@@ -101,6 +96,14 @@ const primaryItems: NavItem[] = [
 ]
 
 const navGroups: NavGroup[] = [
+  {
+    id: "admin-workspace",
+    label: "Admin Tasks",
+    icon: ClipboardCheck,
+    items: [
+      { href: "/admin-tasks", label: "Tasks", icon: ClipboardCheck },
+    ],
+  },
   {
     id: "team",
     label: "Ekipi",
