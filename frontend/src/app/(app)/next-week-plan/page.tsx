@@ -2845,10 +2845,10 @@ export default function NextWeekPlanPage() {
                 onValueChange={(v) => setNextWeekFilter(v as NextWeekFilter)}
               >
                 <SelectTrigger className="h-9 w-[140px]">
-                  <SelectValue placeholder="JAV TJT?" />
+                  <SelectValue placeholder="This Week" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All JAV TJT?</SelectItem>
+                  <SelectItem value="all">This Week</SelectItem>
                   <SelectItem value="checked">Checked</SelectItem>
                   <SelectItem value="unchecked">Blank</SelectItem>
                 </SelectContent>
@@ -3161,7 +3161,7 @@ export default function NextWeekPlanPage() {
                       <th className="min-w-[320px] w-[320px] max-w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PLANIFIKIM</th>
                       <th className="min-w-[180px] w-[180px] max-w-[180px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KOMENT</th>
                       <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Diskutuar YES/JO?">DISK</th>
-                      <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-1 text-center align-middle font-medium whitespace-normal leading-tight text-xs" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>JAV TJT?</th>
+                      <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-1 text-center align-middle font-medium whitespace-normal leading-tight text-xs" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>THIS<br />WEEK</th>
                       <th className="w-[96px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
                       <th className="w-[44px] min-w-[44px] max-w-[44px] border border-slate-600 bg-white text-foreground h-10 px-1 text-center align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NGA</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PER</th>
