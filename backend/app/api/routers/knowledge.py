@@ -53,6 +53,7 @@ STATUS_REJECTED = "REJECTED"
 PROMPT_STATUSES = {STATUS_PENDING_TEST, STATUS_PENDING_APPROVAL, STATUS_APPROVED, STATUS_REJECTED}
 
 TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".json", ".yaml", ".yml", ".prompt", ".xml", ".csv"}
+PROMPT_SERVER_EXTENSIONS = {".txt", ".md", ".markdown", ".prompt"}
 MAX_KEYWORDS = 30
 
 
@@ -74,6 +75,64 @@ def _upload_base_dir() -> Path:
     if not base.is_absolute():
         base = Path(__file__).resolve().parents[3] / base
     return base
+
+
+def _prompt_filename(title: str) -> str:
+    """Return a Windows-safe filename for a prompt saved into a directory."""
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", title).strip().rstrip(". ")
+    return f"{(name or 'prompt')[:240]}.txt"
+
+
+def _save_prompt_text_to_server(raw_path: str, title: str, content: str) -> str:
+    """Write only the prompt body to an absolute server path and return that path.
+
+    A path to an existing directory creates ``<prompt title>.txt`` inside it. A
+    path without an extension gets ``.txt`` appended. Existing files are
+    replaced atomically so readers never see a partially written prompt.
+    """
+    requested = raw_path.strip().strip('"')
+    if not requested:
+        return ""
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Shkruaj tekstin e promptit para se ta ruash n\u00eb server.",
+        )
+
+    target = Path(requested)
+    if not target.is_absolute():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Path-i i serverit duhet t\u00eb jet\u00eb absolut, p.sh. F:\\FILES\\Prompts\\prompt.txt.",
+        )
+    if target.exists() and target.is_dir():
+        target = target / _prompt_filename(title)
+    elif not target.suffix:
+        target = target.with_suffix(".txt")
+
+    if target.suffix.lower() not in PROMPT_SERVER_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Skedari i promptit n\u00eb server duhet t\u00eb jet\u00eb .txt, .md ose .prompt.",
+        )
+    if not target.parent.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Folderi nuk ekziston n\u00eb server: {target.parent}",
+        )
+
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(content)
+        temporary.replace(target)
+    except OSError as exc:
+        temporary.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Prompti nuk mund t\u00eb ruhej n\u00eb server te {target}: {exc}",
+        ) from exc
+    return str(target)
 
 
 def parse_keywords(raw: str | list[str] | None) -> list[str]:
@@ -653,6 +712,13 @@ async def create_prompt(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Shto tekstin e promptit ose ngarko një skedar",
         )
+    if prompt.files_path:
+        try:
+            prompt.files_path = _save_prompt_text_to_server(prompt.files_path, prompt.title, prompt.content)
+        except HTTPException:
+            if stored_path is not None:
+                stored_path.unlink(missing_ok=True)
+            raise
     db.add(prompt)
     try:
         await db.commit()
@@ -731,6 +797,8 @@ async def update_prompt(
     # Any change to a prompt that is not yet in the library restarts the review.
     if prompt.status != STATUS_APPROVED:
         _reset_review(prompt)
+    if prompt.files_path:
+        prompt.files_path = _save_prompt_text_to_server(prompt.files_path, prompt.title, prompt.content)
     await db.commit()
 
     link = prompt_link(request, prompt.id)

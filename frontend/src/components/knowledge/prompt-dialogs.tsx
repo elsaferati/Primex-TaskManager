@@ -353,15 +353,18 @@ export function PromptFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="kp-path">Path në Files PX</Label>
+            <Label htmlFor="kp-path">Ruaje promptin në server</Label>
             <Input
               id="kp-path"
               value={filesPath}
               onChange={(e) => setFilesPath(e.target.value)}
-              placeholder="p.sh. \\PX-Files\Prompts\Amazon\bulletpoints.md"
+              placeholder="p.sh. F:\FILES\Prompts\Amazon\bulletpoints.txt"
               className="font-mono text-[13px]"
               maxLength={1000}
             />
+            <p className="text-xs text-muted-foreground">
+              Vendos path-in absolut të folderit ose skedarit në server. Ruhet vetëm teksti i promptit; nëse mungon prapashtesa, shtohet .txt.
+            </p>
           </div>
         </div>
 

@@ -19,6 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { TaskSkillField } from "@/components/task-skill-field"
+import { PromptLinkButton, promptHrefFromText } from "@/components/knowledge/prompt-link"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
@@ -4251,7 +4252,11 @@ export default function GaKaNotesPage() {
                                 </div>
                               ) : null}
                               {taskInfo?.description ? (
-                                <div>{taskInfo.description}</div>
+                                promptHrefFromText(taskInfo.description) ? (
+                                  <PromptLinkButton text={taskInfo.description} compact />
+                                ) : (
+                                  <div className="break-words [overflow-wrap:anywhere]">{taskInfo.description}</div>
+                                )
                               ) : null}
                               {attachments.length > 0 ? (
                                 <div className="space-y-1">
