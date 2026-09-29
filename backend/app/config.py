@@ -93,6 +93,8 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
     FILE_ACCESS_API_BASE_URL: str = "http://192.168.10.8:5080"
     FILE_ACCESS_API_KEY: str | None = "XeiMrYgncS2EkpQZ4tTqs73RfIU8Cub91oAwB5zPxyjOJDVd"
+    FILES_SERVER_STORAGE_ROOT: str = r"F:\FILES"
+    FILES_SERVER_PATH_ALIASES: str = r"Y:;F:\FILES;\\192.168.10.8\FILES"
 
     GA_NOTES_UPLOAD_DIR: str = "uploads/ga-notes"
     PLAN_NOTES_UPLOAD_DIR: str = "uploads/plan_notes"

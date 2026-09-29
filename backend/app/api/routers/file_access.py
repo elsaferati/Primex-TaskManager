@@ -190,6 +190,16 @@ async def search_folders(
     return [_folder_to_out(folder) for folder in folders]
 
 
+@router.get("/folders/{folder_id}/children", response_model=list[FileAccessFolderOut])
+async def list_folder_children(
+    folder_id: int,
+    _: User = Depends(get_current_user),
+) -> list[FileAccessFolderOut]:
+    data = await _file_access_request("GET", f"/api/folders/{folder_id}/children")
+    folders = data if isinstance(data, list) else data.get("items", [])
+    return [_folder_to_out(folder) for folder in folders]
+
+
 @router.get("/access", response_model=FileAccessAccessOut)
 async def list_current_access(
     folder_id: int | None = None,

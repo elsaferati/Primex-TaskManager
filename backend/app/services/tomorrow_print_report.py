@@ -264,6 +264,7 @@ def _task_marker_label(item: dict[str, Any]) -> str:
     label = {
         "EXCLAMATION": "!",
         "CLIENT_URGENT": "!!!",
+        "SHARE": "SHARE",
         "QUESTION": "?",
         "KA": "KA",
         "GENT": "GENT",
@@ -300,6 +301,7 @@ def _task_marker_legend_text() -> str:
         "LEGJENDA: ? - PYETJE/PAQARTESI / "
         "! - DYSHIM/ NUK KUPTOHET DET / "
         "!!! - KLIENT/URGJENT / "
+        "SHARE - DET QE DUHET SCREENSHARE ME GA / "
         "👁 - KËRKON MONITORIM NGA DIKUSH TJETËR / "
         "X - MBYLL DETYREN / "
         "M2 - DOREZIM DERI NE PAUZE / "
@@ -1233,6 +1235,7 @@ def _task_marker_legend_html() -> str:
         ("?", "PYETJE/PAQARTESI"),
         ("!", "DYSHIM/ NUK KUPTOHET DET"),
         ("!!!", "KLIENT/URGJENT"),
+        ("SHARE", "DET QE DUHET SCREENSHARE ME GA"),
         ("👁", "KËRKON MONITORIM NGA DIKUSH TJETËR"),
         ("X", "MBYLL DETYREN"),
         ("M2", "DOREZIM DERI NE PAUZE"),
@@ -3323,6 +3326,7 @@ async def _build_print_report(
         "LEGJENDA: ? - PYETJE/PAQARTESI / "
         "! - DYSHIM/ NUK KUPTOHET DET / "
         "!!! - KLIENT/URGJENT / "
+        "SHARE - DET QE DUHET SCREENSHARE ME GA / "
         "👁 - KËRKON MONITORIM NGA DIKUSH TJETËR / X - MBYLL DETYREN / "
         "M2 - DOREZIM DERI NE PAUZE / M3 - DOREZIM DERI NE FUND TE DITES / "
         "M2/3 - DOREZIM EDHE NE M2 EDHE M3 / "

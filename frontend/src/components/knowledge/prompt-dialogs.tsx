@@ -4,13 +4,17 @@ import * as React from "react"
 import {
   Check,
   CheckCircle2,
+  ChevronRight,
   ClipboardCopy,
   Download,
   FileText,
   FlaskConical,
+  Folder,
   FolderOpen,
+  Home,
   Loader2,
   Pencil,
+  Search,
   ShieldCheck,
   Trash2,
   Undo2,
@@ -148,6 +152,14 @@ function KeywordInput({ value, onChange }: { value: string[]; onChange: (next: s
 /* Create / edit prompt                                                       */
 /* -------------------------------------------------------------------------- */
 
+type FilesFolder = {
+  id: number
+  fullPath?: string | null
+  relativePath?: string | null
+  folderName: string
+  hasChildren?: boolean | null
+}
+
 export function PromptFormDialog({
   open,
   onOpenChange,
@@ -171,6 +183,12 @@ export function PromptFormDialog({
   const [file, setFile] = React.useState<File | null>(null)
   const [removeFile, setRemoveFile] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
+  const [folderPickerOpen, setFolderPickerOpen] = React.useState(false)
+  const [folderItems, setFolderItems] = React.useState<FilesFolder[]>([])
+  const [folderTrail, setFolderTrail] = React.useState<FilesFolder[]>([])
+  const [selectedFolder, setSelectedFolder] = React.useState<FilesFolder | null>(null)
+  const [folderSearch, setFolderSearch] = React.useState("")
+  const [foldersLoading, setFoldersLoading] = React.useState(false)
   const fileRef = React.useRef<HTMLInputElement | null>(null)
 
   React.useEffect(() => {
@@ -215,9 +233,65 @@ export function PromptFormDialog({
   const hasExistingFile = Boolean(prompt?.file_original_name) && !removeFile
   const tasksDone = sourceNote ? sourceNote.tasks.every((t) => t.status === "DONE") : true
 
+  const fetchFolders = async (url: string, trail: FilesFolder[] = []) => {
+    setFoldersLoading(true)
+    try {
+      const res = await apiFetch(url)
+      if (!res.ok) {
+        toast.error(await readError(res, "Folderat e Files PX nuk u hapën"))
+        return
+      }
+      setFolderItems((await res.json()) as FilesFolder[])
+      setFolderTrail(trail)
+    } finally {
+      setFoldersLoading(false)
+    }
+  }
+
+  const openFolderPicker = async () => {
+    setFolderPickerOpen(true)
+    setFolderSearch("")
+    setSelectedFolder(null)
+    await fetchFolders("/file-access/folders?limit=200", [])
+  }
+
+  const browseFolder = async (folder: FilesFolder) => {
+    setSelectedFolder(folder)
+    await fetchFolders(`/file-access/folders/${folder.id}/children`, [...folderTrail, folder])
+  }
+
+  const browseTrail = async (index: number) => {
+    if (index < 0) {
+      setSelectedFolder(null)
+      await fetchFolders("/file-access/folders?limit=200", [])
+      return
+    }
+    const folder = folderTrail[index]
+    setSelectedFolder(folder)
+    await fetchFolders(`/file-access/folders/${folder.id}/children`, folderTrail.slice(0, index + 1))
+  }
+
+  const searchFolders = async () => {
+    const query = folderSearch.trim()
+    setSelectedFolder(null)
+    await fetchFolders(
+      query ? `/file-access/folders?search=${encodeURIComponent(query)}&limit=200` : "/file-access/folders?limit=200",
+      []
+    )
+  }
+
+  const chooseFolder = () => {
+    if (!selectedFolder) return
+    const path = selectedFolder.fullPath || selectedFolder.relativePath || ""
+    if (!path) return toast.error("Ky folder nuk ka path në Files PX")
+    setFilesPath(path)
+    setFolderPickerOpen(false)
+  }
+
   const save = async () => {
     if (title.trim().length < 2) return toast.error("Shkruaj titullin e promptit")
     if (!content.trim() && !file && !hasExistingFile) return toast.error("Shto tekstin e promptit ose ngarko një skedar")
+    if (!filesPath.trim()) return toast.error("Zgjidh folderin ku do të ruhet prompti në Files PX")
     if (!testerLocked && !testerId) return toast.error("Zgjidh testuesin e promptit")
     const form = new FormData()
     form.append("title", title.trim())
@@ -252,7 +326,8 @@ export function PromptFormDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{prompt ? "Edito promptin" : "Shto promptin"}</DialogTitle>
@@ -353,15 +428,22 @@ export function PromptFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="kp-path">Path në Files PX</Label>
-            <Input
-              id="kp-path"
-              value={filesPath}
-              onChange={(e) => setFilesPath(e.target.value)}
-              placeholder="p.sh. \\PX-Files\Prompts\Amazon\bulletpoints.md"
-              className="font-mono text-[13px]"
-              maxLength={1000}
-            />
+            <Label>Folderi në Files PX</Label>
+            <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3 sm:flex-row sm:items-center">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <code className="min-w-0 break-all text-[12px]">
+                  {filesPath || "Nuk është zgjedhur ende"}
+                </code>
+              </div>
+              <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => void openFolderPicker()}>
+                <FolderOpen className="h-4 w-4" />
+                {filesPath ? "Ndrysho folderin" : "Zgjidh folderin"}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              PrimeFlow krijon skedarin .txt në folderin e zgjedhur dhe e përditëson kur editohet prompti.
+            </p>
           </div>
         </div>
 
@@ -374,8 +456,102 @@ export function PromptFormDialog({
             {prompt ? "Ruaj ndryshimet" : "Ruaj për testim"}
           </Button>
         </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={folderPickerOpen} onOpenChange={setFolderPickerOpen}>
+        <DialogContent className="max-h-[88vh] sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Zgjidh folderin në Files PX</DialogTitle>
+            <DialogDescription>Hap folderat e serverit dhe zgjidh ku do të ruhet prompti.</DialogDescription>
+          </DialogHeader>
+
+          <form
+            className="flex gap-2"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void searchFolders()
+            }}
+          >
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={folderSearch}
+                onChange={(event) => setFolderSearch(event.target.value)}
+                placeholder="Kërko folderin..."
+                className="pl-8"
+              />
+            </div>
+            <Button type="submit" variant="outline" disabled={foldersLoading}>Kërko</Button>
+          </form>
+
+          <div className="flex min-h-8 flex-wrap items-center gap-1 rounded-md border bg-muted/30 px-2 py-1 text-xs">
+            <button type="button" className="rounded p-1 hover:bg-background" onClick={() => void browseTrail(-1)} aria-label="Files PX">
+              <Home className="h-4 w-4" />
+            </button>
+            {folderTrail.map((folder, index) => (
+              <React.Fragment key={folder.id}>
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                <button type="button" className="max-w-48 truncate rounded px-1.5 py-1 hover:bg-background" onClick={() => void browseTrail(index)}>
+                  {folder.folderName}
+                </button>
+              </React.Fragment>
+            ))}
+          </div>
+
+          <div className="min-h-64 overflow-y-auto rounded-md border">
+            {foldersLoading ? (
+              <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Duke hapur folderat...
+              </div>
+            ) : folderItems.length ? (
+              <div className="divide-y">
+                {folderItems.map((folder) => {
+                  const selected = selectedFolder?.id === folder.id
+                  return (
+                    <div key={folder.id} className={cn("flex items-center gap-2 p-2", selected && "bg-primary/10")}>
+                      <button
+                        type="button"
+                        className="flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-2 text-left hover:bg-muted"
+                        onClick={() => setSelectedFolder(folder)}
+                      >
+                        <Folder className="h-4 w-4 shrink-0 text-amber-600" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium">{folder.folderName}</span>
+                          <span className="block truncate text-[11px] text-muted-foreground">{folder.fullPath || folder.relativePath}</span>
+                        </span>
+                        {selected ? <Check className="h-4 w-4 shrink-0 text-primary" /> : null}
+                      </button>
+                      <Button type="button" size="icon-sm" variant="ghost" aria-label={`Hap ${folder.folderName}`} onClick={() => void browseFolder(folder)}>
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="flex h-64 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+                Nuk u gjet asnjë nënfolder. Mund të zgjedhësh folderin aktual ose të kthehesh mbrapa.
+              </div>
+            )}
+          </div>
+
+          {selectedFolder ? (
+            <div className="rounded-md bg-muted/40 px-3 py-2 text-xs">
+              <span className="font-semibold">Folderi i zgjedhur: </span>
+              <code className="break-all">{selectedFolder.fullPath || selectedFolder.relativePath}</code>
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setFolderPickerOpen(false)}>Anulo</Button>
+            <Button type="button" onClick={chooseFolder} disabled={!selectedFolder}>
+              <Check className="h-4 w-4" /> Zgjidh këtë folder
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
