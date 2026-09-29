@@ -54,6 +54,14 @@ PROMPT_STATUSES = {STATUS_PENDING_TEST, STATUS_PENDING_APPROVAL, STATUS_APPROVED
 
 TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".json", ".yaml", ".yml", ".prompt", ".xml", ".csv"}
 PROMPT_SERVER_EXTENSIONS = {".txt", ".md", ".markdown", ".prompt"}
+WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *{f"COM{i}" for i in range(1, 10)},
+    *{f"LPT{i}" for i in range(1, 10)},
+}
 MAX_KEYWORDS = 30
 
 
@@ -80,6 +88,8 @@ def _upload_base_dir() -> Path:
 def _prompt_filename(title: str) -> str:
     """Return a Windows-safe filename for a prompt saved into a directory."""
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", title).strip().rstrip(". ")
+    if name.upper() in WINDOWS_RESERVED_NAMES:
+        name = f"_{name}"
     return f"{(name or 'prompt')[:240]}.txt"
 
 
@@ -97,7 +107,30 @@ def _resolve_files_server_path(raw_path: str) -> str:
     return requested
 
 
-def _save_prompt_text_to_server(raw_path: str, title: str, content: str) -> str:
+def _canonical_files_path(raw_path: str) -> Path:
+    return Path(_resolve_files_server_path(raw_path)).resolve(strict=False)
+
+
+def _require_path_inside_files_storage(target: Path) -> Path:
+    storage_root = Path(settings.FILES_SERVER_STORAGE_ROOT).resolve(strict=False)
+    resolved_target = target.resolve(strict=False)
+    try:
+        resolved_target.relative_to(storage_root)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Promptet mund të ruhen vetëm brenda Files PX (F:\\FILES).",
+        )
+    return resolved_target
+
+
+def _save_prompt_text_to_server(
+    raw_path: str,
+    title: str,
+    content: str,
+    *,
+    existing_path: str | None = None,
+) -> str:
     """Write only the prompt body to an absolute server path and return that path.
 
     A path to an existing directory creates ``<prompt title>.txt`` inside it. A
@@ -124,16 +157,34 @@ def _save_prompt_text_to_server(raw_path: str, title: str, content: str) -> str:
     elif not target.suffix:
         target = target.with_suffix(".txt")
 
+    target = _require_path_inside_files_storage(target)
+
     if target.suffix.lower() not in PROMPT_SERVER_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Skedari i promptit n\u00eb server duhet t\u00eb jet\u00eb .txt, .md ose .prompt.",
+        )
+    if target.stem.upper() in WINDOWS_RESERVED_NAMES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Emri i skedarit nuk lejohet n\u00eb Windows.",
         )
     if not target.parent.is_dir():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Folderi nuk ekziston n\u00eb server: {target.parent}",
         )
+
+    if target.exists():
+        can_edit_existing = bool(existing_path) and target == _canonical_files_path(existing_path or "")
+        if not can_edit_existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Skedari ekziston tashmë dhe nuk i përket këtij prompti: {target}. "
+                    "Zgjidh një folder tjetër ose ndrysho titullin e promptit."
+                ),
+            )
 
     temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
     try:
@@ -768,6 +819,7 @@ async def update_prompt(
     user=Depends(get_current_user),
 ) -> KnowledgePromptOut:
     prompt = await _get_prompt_or_404(db, prompt_id)
+    original_files_path = prompt.files_path
     is_author = prompt.created_by == user.id
     if not _is_manager(user) and not (is_author and prompt.status != STATUS_APPROVED):
         raise HTTPException(
@@ -812,7 +864,12 @@ async def update_prompt(
     if prompt.status != STATUS_APPROVED:
         _reset_review(prompt)
     if prompt.files_path:
-        prompt.files_path = _save_prompt_text_to_server(prompt.files_path, prompt.title, prompt.content)
+        prompt.files_path = _save_prompt_text_to_server(
+            prompt.files_path,
+            prompt.title,
+            prompt.content,
+            existing_path=original_files_path,
+        )
     await db.commit()
 
     link = prompt_link(request, prompt.id)
@@ -951,6 +1008,8 @@ async def delete_prompt(
     prompt = await _get_prompt_or_404(db, prompt_id)
     if not _is_manager(user) and not (prompt.created_by == user.id and prompt.status != STATUS_APPROVED):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Nuk keni leje ta fshini")
+    # Files PX is create/update only. Deleting the PrimeFlow record must never
+    # remove the external file referenced by prompt.files_path.
     if prompt.file_stored_name:
         (_upload_base_dir() / str(prompt.id) / prompt.file_stored_name).unlink(missing_ok=True)
     await _deactivate_test_task(db, prompt.test_task_id)
