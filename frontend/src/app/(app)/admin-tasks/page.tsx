@@ -1209,9 +1209,9 @@ function GaTimeRichTextEditor({
   )
 }
 
-type GaTimeAutoSaveStatus = "idle" | "pending" | "saving" | "saved" | "error"
+type GaTimeSaveStatus = "idle" | "saving" | "saved" | "error"
 
-const gaTimeAutoSaveSignature = (content: string, format: GaTimeEntryFormat) => JSON.stringify([
+const gaTimeSaveSignature = (content: string, format: GaTimeEntryFormat) => JSON.stringify([
   content,
   format.background_color,
   format.text_color,
@@ -1219,7 +1219,7 @@ const gaTimeAutoSaveSignature = (content: string, format: GaTimeEntryFormat) => 
   format.is_italic,
 ])
 
-function useGaTimeAutoSave({
+function useGaTimeManualSave({
   initialContent,
   initialFormat,
   content,
@@ -1232,94 +1232,39 @@ function useGaTimeAutoSave({
   format: GaTimeEntryFormat
   onSave: (content: string, format: GaTimeEntryFormat) => Promise<boolean>
 }) {
-  const initialSignatureRef = React.useRef(gaTimeAutoSaveSignature(initialContent, initialFormat))
-  const lastSavedSignatureRef = React.useRef(initialSignatureRef.current)
-  const latestValueRef = React.useRef({ content, format })
-  const onSaveRef = React.useRef(onSave)
-  const inFlightRef = React.useRef<Promise<boolean> | null>(null)
-  const mountedRef = React.useRef(true)
-  const [status, setStatus] = React.useState<GaTimeAutoSaveStatus>("saved")
-
-  latestValueRef.current = { content, format }
-  onSaveRef.current = onSave
-
-  React.useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
-
-  const saveLatest = React.useCallback(async () => {
-    if (inFlightRef.current) return inFlightRef.current
-
-    const run = async () => {
-      while (true) {
-        const snapshot = latestValueRef.current
-        const signature = gaTimeAutoSaveSignature(snapshot.content, snapshot.format)
-        if (signature === lastSavedSignatureRef.current) {
-          if (mountedRef.current) setStatus("saved")
-          return true
-        }
-
-        const sanitizedContent = sanitizeGaTimeRichTextHtml(normalizeGaTimeRichTextValue(snapshot.content))
-        if (!getPlainGaTimeRichText(sanitizedContent).trim()) {
-          if (mountedRef.current) setStatus("idle")
-          return false
-        }
-
-        if (mountedRef.current) setStatus("saving")
-        const saved = await onSaveRef.current(sanitizedContent, snapshot.format)
-        if (!saved) {
-          if (mountedRef.current) setStatus("error")
-          return false
-        }
-        lastSavedSignatureRef.current = signature
-
-        if (gaTimeAutoSaveSignature(latestValueRef.current.content, latestValueRef.current.format) === signature) {
-          if (mountedRef.current) setStatus("saved")
-          return true
-        }
-      }
-    }
-
-    const request = run()
-    inFlightRef.current = request
-    try {
-      return await request
-    } finally {
-      inFlightRef.current = null
-    }
-  }, [])
-
-  const currentSignature = gaTimeAutoSaveSignature(content, format)
+  const lastSavedSignatureRef = React.useRef(gaTimeSaveSignature(initialContent, initialFormat))
+  const [status, setStatus] = React.useState<GaTimeSaveStatus>("idle")
+  const savingRef = React.useRef(false)
+  const currentSignature = gaTimeSaveSignature(content, format)
   const hasChanges = currentSignature !== lastSavedSignatureRef.current
-
-  React.useEffect(() => () => {
-    const snapshot = latestValueRef.current
-    const signature = gaTimeAutoSaveSignature(snapshot.content, snapshot.format)
-    if (
-      signature !== lastSavedSignatureRef.current &&
-      getPlainGaTimeRichText(snapshot.content).trim()
-    ) {
-      void saveLatest()
-    }
-  }, [saveLatest])
-
-  React.useEffect(() => {
-    if (!hasChanges) return
-    if (!getPlainGaTimeRichText(content).trim()) {
+  const save = React.useCallback(async () => {
+    if (savingRef.current) return false
+    if (!hasChanges) return true
+    const sanitizedContent = sanitizeGaTimeRichTextHtml(normalizeGaTimeRichTextValue(content))
+    if (!getPlainGaTimeRichText(sanitizedContent).trim()) {
       setStatus("idle")
-      return
+      return false
     }
-    setStatus("pending")
-    // Give normal typing pauses time to finish before autosaving; saving too
-    // aggressively causes a parent update while the contentEditable is active.
-    const timeoutId = window.setTimeout(() => void saveLatest(), 1500)
-    return () => window.clearTimeout(timeoutId)
-  }, [content, format, hasChanges, saveLatest])
+    savingRef.current = true
+    setStatus("saving")
+    try {
+      const saved = await onSave(sanitizedContent, format)
+      if (saved) {
+        lastSavedSignatureRef.current = currentSignature
+        setStatus("saved")
+      } else {
+        setStatus("error")
+      }
+      return saved
+    } catch {
+      setStatus("error")
+      return false
+    } finally {
+      savingRef.current = false
+    }
+  }, [content, currentSignature, format, hasChanges, onSave])
 
-  return { status, hasChanges, saveLatest }
+  return { status, hasChanges, save }
 }
 
 const normalizeGaTimeEntryFormat = (
@@ -1361,7 +1306,7 @@ function GaTimeEntryEditor({
   const [content, setContent] = React.useState(initialContent)
   const [normalizedInitialFormat] = React.useState<GaTimeEntryFormat>(() => normalizeGaTimeEntryFormat(initialFormat))
   const [format, setFormat] = React.useState<GaTimeEntryFormat>(normalizedInitialFormat)
-  const { status, hasChanges, saveLatest } = useGaTimeAutoSave({
+  const { status, hasChanges, save } = useGaTimeManualSave({
     initialContent,
     initialFormat: normalizedInitialFormat,
     content,
@@ -1369,35 +1314,19 @@ function GaTimeEntryEditor({
     onSave,
   })
   const isSaving = saving || status === "saving"
-  const editorContainerRef = React.useRef<HTMLDivElement | null>(null)
 
-  const closeEditor = React.useCallback(async () => {
-    if (!getPlainGaTimeRichText(content).trim()) {
-      onCancel()
-      return
-    }
-    if (!hasChanges || await saveLatest()) onCancel()
-  }, [content, hasChanges, onCancel, saveLatest])
-
-  React.useEffect(() => {
-    const handlePointerDown = (event: PointerEvent) => {
-      const container = editorContainerRef.current
-      if (!container || container.contains(event.target as Node)) return
-      void closeEditor()
-    }
-    document.addEventListener("pointerdown", handlePointerDown)
-    return () => document.removeEventListener("pointerdown", handlePointerDown)
-  }, [closeEditor])
+  const saveAndClose = React.useCallback(async () => {
+    if (await save()) onCancel()
+  }, [onCancel, save])
 
   return (
-    <div ref={editorContainerRef} className="w-full space-y-2 rounded-md border border-blue-200 bg-white p-2">
+    <div className="w-full space-y-2 rounded-md border border-blue-200 bg-white p-2">
       <GaTimeRichTextEditor
         value={content}
         onChange={setContent}
         placeholder="Write task..."
-        disabled={false}
+        disabled={isSaving}
         cellFormat={format}
-        onEditorBlur={() => void saveLatest()}
       />
       <div className="space-y-1.5">
         <div className="flex items-center gap-1 whitespace-nowrap">
@@ -1411,6 +1340,7 @@ function GaTimeEntryEditor({
                 format.background_color === color && "ring-2 ring-blue-500 ring-offset-1"
               )}
               style={{ backgroundColor: color }}
+              disabled={isSaving}
               onClick={() => {
                 setFormat((current) => ({ ...current, background_color: color }))
                 if (color === "#EF4444") setContent((current) => applyGaTimeAutomaticContrast(current, color))
@@ -1421,13 +1351,15 @@ function GaTimeEntryEditor({
           ))}
         </div>
       </div>
-      <div className="flex items-center justify-between gap-2">
-        <span className={cn("text-[10px]", status === "error" ? "text-red-600" : "text-slate-500")} aria-live="polite">
-          {isSaving ? "Saving..." : status === "error" ? "Save failed" : status === "idle" ? "Type something..." : hasChanges ? "Autosave pending..." : "Saved"}
-        </span>
-        <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => void closeEditor()}>
-          Close
-        </Button>
+      <div className="flex justify-end">
+        <div className="flex items-center gap-1">
+          <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={onCancel} disabled={isSaving}>
+            Cancel
+          </Button>
+          <Button type="button" size="sm" className="h-7 px-2 text-xs" onClick={() => void saveAndClose()} disabled={isSaving || !hasChanges || !getPlainGaTimeRichText(content).trim()}>
+            {isSaving ? "Saving..." : "Save"}
+          </Button>
+        </div>
       </div>
     </div>
   )
@@ -1449,7 +1381,7 @@ function GaTimeRowCommentEditor({
   const [comment, setComment] = React.useState(initialComment)
   const [normalizedInitialFormat] = React.useState<GaTimeEntryFormat>(() => normalizeGaTimeEntryFormat(initialFormat))
   const [format, setFormat] = React.useState<GaTimeEntryFormat>(normalizedInitialFormat)
-  const { status, hasChanges, saveLatest } = useGaTimeAutoSave({
+  const { status, hasChanges, save } = useGaTimeManualSave({
     initialContent: initialComment,
     initialFormat: normalizedInitialFormat,
     content: comment,
@@ -1457,39 +1389,22 @@ function GaTimeRowCommentEditor({
     onSave,
   })
   const isSaving = saving || status === "saving"
-  const editorContainerRef = React.useRef<HTMLDivElement | null>(null)
 
-  const closeEditor = React.useCallback(async () => {
-    if (!getPlainGaTimeRichText(comment).trim()) {
-      onCancel()
-      return
-    }
-    if (!hasChanges || await saveLatest()) onCancel()
-  }, [comment, hasChanges, onCancel, saveLatest])
-
-  React.useEffect(() => {
-    const handlePointerDown = (event: PointerEvent) => {
-      const container = editorContainerRef.current
-      if (!container || container.contains(event.target as Node)) return
-      void closeEditor()
-    }
-    document.addEventListener("pointerdown", handlePointerDown)
-    return () => document.removeEventListener("pointerdown", handlePointerDown)
-  }, [closeEditor])
+  const saveAndClose = React.useCallback(async () => {
+    if (await save()) onCancel()
+  }, [onCancel, save])
 
   return (
     <div
-      ref={editorContainerRef}
       className="flex min-w-[158px] flex-col gap-2 rounded-md border border-blue-200 bg-white p-2"
     >
       <GaTimeRichTextEditor
         value={comment}
         onChange={setComment}
         placeholder="Add comment..."
-        disabled={false}
+        disabled={isSaving}
         multiline
         cellFormat={format}
-        onEditorBlur={() => void saveLatest()}
       />
       <div className="space-y-1.5">
         <div className="flex items-center gap-1 whitespace-nowrap">
@@ -1503,6 +1418,7 @@ function GaTimeRowCommentEditor({
                 format.background_color === color && "ring-2 ring-blue-500 ring-offset-1"
               )}
               style={{ backgroundColor: color }}
+              disabled={isSaving}
               onClick={() => {
                 setFormat((current) => ({ ...current, background_color: color }))
                 if (color === "#EF4444") setComment((current) => applyGaTimeAutomaticContrast(current, color))
@@ -1513,13 +1429,15 @@ function GaTimeRowCommentEditor({
           ))}
         </div>
       </div>
-      <div className="flex items-center justify-between gap-2">
-        <span className={cn("text-[10px]", status === "error" ? "text-red-600" : "text-slate-500")} aria-live="polite">
-          {isSaving ? "Saving..." : status === "error" ? "Save failed" : status === "idle" ? "Type something..." : hasChanges ? "Autosave pending..." : "Saved"}
-        </span>
-        <Button type="button" size="sm" variant="ghost" className="h-8 px-3 text-xs" onClick={() => void closeEditor()}>
-          Close
-        </Button>
+      <div className="flex justify-end">
+        <div className="flex items-center gap-1">
+          <Button type="button" size="sm" variant="ghost" className="h-8 px-3 text-xs" onClick={onCancel} disabled={isSaving}>
+            Cancel
+          </Button>
+          <Button type="button" size="sm" className="h-8 px-3 text-xs" onClick={() => void saveAndClose()} disabled={isSaving || !hasChanges || !getPlainGaTimeRichText(comment).trim()}>
+            {isSaving ? "Saving..." : "Save"}
+          </Button>
+        </div>
       </div>
     </div>
   )
@@ -5950,7 +5868,6 @@ export default function AdminTasksPage() {
     return (
       <td
         className={`ga-time-cell ga-time-comment${isSpecialStartCell ? " ga-time-special-comment" : ""}`}
-        colSpan={isSpecialStartCell ? 2 : undefined}
         data-ga-comment-cell="true"
         data-ga-row-start={slot.start}
         data-ga-row-end={slot.end}
@@ -7499,16 +7416,14 @@ export default function AdminTasksPage() {
                 {gaTimeRows.map((slot) => (
                   <tr key={slot.start} className={slot.isSpecial ? "ga-time-row-custom" : undefined}>
                     <td className="ga-time-slot-label ga-time-nr">{slot.nrLabel}</td>
-                    {!slot.isSpecial ? (
-                      <td className="ga-time-slot-label ga-time-time">
-                        {slot.label ? (
-                          <span className="ga-time-range">
-                            <span>{slot.start}</span>
-                            <span>{slot.end}</span>
-                          </span>
-                        ) : "\u00A0"}
-                      </td>
-                    ) : null}
+                    <td className="ga-time-slot-label ga-time-time">
+                      {!slot.isSpecial && slot.label ? (
+                        <span className="ga-time-range">
+                          <span>{slot.start}</span>
+                          <span>{slot.end}</span>
+                        </span>
+                      ) : "\u00A0"}
+                    </td>
                     {renderGaTimeCommentCell(slot, "start", Boolean(slot.isSpecial))}
                     {commonWeekISOs.map((iso) => {
                       const dayOfWeek = toDayOfWeek(iso)
@@ -8972,6 +8887,10 @@ export default function AdminTasksPage() {
           border: 2px solid #020617;
           font-size: 11px;
         }
+        .admin-week-table .ga-time-table-live {
+          border-collapse: separate;
+          border-spacing: 0;
+        }
         .admin-week-table .ga-time-table-scroll {
           overflow: visible;
         }
@@ -9019,6 +8938,30 @@ export default function AdminTasksPage() {
             inset 0 -2px 0 #020617,
             0 2px 3px rgba(15, 23, 42, 0.2);
         }
+        .admin-week-table .ga-time-table-live .ga-time-nr,
+        .admin-week-table .ga-time-table-live .ga-time-time {
+          position: sticky;
+          background: #f1f5f9;
+          z-index: 10;
+        }
+        .admin-week-table .ga-time-table-live .ga-time-nr {
+          left: 0;
+        }
+        .admin-week-table .ga-time-table-live .ga-time-time {
+          left: 30px;
+          box-shadow: inset -1px 0 #111827, 2px 0 3px rgba(15, 23, 42, 0.16);
+        }
+        .admin-week-table .ga-time-table-live thead .ga-time-nr,
+        .admin-week-table .ga-time-table-live thead .ga-time-time {
+          background: #f8fafc;
+          z-index: 30;
+        }
+        .admin-week-table .ga-time-table-live thead .ga-time-time {
+          box-shadow: inset -1px 0 #111827, inset 0 -2px 0 #020617, 2px 0 3px rgba(15, 23, 42, 0.16);
+        }
+        .admin-week-table .ga-time-table-live .ga-time-row-custom .ga-time-nr {
+          background: #f8fafc;
+        }
         .admin-week-table .ga-time-table-table thead th:first-child {
           border-left: 2px solid #020617;
           border-right: 2px solid #020617;
@@ -9035,6 +8978,15 @@ export default function AdminTasksPage() {
         }
         .admin-week-table .ga-time-table-table tbody tr:last-child td {
           border-bottom: 2px solid #020617;
+        }
+        .admin-week-table .ga-time-table-live th,
+        .admin-week-table .ga-time-table-live td {
+          border-right: 0;
+          border-bottom: 0;
+        }
+        .admin-week-table .ga-time-table-live thead th:first-child,
+        .admin-week-table .ga-time-table-live tbody td:first-child {
+          border-right: 0;
         }
         .admin-week-table .ga-time-nr {
           width: 30px;

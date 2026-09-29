@@ -39,7 +39,7 @@ type Preview = {
 }
 type TaskMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "F" | "BZ1N1" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
 type TaskMarkerFilter = "all" | "with" | "none" | TaskMarker
-type TaskDueDateFilter = "all" | "today"
+type TaskDueDateFilter = "all" | "today" | "deadline" | "starts_today"
 
 const taskMarkerOptions: Array<{ value: TaskMarker; label: string }> = [
   { value: "QUESTION", label: "?" },
@@ -263,6 +263,9 @@ export function PrintReportPage({
   const applyPreviewMarkerFilter = React.useCallback(() => {
     const document = previewFrameRef.current?.contentDocument
     if (!document) return
+    const reportDateLabel = preview?.target_date
+      ? preview.target_date.slice(0, 10).split("-").reverse().join(".")
+      : ""
     document.querySelectorAll<HTMLTableRowElement>('tr[data-task-card-row="content"]').forEach((contentRow) => {
       const dateRow = contentRow.nextElementSibling as HTMLTableRowElement | null
       const dateCells = dateRow?.matches('tr[data-task-card-row="dates"]')
@@ -281,8 +284,15 @@ export function PrintReportPage({
             markerFilter === "none" ? !marker : marker === markerFilter
           )
         )
+        const legacyRedDeadline = cell.getAttribute("bgcolor")?.toUpperCase() === "#DC2626"
+        const matchesDeadline = cell.dataset.taskDeadlineImportant === "true" || legacyRedDeadline
         const dueToday = Boolean(dateCells[index]?.querySelector('[data-task-badge="due-date"][data-due-today="true"]'))
-        const matchesDueDate = dueDateFilter === "all" || (isTaskCard && dueToday)
+        const startDateLabel = dateCells[index]?.querySelector('[data-task-badge="start-date"]')?.textContent?.trim()
+        const startsToday = cell.dataset.taskStartsToday === "true" || Boolean(reportDateLabel && startDateLabel === reportDateLabel)
+        const matchesDueDate = dueDateFilter === "all" || (isTaskCard && (
+          dueDateFilter === "today" ? dueToday :
+          dueDateFilter === "deadline" ? matchesDeadline : startsToday
+        ))
         const matches = matchesMarker && matchesDueDate
         cell.style.display = matches ? "" : "none"
         cell.dataset.taskMarkerFilterHidden = matches ? "false" : "true"
@@ -294,7 +304,7 @@ export function PrintReportPage({
         if (content) content.style.visibility = ""
       })
     })
-  }, [dueDateFilter, markerFilter])
+  }, [dueDateFilter, markerFilter, preview?.target_date])
 
   const setupPreviewMarkerControls = React.useCallback(() => {
     const document = previewFrameRef.current?.contentDocument
@@ -590,13 +600,15 @@ export function PrintReportPage({
     <label className="flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-3 text-sm font-medium text-red-900">
       Due date
       <select
-        className="h-8 bg-transparent text-sm font-black text-red-900 outline-none"
+        className={`h-8 bg-transparent text-sm font-black outline-none ${dueDateFilter === "deadline" ? "text-red-600" : "text-red-900"}`}
         value={dueDateFilter}
         onChange={(event) => setDueDateFilter(event.target.value as TaskDueDateFilter)}
         aria-label="Filter tasks by due date"
       >
         <option value="all">All</option>
         <option value="today">SOT</option>
+        <option value="deadline" style={{ color: "#DC2626", fontWeight: 800 }}>Deadline</option>
+        <option value="starts_today">Starts SOT</option>
       </select>
     </label>
   )

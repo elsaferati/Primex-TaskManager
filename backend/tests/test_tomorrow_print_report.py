@@ -332,6 +332,23 @@ def test_html_table_keeps_grid_styles_inline_for_email_clients() -> None:
     assert '<style>' not in report_html
 
 
+def test_html_table_marks_important_deadline_tasks_for_filtering() -> None:
+    report_html = _html_table(
+        [("1H 10:00", [
+            {"task_id": "important", "title": "Important", "is_deadline_important": True,
+             "start_date": "2026-09-29", "created_at": "2026-09-20T08:00:00"},
+            {"task_id": "regular", "title": "Regular", "is_deadline_important": False,
+             "start_date": "2026-09-28"},
+        ], False)],
+        report_date=date(2026, 9, 29),
+    )
+
+    assert ('data-task-id="important" data-task-marker="" '
+            'data-task-deadline-important="true" data-task-starts-today="true"') in report_html
+    assert ('data-task-id="regular" data-task-marker="" '
+            'data-task-deadline-important="false" data-task-starts-today="false"') in report_html
+
+
 def test_task_title_text_is_larger_and_sits_lower_without_changing_cell_layout() -> None:
     report_html = _html_table(
         [("1H 10:00", [{"title": "GA: A task", "finishPeriod": "AM"}], False)]

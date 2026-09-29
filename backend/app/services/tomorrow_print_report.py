@@ -1337,8 +1337,16 @@ def _html_table(
                             item.get("one_h_marker_by_ga") or item.get("oneHMarkerByGa")
                         ) else "false"
                         marker_comment = _task_marker_comment(item)
+                        deadline_important = "true" if (
+                            item.get("is_deadline_important") or item.get("isDeadlineImportant")
+                        ) else "false"
+                        starts_today = "true" if (
+                            report_date is not None and _task_start_day(item) == report_date
+                        ) else "false"
                         task_attr = (
                             f' data-task-id="{task_id}" data-task-marker="{marker_value}"'
+                            f' data-task-deadline-important="{deadline_important}"'
+                            f' data-task-starts-today="{starts_today}"'
                             f' data-task-marker-by-ga="{marker_by_ga}"'
                             f' data-task-marker-comment="{html.escape(marker_comment, quote=True)}"'
                             if task_id else ""
