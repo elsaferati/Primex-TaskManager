@@ -89,14 +89,14 @@ const primaryItems: NavItem[] = [
     icon: StickyNote,
   },
   {
-    href: "/admin-tasks",
-    label: "Admin Tasks",
-    icon: ClipboardCheck,
-  },
-  {
     href: "/next-week-plan",
     label: "PX JAV",
     icon: CalendarClock,
+  },
+  {
+    href: "/admin-tasks",
+    label: "Admin Tasks",
+    icon: ClipboardCheck,
   },
   {
     href: "/waiting-confirmation-ga",
