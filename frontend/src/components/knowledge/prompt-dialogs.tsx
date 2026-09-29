@@ -358,12 +358,12 @@ export function PromptFormDialog({
               id="kp-path"
               value={filesPath}
               onChange={(e) => setFilesPath(e.target.value)}
-              placeholder="p.sh. F:\FILES\Prompts\Amazon\bulletpoints.txt"
+              placeholder="p.sh. Y:\10_ZHVILLIM\...\prompt.txt"
               className="font-mono text-[13px]"
               maxLength={1000}
             />
             <p className="text-xs text-muted-foreground">
-              Vendos path-in absolut të folderit ose skedarit në server. Ruhet vetëm teksti i promptit; nëse mungon prapashtesa, shtohet .txt.
+              Vendos path-in e folderit ose skedarit në Files PX. Path-i Y: përkthehet automatikisht te serveri; ruhet vetëm teksti i promptit.
             </p>
           </div>
         </div>

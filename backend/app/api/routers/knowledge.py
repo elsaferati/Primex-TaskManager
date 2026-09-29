@@ -83,6 +83,20 @@ def _prompt_filename(title: str) -> str:
     return f"{(name or 'prompt')[:240]}.txt"
 
 
+def _resolve_files_server_path(raw_path: str) -> str:
+    """Translate mapped/client paths to the Files PX path on the server."""
+    requested = raw_path.strip().strip('"').replace("/", "\\")
+    storage_root = settings.FILES_SERVER_STORAGE_ROOT.strip().rstrip("\\/")
+    aliases = [value.strip().rstrip("\\/") for value in settings.FILES_SERVER_PATH_ALIASES.split(";")]
+    for alias in (value for value in aliases if value):
+        requested_key = requested.casefold()
+        alias_key = alias.casefold()
+        if requested_key == alias_key or requested_key.startswith(f"{alias_key}\\"):
+            relative = requested[len(alias) :].lstrip("\\/")
+            return f"{storage_root}\\{relative}" if relative else storage_root
+    return requested
+
+
 def _save_prompt_text_to_server(raw_path: str, title: str, content: str) -> str:
     """Write only the prompt body to an absolute server path and return that path.
 
@@ -90,7 +104,7 @@ def _save_prompt_text_to_server(raw_path: str, title: str, content: str) -> str:
     path without an extension gets ``.txt`` appended. Existing files are
     replaced atomically so readers never see a partially written prompt.
     """
-    requested = raw_path.strip().strip('"')
+    requested = _resolve_files_server_path(raw_path)
     if not requested:
         return ""
     if not content:
