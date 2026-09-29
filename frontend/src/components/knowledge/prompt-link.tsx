@@ -1,0 +1,24 @@
+import Link from "next/link"
+import { ExternalLink } from "lucide-react"
+
+const PROMPT_LINK_RE = /\/knowledge\/prompts\?prompt=([0-9a-f-]{36})/i
+
+/** Prompt tasks (PROMPT: … / PROMPT: TESTO: …) carry only a link to the full prompt in their description. */
+export function promptHrefFromText(text?: string | null): string | null {
+  const match = (text || "").match(PROMPT_LINK_RE)
+  return match ? `/knowledge/prompts?prompt=${match[1]}` : null
+}
+
+export function PromptLinkButton({ text }: { text?: string | null }) {
+  const href = promptHrefFromText(text)
+  if (!href) return null
+  return (
+    <Link
+      href={href}
+      className="inline-flex items-center gap-1.5 rounded-md border border-violet-300 bg-violet-50 px-2.5 py-1 text-sm font-medium text-violet-800 hover:bg-violet-100"
+    >
+      <ExternalLink className="h-3.5 w-3.5" />
+      Shiko promptin e plotë
+    </Link>
+  )
+}

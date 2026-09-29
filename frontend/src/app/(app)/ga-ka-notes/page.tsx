@@ -1233,6 +1233,8 @@ export default function GaKaNotesPage() {
   const [taskStartDate, setTaskStartDate] = React.useState("")
   const [taskDeadlineImportant, setTaskDeadlineImportant] = React.useState(false)
   const [taskAssigneeIds, setTaskAssigneeIds] = React.useState<string[]>([])
+  // Knowledge PX prompt notes: who tests the prompt ("PROMPT: TESTO: ..." task).
+  const [taskPromptTesterId, setTaskPromptTesterId] = React.useState("")
   const [taskDepartmentIds, setTaskDepartmentIds] = React.useState<string[]>([])
   const [taskProjectId, setTaskProjectId] = React.useState("NONE")
   const [taskSkillCategory, setTaskSkillCategory] = React.useState<SkillCategory | null>(null)
@@ -2496,7 +2498,9 @@ export default function GaKaNotesPage() {
       toast.error("Tasks for non-development project notes must be created manually")
       return
     }
-    const defaultTitle = noteToTaskTitle(note.content || "")
+    const noteTitle = noteToTaskTitle(note.content || "")
+    // Knowledge PX: the prompt creator's task is "PROMPT: …" (renamed to the prompt title once it is saved).
+    const defaultTitle = note.knowledge_type === "PROMPT" ? `PROMPT: ${noteTitle}` : noteTitle
     setTaskDialogNoteId(note.id)
     setTaskTitle(defaultTitle)
     setTaskDescription("") // start empty so creator can add detailed description
@@ -2509,6 +2513,7 @@ export default function GaKaNotesPage() {
     setTaskStartDate("")
     setTaskDeadlineImportant(false)
     setTaskAssigneeIds([])
+    setTaskPromptTesterId(note.knowledge_tester_id ?? "")
     setTaskDepartmentIds([])
     setTaskProjectId(note.project_id ?? "NONE")
     const inferredCategory = inferSkillCategory(defaultTitle, note.content)
@@ -2582,6 +2587,15 @@ export default function GaKaNotesPage() {
     }
     if (taskAssigneeIds.length === 0) {
       toast.error("Select at least one assignee before creating the task")
+      return
+    }
+    const isPromptNote = note.knowledge_type === "PROMPT"
+    if (isPromptNote && !taskPromptTesterId) {
+      toast.error("Zgjidh testuesin e promptit")
+      return
+    }
+    if (isPromptNote && taskAssigneeIds.includes(taskPromptTesterId)) {
+      toast.error("Testuesi duhet të jetë person tjetër nga ai që e bën promptin")
       return
     }
     const selectedPvAssignees = taskAssigneeIds
@@ -2661,6 +2675,21 @@ export default function GaKaNotesPage() {
         }
       }
 
+      if (isPromptNote) {
+        const testerRes = await apiFetch(`/knowledge/prompt-notes/${note.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tester_id: taskPromptTesterId }),
+        })
+        if (!testerRes.ok) {
+          const data = await testerRes.json().catch(() => null)
+          toast.error(typeof data?.detail === "string" ? data.detail : "Testuesi nuk u ruajt")
+          return
+        }
+        setNotes((prev) =>
+          prev.map((item) => (item.id === note.id ? { ...item, knowledge_tester_id: taskPromptTesterId } : item))
+        )
+      }
       const taskRes = await apiFetch("/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -4914,7 +4943,9 @@ export default function GaKaNotesPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Assign to</Label>
+                <Label>
+                  {taskDialogNote.knowledge_type === "PROMPT" ? "Assign to · Krijuesi i promptit" : "Assign to"}
+                </Label>
                 <div className="rounded-md border bg-white p-2">
                   <div className="flex flex-wrap gap-2 mb-2">
                     {taskAssigneeIds.length === 0 ? (
@@ -4980,6 +5011,29 @@ export default function GaKaNotesPage() {
                   <p className="text-xs text-muted-foreground">Select one or more departments to guide projects (optional).</p>
                 ) : null}
               </div>
+              {taskDialogNote.knowledge_type === "PROMPT" ? (
+                <div className="space-y-2 rounded-md border border-violet-200 bg-violet-50/60 p-2">
+                  <Label>Testuesi i promptit</Label>
+                  <Select value={taskPromptTesterId || undefined} onValueChange={setTaskPromptTesterId}>
+                    <SelectTrigger className="bg-white">
+                      <SelectValue placeholder="Zgjidh personin që do ta testojë promptin" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {taskAssigneeOptions
+                        .filter((person) => person.id && person.is_active !== false && !taskAssigneeIds.includes(person.id))
+                        .map((person) => (
+                          <SelectItem key={person.id} value={person.id}>
+                            {taskAssigneeLabel(person, person.id)}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Kur shtohet prompti, testuesit i krijohet detyra &ldquo;PROMPT: TESTO: Titulli&rdquo;. Kjo detyrë
+                    mbyllet vetëm pasi testuesi ta konfirmojë testimin; atëherë mbyllen automatikisht të dyja detyrat.
+                  </p>
+                </div>
+              ) : null}
               <TaskSkillField
                 value={taskSkillCategory}
                 onChange={(category) => {

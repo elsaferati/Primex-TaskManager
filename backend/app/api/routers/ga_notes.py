@@ -109,6 +109,7 @@ def _note_out(note: GaNote) -> GaNoteOut:
         project_id=note.project_id,
         department_id=note.department_id,
         knowledge_type=note.knowledge_type,
+        knowledge_tester_id=note.knowledge_tester_id,
         created_at=note.created_at,
         updated_at=note.updated_at,
         attachments=[_attachment_out(a) for a in (note.attachments or [])],
@@ -418,7 +419,8 @@ async def update_ga_note(
             marker_comment=payload.one_h_marker_comment,
         )
 
-    if payload.content is not None and payload.content != old_content:
+    if payload.content is not None and payload.content != old_content and note.knowledge_type != "PROMPT":
+        # Knowledge PX prompt-note tasks keep their "PROMPT: <prompt title>" titles.
         new_task_title = _ga_note_task_title(note.content)
         old_default_description = _ga_note_default_task_description(old_content)
         new_default_description = _ga_note_default_task_description(note.content)
@@ -576,7 +578,11 @@ async def update_ga_note_task_bundle(
     }
     description_before = {task.id: task.description for task in active_tasks}
 
-    title = _ga_note_task_title(note.content) if "content" in fields_set else None
+    title = (
+        _ga_note_task_title(note.content)
+        if "content" in fields_set and note.knowledge_type != "PROMPT"
+        else None
+    )
     description_is_set = "description" in fields_set
     updated_count = apply_ga_note_shared_task_fields(
         active_tasks,

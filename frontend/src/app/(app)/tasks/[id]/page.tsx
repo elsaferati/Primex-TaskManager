@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/lib/auth"
 import { TaskReviewsPanel } from "@/components/task-reviews-panel"
 import { TaskOneHMarker } from "@/components/task-one-h-marker"
+import { PromptLinkButton } from "@/components/knowledge/prompt-link"
 import { clearDepartmentBootstrapCacheByPrefix } from "@/lib/department-bootstrap-cache"
 import { formatDateDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { loadGaNoteTaskAssigneeIds, replaceGaNoteTaskAssignees } from "@/lib/ga-note-task-membership"
@@ -642,6 +643,7 @@ export default function TaskDetailsPage() {
 
               <div className="space-y-2">
                 <Label>Description</Label>
+                <PromptLinkButton text={description} />
                 {isNoteOriginTask ? (
                   <div className="min-h-[44px] rounded-md border bg-slate-50 px-3 py-2 text-sm text-slate-700">
                     {description || "—"}

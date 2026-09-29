@@ -25,7 +25,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth"
+import type { UserLookup } from "@/lib/types"
+import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { cn } from "@/lib/utils"
 
 import {
@@ -158,8 +161,10 @@ export function PromptFormDialog({
   sourceNote?: PromptNote | null
   onSaved: (prompt: KnowledgePrompt) => void
 }) {
-  const { apiFetch } = useAuth()
+  const { apiFetch, user } = useAuth()
   const [title, setTitle] = React.useState("")
+  const [testerId, setTesterId] = React.useState("")
+  const [users, setUsers] = React.useState<UserLookup[]>([])
   const [content, setContent] = React.useState("")
   const [keywords, setKeywords] = React.useState<string[]>([])
   const [filesPath, setFilesPath] = React.useState("")
@@ -174,9 +179,25 @@ export function PromptFormDialog({
     setContent(prompt?.content ?? "")
     setKeywords(prompt?.keywords ?? [])
     setFilesPath(prompt?.files_path ?? "")
+    setTesterId(prompt?.tester?.id ?? sourceNote?.tester?.id ?? "")
     setFile(null)
     setRemoveFile(false)
-  }, [open, prompt])
+  }, [open, prompt, sourceNote])
+
+  React.useEffect(() => {
+    if (!open || users.length) return
+    void fetchUsersLookupCached(apiFetch).then((data) => { if (data) setUsers(data as UserLookup[]) })
+  }, [apiFetch, open, users.length])
+
+  const authorId = prompt?.created_by?.id ?? user?.id
+  const testerOptions = React.useMemo(
+    () =>
+      users
+        .filter((u) => u.is_active && u.id !== authorId)
+        .sort((a, b) => (a.full_name || a.email).localeCompare(b.full_name || b.email)),
+    [users, authorId]
+  )
+  const testerLocked = prompt?.status === "APPROVED"
 
   const pickFile = async (next: File | null) => {
     setFile(next)
@@ -197,11 +218,13 @@ export function PromptFormDialog({
   const save = async () => {
     if (title.trim().length < 2) return toast.error("Shkruaj titullin e promptit")
     if (!content.trim() && !file && !hasExistingFile) return toast.error("Shto tekstin e promptit ose ngarko një skedar")
+    if (!testerLocked && !testerId) return toast.error("Zgjidh testuesin e promptit")
     const form = new FormData()
     form.append("title", title.trim())
     form.append("content", content)
     form.append("keywords", keywords.join(", "))
     form.append("files_path", filesPath.trim())
+    if (testerId && !testerLocked) form.append("tester_id", testerId)
     if (file) form.append("file", file)
     if (!prompt && sourceNote) form.append("source_note_id", sourceNote.id)
     if (prompt && removeFile && !file) form.append("remove_file", "true")
@@ -217,7 +240,9 @@ export function PromptFormDialog({
       }
       const saved = (await res.json()) as KnowledgePrompt
       toast.success(
-        saved.status === "PENDING_TEST" ? "Prompti u ruajt · pret testimin nga një person tjetër" : "Prompti u përditësua"
+        saved.status === "PENDING_TEST"
+          ? `Prompti u ruajt · ${saved.tester?.full_name || "testuesi"} e ka detyrën "PROMPT: TESTO"`
+          : "Prompti u përditësua"
       )
       onSaved(saved)
       onOpenChange(false)
@@ -243,7 +268,7 @@ export function PromptFormDialog({
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Kërkesa</p>
             <p className="mt-1 whitespace-pre-wrap">{sourceNote.content}</p>
             {!tasksDone ? (
-              <p className="mt-2 text-xs text-amber-700">Detyra për këtë kërkesë nuk është shënuar ende si e kryer.</p>
+              <p className="mt-2 text-xs text-violet-700">Detyra jote mbyllet automatikisht sapo testuesi ta konfirmojë testimin.</p>
             ) : null}
           </div>
         ) : null}
@@ -311,6 +336,23 @@ export function PromptFormDialog({
           </div>
 
           <div className="space-y-2">
+            <Label>Testuesi i promptit</Label>
+            <Select value={testerId || undefined} onValueChange={setTesterId} disabled={testerLocked}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Zgjidh personin që do ta testojë" /></SelectTrigger>
+              <SelectContent>
+                {testerOptions.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>{u.full_name || u.username || u.email}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {testerLocked
+                ? "Prompti është aprovuar; testuesi nuk ndryshohet më."
+                : "Personit i krijohet automatikisht detyra \u201cPROMPT: TESTO: Titulli\u201d. Kur klikon \u201cE testova\u201d, detyra mbyllet vetë."}
+            </p>
+          </div>
+
+          <div className="space-y-2">
             <Label htmlFor="kp-path">Path në Files PX</Label>
             <Input
               id="kp-path"
@@ -369,11 +411,12 @@ export function PromptDetailDialog({
   if (!prompt) return null
   const isManager = user?.role === "ADMIN" || user?.role === "MANAGER"
   const isAuthor = prompt.created_by?.id === user?.id
-  const canTest = prompt.status === "PENDING_TEST" && !isAuthor
+  const isTester = prompt.tester ? prompt.tester.id === user?.id : true
+  const canTest = prompt.status === "PENDING_TEST" && !isAuthor && isTester
   const canApprove =
     prompt.status === "PENDING_APPROVAL" && isManager && !isAuthor && prompt.tested_by?.id !== user?.id
   const canReject =
-    (prompt.status === "PENDING_TEST" && !isAuthor) ||
+    (prompt.status === "PENDING_TEST" && !isAuthor && (isTester || isManager)) ||
     ((prompt.status === "PENDING_APPROVAL" || prompt.status === "APPROVED") && isManager)
   const canEdit = isManager || (isAuthor && prompt.status !== "APPROVED")
   const canDelete = isManager || (isAuthor && prompt.status !== "APPROVED")
@@ -429,7 +472,13 @@ export function PromptDetailDialog({
 
   const steps = [
     { label: "Krijuar", who: prompt.created_by?.full_name, when: prompt.created_at, done: true },
-    { label: "Testuar", who: prompt.tested_by?.full_name, when: prompt.tested_at, done: Boolean(prompt.tested_at) },
+    {
+      label: "Testuar",
+      who: prompt.tested_by?.full_name,
+      when: prompt.tested_at,
+      done: Boolean(prompt.tested_at),
+      pending: prompt.tester?.full_name ? `Testuesi: ${prompt.tester.full_name}` : undefined,
+    },
     { label: "Aprovuar", who: prompt.approved_by?.full_name, when: prompt.approved_at, done: Boolean(prompt.approved_at) },
   ]
 
@@ -506,7 +555,7 @@ export function PromptDetailDialog({
                 {step.done ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <span className="h-4 w-4 rounded-full border-2 border-muted-foreground/30" />}
                 {step.label}
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">{step.done ? `${step.who || "—"} · ${formatDate(step.when)}` : "Në pritje"}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{step.done ? `${step.who || "—"} · ${formatDate(step.when)}` : step.pending || "Në pritje"}</p>
             </li>
           ))}
         </ol>
@@ -579,7 +628,12 @@ export function PromptDetailDialog({
           </div>
         </DialogFooter>
         {prompt.status === "PENDING_TEST" && isAuthor ? (
-          <p className="text-right text-xs text-muted-foreground">Testimin duhet ta konfirmojë një koleg tjetër.</p>
+          <p className="text-right text-xs text-muted-foreground">
+            {prompt.tester?.full_name ? `Pret testimin nga ${prompt.tester.full_name}.` : "Testimin duhet ta konfirmojë një koleg tjetër."}
+          </p>
+        ) : null}
+        {prompt.status === "PENDING_TEST" && !isAuthor && !isTester ? (
+          <p className="text-right text-xs text-muted-foreground">Testimin e konfirmon vetëm {prompt.tester?.full_name}.</p>
         ) : null}
         {prompt.status === "PENDING_APPROVAL" && !canApprove ? (
           <p className="text-right text-xs text-muted-foreground">

@@ -600,6 +600,7 @@ export interface GaNote {
   project_id?: string | null
   department_id?: string | null
   knowledge_type?: "PROMPT" | null
+  knowledge_tester_id?: string | null
   created_at: string
   updated_at: string
   attachments?: GaNoteAttachment[]

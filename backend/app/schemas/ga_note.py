@@ -36,6 +36,7 @@ class GaNoteOut(BaseModel):
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     knowledge_type: str | None = None
+    knowledge_tester_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
     attachments: list[GaNoteAttachmentOut] = []

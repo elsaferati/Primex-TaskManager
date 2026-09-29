@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -107,10 +107,26 @@ async def _user_map(db: AsyncSession, ids: set[uuid.UUID | None]) -> dict[uuid.U
 
 
 def _prompt_user_ids(prompt: KnowledgePrompt) -> set[uuid.UUID | None]:
-    return {prompt.created_by, prompt.tested_by, prompt.approved_by, prompt.rejected_by}
+    return {prompt.created_by, prompt.tester_id, prompt.tested_by, prompt.approved_by, prompt.rejected_by}
 
 
-def _prompt_out(prompt: KnowledgePrompt, users: dict[uuid.UUID, KnowledgeUserRef]) -> KnowledgePromptOut:
+def _status_value(value) -> str:
+    return value.value if hasattr(value, "value") else str(value)
+
+
+async def _task_status_map(db: AsyncSession, ids: set[uuid.UUID | None]) -> dict[uuid.UUID, str]:
+    clean = {i for i in ids if i is not None}
+    if not clean:
+        return {}
+    rows = (await db.execute(select(Task.id, Task.status, Task.is_active).where(Task.id.in_(clean)))).all()
+    return {row.id: _status_value(row.status) for row in rows if row.is_active}
+
+
+def _prompt_out(
+    prompt: KnowledgePrompt,
+    users: dict[uuid.UUID, KnowledgeUserRef],
+    task_statuses: dict[uuid.UUID, str] | None = None,
+) -> KnowledgePromptOut:
     ref = lambda uid: users.get(uid) if uid else None  # noqa: E731
     return KnowledgePromptOut(
         id=prompt.id,
@@ -121,6 +137,9 @@ def _prompt_out(prompt: KnowledgePrompt, users: dict[uuid.UUID, KnowledgeUserRef
         source_note_id=prompt.source_note_id,
         status=prompt.status,
         created_by=ref(prompt.created_by),
+        tester=ref(prompt.tester_id),
+        test_task_id=prompt.test_task_id,
+        test_task_status=(task_statuses or {}).get(prompt.test_task_id) if prompt.test_task_id else None,
         tested_by=ref(prompt.tested_by),
         tested_at=prompt.tested_at,
         test_comment=prompt.test_comment,
@@ -139,7 +158,162 @@ def _prompt_out(prompt: KnowledgePrompt, users: dict[uuid.UUID, KnowledgeUserRef
 
 async def _single_prompt_out(db: AsyncSession, prompt: KnowledgePrompt) -> KnowledgePromptOut:
     await db.refresh(prompt)
-    return _prompt_out(prompt, await _user_map(db, _prompt_user_ids(prompt)))
+    return _prompt_out(
+        prompt,
+        await _user_map(db, _prompt_user_ids(prompt)),
+        await _task_status_map(db, {prompt.test_task_id}),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tester + "PROMPT: TESTO: ..." task
+# ---------------------------------------------------------------------------
+
+
+def test_task_title(prompt_title: str) -> str:
+    return f"PROMPT: TESTO: {prompt_title.strip()}"
+
+
+def creator_task_title(prompt_title: str) -> str:
+    return f"PROMPT: {prompt_title.strip()}"
+
+
+PROMPT_LINK_MARKER = "/knowledge/prompts?prompt="
+
+
+def prompt_link(request: Request | None, prompt_id: uuid.UUID) -> str:
+    """Link to the full prompt in Knowledge PX; the task description holds only this link."""
+    origin = (request.headers.get("origin") if request is not None else None) or settings.FRONTEND_URL
+    return f"{origin.rstrip('/')}{PROMPT_LINK_MARKER}{prompt_id}"
+
+
+async def _sync_creator_tasks(db: AsyncSession, prompt: KnowledgePrompt, link: str) -> None:
+    """The prompt creator's task(s) from the Prompt Note: title "PROMPT: <title>",
+    description = link to the full prompt (never the prompt text itself)."""
+    if prompt.source_note_id is None:
+        return
+    tasks = (
+        await db.execute(
+            select(Task)
+            .where(Task.ga_note_origin_id == prompt.source_note_id)
+            .where(Task.is_active.is_(True))
+        )
+    ).scalars().all()
+    changed = False
+    for task in tasks:
+        title = creator_task_title(prompt.title)
+        if task.title != title:
+            task.title = title
+            changed = True
+        if task.description != link:
+            task.description = link
+            changed = True
+    if changed:
+        await db.commit()
+
+
+async def _validate_tester(db: AsyncSession, tester_id: uuid.UUID, author_id: uuid.UUID | None) -> User:
+    tester = (await db.execute(select(User).where(User.id == tester_id))).scalar_one_or_none()
+    if tester is None or not tester.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Testuesi nuk u gjet")
+    if author_id is not None and tester.id == author_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Testuesi duhet të jetë person tjetër nga autori i promptit",
+        )
+    return tester
+
+
+async def _create_test_task(
+    db: AsyncSession, prompt: KnowledgePrompt, tester: User, actor: User, link: str
+) -> uuid.UUID | None:
+    """Create the tester's task through the regular task endpoint logic (baselines, assignees, notifications)."""
+    from app.api.routers.tasks import create_task  # local import: avoid import cycle at module load
+    from app.schemas.task import TaskCreate
+
+    description = link  # only the link to the full prompt, not the prompt text
+    try:
+        out = await create_task(
+            payload=TaskCreate(
+                title=test_task_title(prompt.title),
+                description=description,
+                status="TODO",
+                priority="NORMAL",
+                department_id=tester.department_id,
+                assigned_to=tester.id,
+                assignees=[tester.id],
+            ),
+            db=db,
+            user=actor,
+        )
+    except HTTPException:
+        await db.rollback()
+        return None
+    return out.id
+
+
+async def _deactivate_test_task(db: AsyncSession, task_id: uuid.UUID | None) -> None:
+    if task_id is None:
+        return
+    task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+    if task is not None and _status_value(task.status) != "DONE":
+        task.is_active = False
+
+
+async def _complete_test_task(db: AsyncSession, prompt: KnowledgePrompt, tester: User, comment: str) -> None:
+    """Close the tester's task: the test comment doubles as the RLZ result comment."""
+    if prompt.test_task_id is None:
+        return
+    from app.api.routers.tasks import update_task  # local import: avoid import cycle at module load
+    from app.models.task_user_comment import TaskUserComment
+    from app.schemas.task import TaskUpdate
+
+    task = (await db.execute(select(Task).where(Task.id == prompt.test_task_id))).scalar_one_or_none()
+    if task is None or not task.is_active or _status_value(task.status) == "DONE":
+        return
+    existing = (
+        await db.execute(
+            select(TaskUserComment).where(TaskUserComment.task_id == task.id, TaskUserComment.user_id == tester.id)
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        db.add(TaskUserComment(task_id=task.id, user_id=tester.id, comment=comment))
+    elif not (existing.comment or "").strip():
+        existing.comment = comment
+    await db.commit()
+    task._knowledge_autoclose = True  # allowed through the Knowledge PX task guard
+    try:
+        await update_task(task_id=task.id, payload=TaskUpdate(status="DONE"), db=db, user=tester)
+    except HTTPException:
+        await db.rollback()
+
+
+async def _complete_author_tasks(db: AsyncSession, prompt: KnowledgePrompt, tester: User) -> None:
+    """Close the prompt author's task(s) from the Prompt Note once the prompt is tested,
+    exactly as if the assignee had set them to DONE in the department view / PX Notes."""
+    if prompt.source_note_id is None:
+        return
+    from app.api.routers.tasks import update_task  # local import: avoid import cycle at module load
+    from app.schemas.task import TaskUpdate
+
+    tasks = (
+        await db.execute(
+            select(Task)
+            .where(Task.ga_note_origin_id == prompt.source_note_id)
+            .where(Task.is_active.is_(True))
+        )
+    ).scalars().all()
+    for task in tasks:
+        if _status_value(task.status) == "DONE":
+            continue
+        actor = None
+        if task.assigned_to is not None:
+            actor = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
+        task._knowledge_autoclose = True  # allowed through the Knowledge PX task guard
+        try:
+            await update_task(task_id=task.id, payload=TaskUpdate(status="DONE"), db=db, user=actor or tester)
+        except HTTPException:
+            await db.rollback()
 
 
 async def _get_prompt_or_404(db: AsyncSession, prompt_id: uuid.UUID) -> KnowledgePrompt:
@@ -260,7 +434,16 @@ async def list_prompt_notes(
             )
         ).scalars().all()
 
-    users = await _user_map(db, {n.created_by for n in notes} | {t.assigned_to for t in tasks})
+    users = await _user_map(
+        db,
+        {n.created_by for n in notes}
+        | {n.knowledge_tester_id for n in notes}
+        | {t.assigned_to for t in tasks}
+        | {p.tester_id for p in prompts}
+        | {p.created_by for p in prompts}
+        | {p.tested_by for p in prompts},
+    )
+    test_statuses = await _task_status_map(db, {p.test_task_id for p in prompts})
 
     tasks_by_note: dict[uuid.UUID, list[PromptNoteTaskOut]] = {}
     for task in tasks:
@@ -277,7 +460,16 @@ async def list_prompt_notes(
     prompts_by_note: dict[uuid.UUID, list[KnowledgePromptBrief]] = {}
     for prompt in prompts:
         prompts_by_note.setdefault(prompt.source_note_id, []).append(
-            KnowledgePromptBrief(id=prompt.id, title=prompt.title, status=prompt.status)
+            KnowledgePromptBrief(
+                id=prompt.id,
+                title=prompt.title,
+                status=prompt.status,
+                created_by=users.get(prompt.created_by) if prompt.created_by else None,
+                tested_by=users.get(prompt.tested_by) if prompt.tested_by else None,
+                tested_at=prompt.tested_at,
+                tester=users.get(prompt.tester_id) if prompt.tester_id else None,
+                test_task_status=test_statuses.get(prompt.test_task_id) if prompt.test_task_id else None,
+            )
         )
 
     return [
@@ -294,6 +486,7 @@ async def list_prompt_notes(
             completed_at=note.completed_at,
             tasks=tasks_by_note.get(note.id, []),
             prompts=prompts_by_note.get(note.id, []),
+            tester=users.get(note.knowledge_tester_id) if note.knowledge_tester_id else None,
         )
         for note in notes
     ]
@@ -345,8 +538,29 @@ async def update_prompt_note(
     user=Depends(get_current_user),
 ) -> None:
     note = await _get_prompt_note_or_404(db, note_id)
-    if note.created_by != user.id and not _is_manager(user):
+    changes_note = payload.content is not None or payload.status is not None
+    if changes_note and note.created_by != user.id and not _is_manager(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Vetëm autori ose menaxheri")
+    if payload.tester_id is not None:
+        # Anyone who creates the task may choose the tester (same openness as PX Notes).
+        tester = (await db.execute(select(User).where(User.id == payload.tester_id))).scalar_one_or_none()
+        if tester is None or not tester.is_active:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Testuesi nuk u gjet")
+        assignee_ids = set(
+            (
+                await db.execute(
+                    select(Task.assigned_to)
+                    .where(Task.ga_note_origin_id == note.id)
+                    .where(Task.is_active.is_(True))
+                )
+            ).scalars().all()
+        )
+        if tester.id in assignee_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Testuesi duhet të jetë person tjetër nga ai që e bën promptin",
+            )
+        note.knowledge_tester_id = tester.id
     if payload.content is not None:
         note.content = payload.content.strip()
     if payload.status is not None:
@@ -378,7 +592,8 @@ async def list_prompts(
     for prompt in prompts:
         ids |= _prompt_user_ids(prompt)
     users = await _user_map(db, ids)
-    return [_prompt_out(p, users) for p in prompts]
+    task_statuses = await _task_status_map(db, {p.test_task_id for p in prompts})
+    return [_prompt_out(p, users, task_statuses) for p in prompts]
 
 
 @router.get("/prompts/{prompt_id}", response_model=KnowledgePromptOut)
@@ -392,11 +607,13 @@ async def get_prompt(
 
 @router.post("/prompts", response_model=KnowledgePromptOut, status_code=status.HTTP_201_CREATED)
 async def create_prompt(
+    request: Request,
     title: str = Form(...),
     content: str = Form(""),
     keywords: str = Form(""),
     files_path: str = Form(""),
     source_note_id: uuid.UUID | None = Form(None),
+    tester_id: uuid.UUID | None = Form(None),
     file: UploadFile | None = File(None),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
@@ -404,8 +621,16 @@ async def create_prompt(
     title = title.strip()
     if len(title) < 2:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Titulli i promptit mungon")
+    source_note: GaNote | None = None
     if source_note_id is not None:
-        await _get_prompt_note_or_404(db, source_note_id)
+        source_note = await _get_prompt_note_or_404(db, source_note_id)
+    if tester_id is None and source_note is not None:
+        tester_id = source_note.knowledge_tester_id
+    if tester_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Zgjidh testuesin e promptit")
+    tester = await _validate_tester(db, tester_id, user.id)
+    if source_note is not None and source_note.knowledge_tester_id != tester.id:
+        source_note.knowledge_tester_id = tester.id
 
     prompt = KnowledgePrompt(
         id=uuid.uuid4(),
@@ -416,6 +641,7 @@ async def create_prompt(
         source_note_id=source_note_id,
         status=STATUS_PENDING_TEST,
         created_by=user.id,
+        tester_id=tester.id,
     )
     stored_path: Path | None = None
     if file is not None and (file.filename or "").strip():
@@ -434,16 +660,28 @@ async def create_prompt(
         if stored_path is not None:
             stored_path.unlink(missing_ok=True)
         raise
+
+    prompt_id = prompt.id
+    link = prompt_link(request, prompt_id)
+    await _sync_creator_tasks(db, prompt, link)
+    prompt = await _get_prompt_or_404(db, prompt_id)
+    task_id = await _create_test_task(db, prompt, tester, user, link)
+    prompt = await _get_prompt_or_404(db, prompt_id)
+    if task_id is not None:
+        prompt.test_task_id = task_id
+        await db.commit()
     return await _single_prompt_out(db, prompt)
 
 
 @router.patch("/prompts/{prompt_id}", response_model=KnowledgePromptOut)
 async def update_prompt(
+    request: Request,
     prompt_id: uuid.UUID,
     title: str | None = Form(None),
     content: str | None = Form(None),
     keywords: str | None = Form(None),
     files_path: str | None = Form(None),
+    tester_id: uuid.UUID | None = Form(None),
     remove_file: bool = Form(False),
     file: UploadFile | None = File(None),
     db: AsyncSession = Depends(get_db),
@@ -483,10 +721,44 @@ async def update_prompt(
             detail="Shto tekstin e promptit ose ngarko një skedar",
         )
 
+    new_tester: User | None = None
+    if tester_id is not None and tester_id != prompt.tester_id and prompt.status != STATUS_APPROVED:
+        new_tester = await _validate_tester(db, tester_id, prompt.created_by)
+        await _deactivate_test_task(db, prompt.test_task_id)
+        prompt.tester_id = new_tester.id
+        prompt.test_task_id = None
+
     # Any change to a prompt that is not yet in the library restarts the review.
     if prompt.status != STATUS_APPROVED:
         _reset_review(prompt)
     await db.commit()
+
+    link = prompt_link(request, prompt.id)
+    prompt_id = prompt.id
+    await _sync_creator_tasks(db, prompt, link)
+    prompt = await _get_prompt_or_404(db, prompt_id)
+
+    # Make sure the (new) tester has an open "PROMPT: TESTO" task.
+    if prompt.status == STATUS_PENDING_TEST and prompt.tester_id is not None:
+        needs_task = prompt.test_task_id is None
+        if not needs_task:
+            current = (await db.execute(select(Task).where(Task.id == prompt.test_task_id))).scalar_one_or_none()
+            if current is None or not current.is_active:
+                needs_task = True
+            elif _status_value(current.status) == "DONE":
+                # Re-test after changes: a finished test task is not reused.
+                needs_task = True
+            elif current.title != test_task_title(prompt.title):
+                current.title = test_task_title(prompt.title)
+                await db.commit()
+        if needs_task:
+            tester = new_tester or (await db.execute(select(User).where(User.id == prompt.tester_id))).scalar_one()
+            prompt_id = prompt.id
+            task_id = await _create_test_task(db, prompt, tester, user, link)
+            prompt = await _get_prompt_or_404(db, prompt_id)
+            if task_id is not None:
+                prompt.test_task_id = task_id
+                await db.commit()
     return await _single_prompt_out(db, prompt)
 
 
@@ -505,15 +777,25 @@ async def confirm_prompt_test(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Testimin duhet ta konfirmojë një person tjetër, jo autori",
         )
+    if prompt.tester_id is not None and prompt.tester_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Testimin e konfirmon vetëm testuesi i caktuar",
+        )
+    comment = (payload.comment or "").strip()
     prompt.status = STATUS_PENDING_APPROVAL
     prompt.tested_by = user.id
     prompt.tested_at = _now()
-    prompt.test_comment = (payload.comment or "").strip() or None
+    prompt.test_comment = comment or None
     prompt.rejected_by = None
     prompt.rejected_at = None
     prompt.rejection_reason = None
     await db.commit()
-    return await _single_prompt_out(db, prompt)
+    prompt_id = prompt.id
+    await _complete_test_task(db, prompt, user, comment or f"Prompti u testua: {prompt.title}")
+    prompt = await _get_prompt_or_404(db, prompt_id)
+    await _complete_author_tasks(db, prompt, user)
+    return await _single_prompt_out(db, await _get_prompt_or_404(db, prompt_id))
 
 
 @router.post("/prompts/{prompt_id}/approve", response_model=KnowledgePromptOut)
@@ -561,6 +843,8 @@ async def reject_prompt(
     if prompt.status == STATUS_PENDING_TEST:
         if prompt.created_by == user.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Autori nuk mund ta refuzojë vetë")
+        if prompt.tester_id is not None and prompt.tester_id != user.id and not _is_manager(user):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Vetëm testuesi i caktuar")
     elif prompt.status in (STATUS_PENDING_APPROVAL, STATUS_APPROVED):
         if not _is_manager(user):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Vetëm menaxherët")
@@ -587,6 +871,7 @@ async def delete_prompt(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Nuk keni leje ta fshini")
     if prompt.file_stored_name:
         (_upload_base_dir() / str(prompt.id) / prompt.file_stored_name).unlink(missing_ok=True)
+    await _deactivate_test_task(db, prompt.test_task_id)
     await db.delete(prompt)
     await db.commit()
 

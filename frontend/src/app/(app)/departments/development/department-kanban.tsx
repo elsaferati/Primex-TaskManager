@@ -2260,6 +2260,8 @@ export default function DepartmentKanban() {
   const completeTaskTitle = React.useCallback(
     (task: Task) => {
       const originId = task.ga_note_origin_id || task.plan_note_origin_id
+      // Knowledge PX prompt tasks show their own "PROMPT: …" title, not the note text.
+      if ((task.title || "").startsWith("PROMPT:")) return task.title
       return getCompleteTaskTitle(task, originId ? noteTitleByOriginId[originId] : null)
     },
     [noteTitleByOriginId]

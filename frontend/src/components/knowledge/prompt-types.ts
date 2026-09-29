@@ -14,6 +14,9 @@ export interface KnowledgePrompt {
   source_note_id?: string | null
   status: PromptStatus
   created_by?: KnowledgeUserRef | null
+  tester?: KnowledgeUserRef | null
+  test_task_id?: string | null
+  test_task_status?: string | null
   tested_by?: KnowledgeUserRef | null
   tested_at?: string | null
   test_comment?: string | null
@@ -50,7 +53,18 @@ export interface PromptNote {
   updated_at: string
   completed_at?: string | null
   tasks: PromptNoteTask[]
-  prompts: { id: string; title: string; status: PromptStatus }[]
+  prompts: {
+    id: string
+    title: string
+    status: PromptStatus
+    tester?: KnowledgeUserRef | null
+    test_task_status?: string | null
+    created_by?: KnowledgeUserRef | null
+    tested_by?: KnowledgeUserRef | null
+    tested_at?: string | null
+  }[]
+  /** Chosen when the task is created (PX Notes dialog); pre-fills the prompt form. */
+  tester?: KnowledgeUserRef | null
 }
 
 export const PROMPT_STATUS_META: Record<PromptStatus, { label: string; className: string }> = {
@@ -86,6 +100,19 @@ export const NOTE_STAGE_META: Record<PromptNoteStage, { label: string; className
   IN_REVIEW: { label: "Në shqyrtim", className: "border-sky-200 bg-sky-50 text-sky-800" },
   DONE: { label: "Në librari", className: "border-emerald-200 bg-emerald-50 text-emerald-800" },
   CLOSED: { label: "Mbyllur", className: "border-slate-200 bg-slate-100 text-slate-500" },
+}
+
+/** Whether the current user is the one who should test / approve this prompt now. */
+export function promptWaitsFor(p: KnowledgePrompt, userId?: string | null, isManager = false): boolean {
+  if (!userId) return false
+  if (p.status === "PENDING_TEST") {
+    if (p.created_by?.id === userId) return false
+    return p.tester ? p.tester.id === userId : true
+  }
+  if (p.status === "PENDING_APPROVAL") {
+    return isManager && p.created_by?.id !== userId && p.tested_by?.id !== userId
+  }
+  return false
 }
 
 export function formatDate(value?: string | null) {
