@@ -960,7 +960,7 @@ type SwimlaneRow = {
   badges?: { value: number; className: string; label?: string }[]
   headerBreakdown?: { value: number; label: string; className?: string }[]
   missingOneHUsers?: { id: string; label: string; initials: string }[]
-  missingBlockedUsers?: { id: string; label: string; initials: string }[]
+  missingBlockedUsers?: { id: string; label: string; initials: string; hasOneHAt16: boolean }[]
   items: SwimlaneCell[]
 }
 
@@ -8457,8 +8457,7 @@ export default function CommonViewPage() {
             return aLabel.localeCompare(bLabel)
           })
       : []
-    const buildMissingOneHUsers = (slot: OneHReportSlot | null) => {
-      if (!selectedOneHDate || !slot) return []
+    const usersWithOneHSlot = (slot: OneHReportSlot) => {
       const usersWithSlot = new Set<string>()
       for (const item of commonData.oneH) {
         if (item.date !== selectedOneHDate || isWaitingClientTask(item)) continue
@@ -8469,6 +8468,11 @@ export default function CommonViewPage() {
           if (assigneeId) usersWithSlot.add(assigneeId)
         }
       }
+      return usersWithSlot
+    }
+    const buildMissingOneHUsers = (slot: OneHReportSlot | null) => {
+      if (!selectedOneHDate || !slot) return []
+      const usersWithSlot = usersWithOneHSlot(slot)
       return oneHEligibleUsers
         .filter((userEntry) => !usersWithSlot.has(userEntry.id))
         .map((userEntry) => {
@@ -8479,6 +8483,7 @@ export default function CommonViewPage() {
     const missingBlockedUsers = selectedOneHDate
       ? (() => {
           const usersWithBlockedTask = new Set<string>()
+          const usersWithOneHAt16 = usersWithOneHSlot("16:00")
           for (const item of commonData.blocked) {
             if (item.date !== selectedOneHDate || isWaitingClientTask(item)) continue
             if (item.userId) usersWithBlockedTask.add(item.userId)
@@ -8491,7 +8496,7 @@ export default function CommonViewPage() {
             .filter((userEntry) => !usersWithBlockedTask.has(userEntry.id))
             .map((userEntry) => {
               const label = userEntry.full_name || userEntry.username || userEntry.email || "Unknown"
-              return { id: userEntry.id, label, initials: initials(label) }
+              return { id: userEntry.id, label, initials: initials(label), hasOneHAt16: usersWithOneHAt16.has(userEntry.id) }
             })
         })()
       : []
@@ -10676,6 +10681,9 @@ export default function CommonViewPage() {
           color: #dc2626;
           text-align: center;
           white-space: nowrap;
+        }
+        .oneh-missing-users .oneh-missing-user.has-oneh-at-16 {
+          color: #15803d;
         }
         .oneh-missing-users .oneh-missing-user:not(:last-child)::after {
           content: "•";
@@ -16746,7 +16754,7 @@ export default function CommonViewPage() {
                                     aria-label={`Pa detyrë BLL: ${row.missingBlockedUsers.map((entry) => entry.label).join(", ")}`}
                                   >
                                     {row.missingBlockedUsers.map((entry) => (
-                                      <span key={entry.id} className="oneh-missing-user" title={entry.label}>
+                                      <span key={entry.id} className={`oneh-missing-user${entry.hasOneHAt16 ? " has-oneh-at-16" : ""}`} title={entry.label}>
                                         {entry.initials}
                                       </span>
                                     ))}
