@@ -65,6 +65,7 @@ REPORT_STRIKE_LEGEND = (
 ONE_H_MARKER_SYMBOLS = {
     "EXCLAMATION": "!",
     "CLIENT_URGENT": "!!!",
+    "SHARE": "SHARE",
     "QUESTION": "?",
     "KA": "KA",
     "GENT": "GENT",
@@ -81,6 +82,7 @@ ONE_H_MARKER_LEGEND = (
     ("?", "PYETJE/PAQARTESI"),
     ("!", "DYSHIM/ NUK KUPTOHET DET"),
     ("!!!", "KLIENT/URGJENT"),
+    ("SHARE", "DET QE DUHET SCREENSHARE ME GA"),
     ("👁", "KËRKON MONITORIM NGA DIKUSH TJETËR"),
     ("X", "MBYLL DETYREN"),
     ("M2", "DOREZIM DERI NE PAUZE"),

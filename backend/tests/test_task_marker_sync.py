@@ -89,6 +89,8 @@ def test_weekly_planner_marker_label_preserves_ga_parentheses():
     assert one_h_marker_label("FLAG") == "GA"
     assert one_h_marker_label("F") == "F"
     assert one_h_marker_label("BZ1N1") == "BZ1N1"
+    assert one_h_marker_label("SHARE") == "SHARE"
+    assert one_h_marker_label("SHARE", True) == "(SHARE)"
 
 
 def test_weekly_planner_carries_a_symbol_into_the_next_week():

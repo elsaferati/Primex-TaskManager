@@ -33,13 +33,14 @@ import type { Department, GaNote, GaNoteAttachment, PlanNote, Project, SkillCate
 
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
-type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "F" | "BZ1N1" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT"
+type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "F" | "BZ1N1" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT" | "SHARE"
 type OneHMarkerFilter = "all" | "with" | "none" | OneHMarker
 const ONE_H_MARKER_NONE = "__none__"
 const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
   { value: "QUESTION", label: "?" },
   { value: "EXCLAMATION", label: "!" },
   { value: "CLIENT_URGENT", label: "!!!" },
+  { value: "SHARE", label: "SHARE" },
   { value: "MONITOR", label: "👁" },
   { value: "CLOSE", label: "X" },
   { value: "M2", label: "M2" },
@@ -3394,6 +3395,8 @@ export default function GaKaNotesPage() {
              <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
              <span><b className="text-base font-black text-red-600">!!!</b> - KLIENT/URGJENT</span>
              <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
+             <span><b className="text-xs font-black text-red-600">SHARE</b> - DET QE DUHET SCREENSHARE ME GA</span>
+             <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
              <span><b className="text-base font-black text-red-600">👁</b> - KËRKON MONITORIM NGA DIKUSH TJETËR</span>
              <span className="text-lg font-black text-[#0F2A5F]" aria-hidden="true">/</span>
              <span><b className="text-base font-black text-red-600">X</b> - MBYLL DETYREN</span>
@@ -3433,6 +3436,7 @@ export default function GaKaNotesPage() {
                       ["?", "PYETJE/PAQARTESI"],
                       ["!", "DYSHIM/ NUK KUPTOHET DET"],
                       ["!!!", "KLIENT/URGJENT"],
+                      ["SHARE", "DET QE DUHET SCREENSHARE ME GA"],
                       ["👁", "KËRKON MONITORIM NGA DIKUSH TJETËR"],
                       ["X", "MBYLL DETYREN"],
                       ["M2", "DOREZIM DERI NE PAUZE"],

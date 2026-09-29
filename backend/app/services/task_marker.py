@@ -14,6 +14,7 @@ GA_MARKER_EMAIL = "ga@primexeu.com"
 ONE_H_MARKER_SYMBOLS = {
     "EXCLAMATION": "!",
     "CLIENT_URGENT": "!!!",
+    "SHARE": "SHARE",
     "QUESTION": "?",
     "KA": "KA",
     "GENT": "GENT",
