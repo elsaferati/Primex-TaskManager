@@ -20,6 +20,9 @@ class KnowledgePromptOut(BaseModel):
     source_note_id: uuid.UUID | None = None
     status: str
     created_by: KnowledgeUserRef | None = None
+    tester: KnowledgeUserRef | None = None
+    test_task_id: uuid.UUID | None = None
+    test_task_status: str | None = None
     tested_by: KnowledgeUserRef | None = None
     tested_at: datetime | None = None
     test_comment: str | None = None
@@ -39,6 +42,11 @@ class KnowledgePromptBrief(BaseModel):
     id: uuid.UUID
     title: str
     status: str
+    created_by: KnowledgeUserRef | None = None
+    tested_by: KnowledgeUserRef | None = None
+    tested_at: datetime | None = None
+    tester: KnowledgeUserRef | None = None
+    test_task_status: str | None = None
 
 
 class PromptNoteTaskOut(BaseModel):
@@ -63,6 +71,7 @@ class PromptNoteOut(BaseModel):
     completed_at: datetime | None = None
     tasks: list[PromptNoteTaskOut] = []
     prompts: list[KnowledgePromptBrief] = []
+    tester: KnowledgeUserRef | None = None
 
 
 class PromptNoteCreate(BaseModel):
@@ -74,6 +83,7 @@ class PromptNoteCreate(BaseModel):
 class PromptNoteUpdate(BaseModel):
     content: str | None = Field(default=None, min_length=2, max_length=10000)
     status: str | None = Field(default=None, pattern=r"^(OPEN|CLOSED)$")
+    tester_id: uuid.UUID | None = None
 
 
 class PromptReviewAction(BaseModel):

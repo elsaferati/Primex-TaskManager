@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { PromptLinkButton } from "@/components/knowledge/prompt-link"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -356,6 +357,7 @@ export function TaskEditDialog({
             {showDescriptionField ? (
               <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="task-edit-description">Description</Label>
+                <PromptLinkButton text={description} />
                 <Textarea
                   id="task-edit-description"
                   value={description}

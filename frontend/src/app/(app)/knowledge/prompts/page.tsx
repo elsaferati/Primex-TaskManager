@@ -29,6 +29,7 @@ import {
   TASK_STATUS_META,
   formatDate,
   promptNoteStage,
+  promptWaitsFor,
   type KnowledgePrompt,
   type KnowledgeUserRef,
   type PromptNote,
@@ -177,9 +178,7 @@ function PromptLibrary({
 
   const isManager = user?.role === "ADMIN" || user?.role === "MANAGER"
   const needsMe = React.useCallback(
-    (p: KnowledgePrompt) =>
-      (p.status === "PENDING_TEST" && p.created_by?.id !== user?.id) ||
-      (p.status === "PENDING_APPROVAL" && isManager && p.created_by?.id !== user?.id && p.tested_by?.id !== user?.id),
+    (p: KnowledgePrompt) => promptWaitsFor(p, user?.id, isManager),
     [isManager, user?.id]
   )
   const counts = React.useMemo(() => {
@@ -339,7 +338,17 @@ function PromptLibrary({
                     {mine ? <div className="mt-1 text-[10px] font-semibold uppercase text-amber-700">Pret ty</div> : null}
                   </td>
                   <td className={cn(TD, "text-center")}><Person user={p.created_by} /></td>
-                  <td className={cn(TD, "text-center")}><Person user={p.tested_by} /></td>
+                  <td className={cn(TD, "text-center")}>
+                    {p.tested_by ? (
+                      <Person user={p.tested_by} />
+                    ) : p.tester ? (
+                      <span title={`Testuesi: ${p.tester.full_name || ""} (pret)`} className="inline-flex rounded-full opacity-70 outline-2 outline-offset-1 outline-dashed outline-amber-500">
+                        <Person user={p.tester} />
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
                   <td className={cn(TD, "text-center")}><Person user={p.approved_by} /></td>
                   <td className={cn(TD, "tabular-nums text-xs")}>{formatDate(p.approved_at || p.updated_at)}</td>
                   <td className={TD}>
@@ -554,7 +563,7 @@ function PromptNotes({
             <th className={cn(TH, "w-[48px] border-l-2 border-l-slate-800")}>NR</th>
             <th className={cn(TH, "w-[28%]")}>Kërkesa</th>
             <th className={cn(TH, "w-[20%]")}>Detyra</th>
-            <th className={cn(TH, "w-[56px]")}>Për</th>
+            <th className={cn(TH, "w-[72px]")} title="Kush e bën promptin / kush e teston">Për / Test</th>
             <th className={cn(TH, "w-[118px]")}>Statusi</th>
             <th className={cn(TH, "w-[16%]")}>Prompti</th>
             <th className={cn(TH, "w-[56px]")}>Nga</th>
@@ -597,6 +606,14 @@ function PromptNotes({
                   <td className={cn(TD, "text-center")}>
                     <div className="flex flex-col items-center gap-1">
                       {note.tasks.length ? note.tasks.map((t) => <Person key={t.id} user={t.assignee} />) : <span className="text-muted-foreground">—</span>}
+                      {note.tester ? (
+                        <span title={`Testuesi: ${note.tester.full_name || ""}`} className="mt-0.5 flex flex-col items-center">
+                          <span className="text-[9px] font-bold uppercase tracking-wide text-violet-700">Test</span>
+                          <span className="rounded-full ring-2 ring-violet-400">
+                            <Person user={note.tester} />
+                          </span>
+                        </span>
+                      ) : null}
                     </div>
                   </td>
                   <td className={TD}>
@@ -623,6 +640,24 @@ function PromptNotes({
                             >
                               <span className="font-medium">{p.title}</span>
                               <span className="mt-0.5 block"><Pill label={m.label} className={m.className} /></span>
+                              <span className="mt-1 block space-y-0.5 text-[11px] leading-snug text-muted-foreground">
+                                {p.created_by ? (
+                                  <span className="block">Krijoi: <b className="font-medium text-foreground">{p.created_by.full_name || "—"}</b></span>
+                                ) : null}
+                                {p.tested_by ? (
+                                  <span className="block">
+                                    Testoi: <b className="font-medium text-foreground">{p.tested_by.full_name || "—"}</b>
+                                    {p.tested_at ? ` · ${formatDate(p.tested_at)}` : ""}
+                                  </span>
+                                ) : p.tester ? (
+                                  <span className="block">
+                                    Testuesi: {p.tester.full_name || "—"} · pret testimin
+                                  </span>
+                                ) : null}
+                                {p.status === "PENDING_APPROVAL" ? (
+                                  <span className="block font-medium text-sky-700">Pret konfirmimin e menaxherit te Prompt Library</span>
+                                ) : null}
+                              </span>
                             </button>
                           )
                         })}
@@ -767,6 +802,33 @@ function PromptsPageInner() {
     void apiFetch("/departments").then(async (res) => { if (res.ok) setDepartments((await res.json()) as Department[]) })
   }, [apiFetch, reloadAll])
 
+  // Deep link from a task description: /knowledge/prompts?prompt=<id> opens the full prompt.
+  const linkedPromptId = searchParams.get("prompt")
+  const openedLinkRef = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    if (!linkedPromptId || loadingPrompts || openedLinkRef.current === linkedPromptId) return
+    openedLinkRef.current = linkedPromptId
+    const found = prompts.find((p) => p.id === linkedPromptId)
+    if (found) {
+      setDetail(found)
+      return
+    }
+    void apiFetch(`/knowledge/prompts/${linkedPromptId}`).then(async (res) => {
+      if (res.ok) setDetail((await res.json()) as KnowledgePrompt)
+      else toast.error("Prompti nuk u gjet")
+    })
+  }, [apiFetch, linkedPromptId, loadingPrompts, prompts])
+
+  const closeDetail = () => {
+    setDetail(null)
+    if (linkedPromptId) {
+      const params = new URLSearchParams(searchParams.toString())
+      params.delete("prompt")
+      const qs = params.toString()
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    }
+  }
+
   const setView = (next: "library" | "notes") => {
     const params = new URLSearchParams(searchParams.toString())
     if (next === "notes") params.set("view", "notes")
@@ -826,10 +888,10 @@ function PromptsPageInner() {
       <PromptFormDialog open={formOpen} onOpenChange={setFormOpen} prompt={editing} sourceNote={sourceNote} onSaved={onSaved} />
       <PromptDetailDialog
         prompt={detail}
-        onClose={() => setDetail(null)}
+        onClose={closeDetail}
         onChanged={(p) => { onSaved(p); setDetail(p) }}
-        onDeleted={(id) => { setPrompts((prev) => prev.filter((p) => p.id !== id)); setDetail(null); void loadNotes() }}
-        onEdit={(p) => { setDetail(null); setEditing(p); setSourceNote(null); setFormOpen(true) }}
+        onDeleted={(id) => { setPrompts((prev) => prev.filter((p) => p.id !== id)); closeDetail(); void loadNotes() }}
+        onEdit={(p) => { closeDetail(); setEditing(p); setSourceNote(null); setFormOpen(true) }}
       />
     </div>
   )

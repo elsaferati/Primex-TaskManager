@@ -34,6 +34,11 @@ class KnowledgePrompt(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="PENDING_TEST", index=True)
 
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    # Person chosen by the author to test the prompt, and the "PROMPT: TESTO: ..." task created for them.
+    tester_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    test_task_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
+    )
     tested_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     test_comment: Mapped[str | None] = mapped_column(Text)

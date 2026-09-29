@@ -209,3 +209,6 @@ __all__ = [
     "WeeklyPlanningAuditSettings",
 ]
 
+
+# Knowledge PX: keep prompt-request tasks open until the prompt is tested.
+from app.services import knowledge_task_guard as _knowledge_task_guard  # noqa: E402,F401
