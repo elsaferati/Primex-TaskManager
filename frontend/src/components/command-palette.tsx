@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/command"
 import { useAuth } from "@/lib/auth"
 import { TaskOneHMarker } from "@/components/task-one-h-marker"
+import { TaskMarkerComment } from "@/components/task-marker-comment"
 import type { Task } from "@/lib/types"
 
 type SearchTask = { id: string; title: string; one_h_marker?: Task["one_h_marker"]; one_h_marker_by_ga?: boolean; one_h_marker_comment?: string | null }
@@ -69,7 +70,7 @@ export function CommandPalette({ openSignal = 0 }: { openSignal?: number }) {
                 }}
               >
                 <TaskOneHMarker marker={t.one_h_marker} markerByGa={t.one_h_marker_by_ga} comment={t.one_h_marker_comment} />
-                <span>{t.title}</span>
+                <span className="min-w-0"><TaskMarkerComment comment={t.one_h_marker_comment} taskId={t.id} />{t.title}</span>
               </CommandItem>
             ))}
           </CommandGroup>

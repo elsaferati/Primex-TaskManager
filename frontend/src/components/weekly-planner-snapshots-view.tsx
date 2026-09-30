@@ -19,6 +19,7 @@ import { formatDateTimeDMY } from "@/lib/dates"
 import { toast } from "sonner"
 import { Printer } from "lucide-react"
 import { TaskOneHMarker, taskOneHMarkerLabel } from "@/components/task-one-h-marker"
+import { TaskMarkerComment } from "@/components/task-marker-comment"
 import type { Task } from "@/lib/types"
 
 type SnapshotType = "PLANNED" | "FINAL"
@@ -625,7 +626,8 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                                 comment={task.one_h_marker_comment}
                                 className="h-4 min-h-4 min-w-4 rounded px-0.5 text-[10px] !text-red-600"
                               />
-                              <span className={["min-w-0 flex-1 truncate whitespace-nowrap font-semibold", titleColorClass].join(" ")}>
+                              <span className={["min-w-0 flex-1 break-words font-semibold", titleColorClass].join(" ")}>
+                                <TaskMarkerComment comment={task.one_h_marker_comment} />
                                 {projectIndex + 1}.{taskIndex + 1}. {task.task_title || task.title || "-"}
                               </span>
                               <div className="flex items-center gap-1">
@@ -687,7 +689,8 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                             comment={task.one_h_marker_comment}
                             className="h-4 min-h-4 min-w-4 rounded px-0.5 text-[10px] !text-red-600"
                           />
-                          <span className={["min-w-0 flex-1 truncate whitespace-nowrap font-semibold", titleColorClass].join(" ")}>
+                          <span className={["min-w-0 flex-1 break-words font-semibold", titleColorClass].join(" ")}>
+                            <TaskMarkerComment comment={task.one_h_marker_comment} />
                             {idx + 1}. {task.title || task.task_title || "-"}
                           </span>
                           <div className="flex items-center gap-1">
@@ -741,7 +744,8 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                             comment={task.one_h_marker_comment}
                             className="h-4 min-h-4 min-w-4 rounded px-0.5 text-[10px] !text-red-600"
                           />
-                          <span className={["min-w-0 flex-1 truncate whitespace-nowrap font-semibold", titleColorClass].join(" ")}>
+                          <span className={["min-w-0 flex-1 break-words font-semibold", titleColorClass].join(" ")}>
+                            <TaskMarkerComment comment={task.one_h_marker_comment} />
                             {idx + 1}. {task.title || task.task_title || "-"}
                           </span>
                           <div className="flex items-center gap-1">

@@ -1354,18 +1354,22 @@ def _html_table(
                             f' data-task-marker-comment="{html.escape(marker_comment, quote=True)}"'
                             if task_id else ""
                         )
+                        comment_display = "block" if marker_comment else "none"
                         comment_html = (
                             '<div data-task-marker-comment="true" '
-                            'style="clear:both;margin-top:4px;color:#0F2A5F;font-size:10px;line-height:1.25;">'
-                            f'<strong>KOMENT SIMBOLI:</strong> {html.escape(marker_comment)}</div>'
-                            if marker_comment else ""
+                            'style="clear:both;width:fit-content;max-width:100%;box-sizing:border-box;'
+                            'margin:4px 0;padding:2px 6px;border:1px solid #BFDBFE;'
+                            'border-radius:4px;background:#EFF6FF;color:#1E3A8A;'
+                            'font-size:11px;font-weight:500;line-height:1.25;'
+                            f'white-space:pre-wrap;overflow-wrap:anywhere;display:{comment_display};">'
+                            f'<strong>COM:</strong> {html.escape(marker_comment)}</div>'
                         )
                         task_text_html = (
                             f'<span data-task-title-text="true" style="{TASK_TITLE_TEXT_STYLE}">'
                             f'{task_number}. {title_html}</span>'
                         )
                         title_cells.append(
-                            f'<td{task_attr}{background} style="{title_style}">{badges}{task_text_html}{comment_html}</td>'
+                            f'<td{task_attr}{background} style="{title_style}">{badges}{comment_html}{task_text_html}</td>'
                         )
                     if chunk_index == len(chunks) - 1:
                         date_style = f"{date_style};{SLOT_END_DIVIDER_STYLE}"
@@ -2041,11 +2045,11 @@ def _excel_table_attachment(
                             labels.append(_task_marker_text_token(item))
                         if _is_eight_am_task(item):
                             labels.append("[08:00]")
-                        if labels:
-                            value = f"{' '.join(labels)}\n{value}"
                         marker_comment = _task_marker_comment(item)
                         if marker_comment:
-                            value = f"{value}\nKOMENT SIMBOLI: {marker_comment}"
+                            value = f"COM: {marker_comment}\n{value}"
+                        if labels:
+                            value = f"{' '.join(labels)}\n{value}"
                         date_labels: list[str] = []
                         start_day = _task_start_day(item)
                         due_day = _task_due_day(item)
@@ -2336,6 +2340,13 @@ def _docx_table_attachment(
         paragraph = cell.paragraphs[0]
         paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
         paragraph.paragraph_format.space_after = Pt(0)
+        marker_comment = _task_marker_comment(item)
+        if marker_comment:
+            run = paragraph.add_run(f"COM: {marker_comment}\n")
+            run.font.name = "Arial"
+            run.font.size = Pt(7)
+            run.bold = False
+            run.font.color.rgb = RGBColor.from_string("0F2A5F")
         marker = _task_marker_label(item)
         parts = [
             (f"{number}. [{_task_period_label(item)}]", color),
@@ -2352,13 +2363,6 @@ def _docx_table_attachment(
             run.font.size = Pt(7.5)
             run.bold = bold or run_color == "DC2626"
             run.font.color.rgb = RGBColor.from_string(run_color.removeprefix("#"))
-        marker_comment = _task_marker_comment(item)
-        if marker_comment:
-            run = paragraph.add_run(f"\nKOMENT SIMBOLI: {marker_comment}")
-            run.font.name = "Arial"
-            run.font.size = Pt(7)
-            run.bold = False
-            run.font.color.rgb = RGBColor.from_string("0F2A5F")
 
     def set_stacked_date_cell(cell: Any, value: str, *, color: str = "000000") -> None:
         first_line, second_line = str(value).split("\n", 1)
@@ -2887,7 +2891,7 @@ def _core_png_table_attachment(
                 value = f"{item_index + 1 + chunk_index * 6}. {_task_title(item, personal=personal)}"
                 marker_comment = _task_marker_comment(item)
                 if marker_comment:
-                    value = f"{value}\nKOMENT SIMBOLI: {marker_comment}"
+                    value = f"COM: {marker_comment}\n{value}"
                 task_font = bold if fill == DEADLINE_COLOR else regular
                 for line_index, line in enumerate(wrap(value, task_font, column_widths[2 + item_index] - 12)):
                     draw_task_title_line(
@@ -3345,8 +3349,8 @@ async def _build_print_report(
                 f"[{_task_period_label(item)}]"
                 f"{' [WFC]' if _task_status(item) == 'WAITING_CONFIRMATION' else ''}"
                 f"{f' {_task_marker_text_token(item)}' if _task_marker_label(item) else ''} "
+                f"{f'COM: {_task_marker_comment(item)} | ' if _task_marker_comment(item) else ''}"
                 f"{_task_title(item, personal=personal)}"
-                f"{f' [KOMENT SIMBOLI: {_task_marker_comment(item)}]' if _task_marker_comment(item) else ''}"
                 for item in values
             )
         )

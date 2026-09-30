@@ -60,7 +60,10 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
     void apiFetch(`/tasks/${taskId}`).then(async (response) => {
       if (!response?.ok) return
       const task = await response.json() as { one_h_marker_by_ga?: boolean; one_h_marker_comment?: string | null }
-      if (active) { setByGa(Boolean(task.one_h_marker_by_ga)); setComment(task.one_h_marker_comment || ""); setDraftComment(task.one_h_marker_comment || "") }
+      if (active) {
+        setByGa(Boolean(task.one_h_marker_by_ga)); setComment(task.one_h_marker_comment || ""); setDraftComment(task.one_h_marker_comment || "")
+        window.dispatchEvent(new CustomEvent(MARKER_UPDATED_EVENT, { detail: { taskId, marker, markerByGa: Boolean(task.one_h_marker_by_ga), markerComment: task.one_h_marker_comment || null } }))
+      }
     }).catch(() => undefined)
     return () => { active = false }
   }, [apiFetch, marker, markerByGa, markerComment, taskId])
@@ -123,7 +126,7 @@ export function TaskOneHMarkerEditor({ taskId, marker, markerByGa, markerComment
       {value !== NONE ? <button type="button" className="absolute -right-1 -top-1 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-blue-300 bg-white p-0 text-[9px] shadow-sm" title={comment || "Add symbol comment"} aria-label={comment ? "View symbol comment" : "Add symbol comment"} onClick={() => { setPendingMarker(value); setDraftComment(comment); setCommentOpen(true) }}>💬</button> : null}
       <Dialog open={commentOpen} onOpenChange={setCommentOpen}>
         <DialogContent onClick={(event) => event.stopPropagation()}>
-          <DialogHeader><DialogTitle>Symbol comment</DialogTitle><DialogDescription>Add an optional comment. It appears on hover and in the 1H report outputs.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>Symbol comment</DialogTitle><DialogDescription>Add an optional comment. It appears above the task title wherever the task is shown.</DialogDescription></DialogHeader>
           <Textarea value={draftComment} onChange={(event) => setDraftComment(event.target.value)} maxLength={1000} placeholder="Write an optional comment..." rows={5} />
           <DialogFooter>
             {comment ? <Button type="button" variant="outline" onClick={() => void navigator.clipboard.writeText(comment)}>Copy current</Button> : null}

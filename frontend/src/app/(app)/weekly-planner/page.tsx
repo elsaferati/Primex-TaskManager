@@ -46,6 +46,7 @@ import {
 } from "@/components/weekly-planner-legend-table"
 import { WeeklyPlannerSnapshotsView } from "@/components/weekly-planner-snapshots-view"
 import { TaskOneHMarker, taskOneHMarkerLabel } from "@/components/task-one-h-marker"
+import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { WeeklyPlanPerformanceView, type WeeklyPlanPerformanceResponse } from "@/components/weekly-plan-performance-view"
 import type { Department, GaNote, Project, Task, UserLookup } from "@/lib/types"
 
@@ -3668,7 +3669,7 @@ export default function WeeklyPlannerPage() {
             </div>
             <div className="mt-1 flex items-start gap-1.5 text-sm font-semibold leading-snug text-slate-900" title={task.title}>
               <TaskOneHMarker marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} comment={task.one_h_marker_comment} />
-              <span className="line-clamp-2">{task.title}</span>
+              <span className="min-w-0"><TaskMarkerComment comment={task.one_h_marker_comment} taskId={task.id} /><span className="line-clamp-2">{task.title}</span></span>
             </div>
           </div>
         </div>
@@ -4794,7 +4795,9 @@ export default function WeeklyPlannerPage() {
                                                     comment={task.one_h_marker_comment}
                                                     className="h-4 min-h-4 min-w-4 rounded px-0.5 text-[10px] !text-red-600"
                                                   />
-                                                  <button
+                                                  <span className="min-w-0 flex-1">
+                                                    <TaskMarkerComment comment={task.one_h_marker_comment} />
+                                                    <button
                                                     type="button"
                                                     onClick={() => openTaskTitle(fullTitle)}
                                                     className={[
@@ -4805,7 +4808,8 @@ export default function WeeklyPlannerPage() {
                                                     title={`${taskNumber}. ${displayTitle}`}
                                                   >
                                                     {taskNumber}. {displayTitle}
-                                                  </button>
+                                                    </button>
+                                                  </span>
                                                 <div className="flex shrink-0 items-center gap-1">
                                                   {isNewTask && (
                                                     <span className="inline-flex h-4 items-center justify-center rounded-full border border-blue-300 bg-blue-100 px-1 text-[9px] font-semibold tracking-tight text-blue-700">
@@ -4887,7 +4891,9 @@ export default function WeeklyPlannerPage() {
                                               comment={task.one_h_marker_comment}
                                               className="h-4 min-h-4 min-w-4 rounded px-0.5 text-[10px] !text-red-600"
                                             />
-                                            <button
+                                            <span className="min-w-0 flex-1">
+                                              <TaskMarkerComment comment={task.one_h_marker_comment} />
+                                              <button
                                               type="button"
                                               onClick={() => openTaskTitle(fullTitle)}
                                               className={[
@@ -4898,7 +4904,8 @@ export default function WeeklyPlannerPage() {
                                               title={`${idx + 1}. ${displayTitle}`}
                                             >
                                               {idx + 1}. {displayTitle}
-                                            </button>
+                                              </button>
+                                            </span>
                                           <div className="flex shrink-0 items-center gap-1">
                                             {isNewTask && (
                                               <span className="inline-flex h-4 items-center justify-center rounded-full border border-blue-300 bg-blue-100 px-1 text-[9px] font-semibold tracking-tight text-blue-700">
@@ -4962,7 +4969,9 @@ export default function WeeklyPlannerPage() {
                                           comment={task.one_h_marker_comment}
                                           className="h-4 min-h-4 min-w-4 rounded px-0.5 text-[10px] !text-red-600"
                                         />
-                                        <button
+                                        <span className="min-w-0 flex-1">
+                                          <TaskMarkerComment comment={task.one_h_marker_comment} />
+                                          <button
                                           type="button"
                                           onClick={() => openTaskTitle(fullTitle)}
                                           className={[
@@ -4973,7 +4982,8 @@ export default function WeeklyPlannerPage() {
                                           title={`${idx + 1}. ${displayTitle}`}
                                         >
                                           {idx + 1}. {displayTitle}
-                                        </button>
+                                          </button>
+                                        </span>
                                           <div className="flex shrink-0 items-center gap-1">
                                             {isNewTask && (
                                               <span className="inline-flex h-4 items-center justify-center rounded-full border border-blue-300 bg-blue-100 px-1 text-[9px] font-semibold tracking-tight text-blue-700">
