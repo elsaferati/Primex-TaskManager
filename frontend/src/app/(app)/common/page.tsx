@@ -10682,14 +10682,18 @@ export default function CommonViewPage() {
           text-align: center;
           white-space: nowrap;
         }
-        .oneh-missing-users .oneh-missing-user.has-oneh-at-16 {
+        .oneh-missing-users.oneh-missing-users-at-16 {
+          padding-top: 4px;
+          color: #15803d;
+        }
+        .oneh-missing-users-at-16 .oneh-missing-user {
           color: #15803d;
         }
         .oneh-missing-users .oneh-missing-user:not(:last-child)::after {
           content: "•";
           display: inline-block;
           margin-left: 8px;
-          color: #ef4444;
+          color: inherit;
           font-size: 9px;
           vertical-align: middle;
         }
@@ -16748,13 +16752,25 @@ export default function CommonViewPage() {
                                     ))}
                                   </div>
                                 ) : null}
-                                {row.missingBlockedUsers?.length ? (
+                                {row.missingBlockedUsers?.some((entry) => !entry.hasOneHAt16) ? (
                                   <div
                                     className="oneh-missing-users"
-                                    aria-label={`Pa detyrë BLL: ${row.missingBlockedUsers.map((entry) => entry.label).join(", ")}`}
+                                    aria-label={`Pa BLL dhe pa 1H 16:00: ${row.missingBlockedUsers.filter((entry) => !entry.hasOneHAt16).map((entry) => entry.label).join(", ")}`}
                                   >
-                                    {row.missingBlockedUsers.map((entry) => (
-                                      <span key={entry.id} className={`oneh-missing-user${entry.hasOneHAt16 ? " has-oneh-at-16" : ""}`} title={entry.label}>
+                                    {row.missingBlockedUsers.filter((entry) => !entry.hasOneHAt16).map((entry) => (
+                                      <span key={entry.id} className="oneh-missing-user" title={entry.label}>
+                                        {entry.initials}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                {row.missingBlockedUsers?.some((entry) => entry.hasOneHAt16) ? (
+                                  <div
+                                    className="oneh-missing-users oneh-missing-users-at-16"
+                                    aria-label={`Pa BLL, me 1H 16:00: ${row.missingBlockedUsers.filter((entry) => entry.hasOneHAt16).map((entry) => entry.label).join(", ")}`}
+                                  >
+                                    {row.missingBlockedUsers.filter((entry) => entry.hasOneHAt16).map((entry) => (
+                                      <span key={entry.id} className="oneh-missing-user" title={entry.label}>
                                         {entry.initials}
                                       </span>
                                     ))}
