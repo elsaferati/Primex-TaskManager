@@ -796,9 +796,11 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
         normalized.append({"section_key": title, "title": title, "body": body})
     # Keep Common View–synced manuals with the other manuals (before auto sections).
     manual_count = len(MANUAL_SECTION_TITLES)
+    from app.services.meeting_point_manual_sync import order_custom_manual_sections
+
     if not extras:
-        return normalized
-    return normalized[:manual_count] + extras + normalized[manual_count:]
+        return order_custom_manual_sections("after_break", normalized)
+    return order_custom_manual_sections("after_break", normalized[:manual_count] + extras + normalized[manual_count:])
 
 
 async def apply_1h_confirmation_questions(

@@ -108,6 +108,8 @@ jobs:
           if not defined MS_CLIENT_ID (echo ::error::MS_CLIENT_ID is missing from GitHub Actions Variables or Secrets & exit /b 1)
           if not defined MS_TENANT_ID (echo ::error::MS_TENANT_ID is missing from GitHub Actions Variables or Secrets & exit /b 1)
           if not defined MS_CLIENT_SECRET (echo ::error::MS_CLIENT_SECRET is missing from GitHub Actions Secrets & exit /b 1)
+          if not defined EMAIL_USER (echo ::error::EMAIL_USER is missing from GitHub Actions Secrets & exit /b 1)
+          if not defined EMAIL_PASSWORD (echo ::error::EMAIL_PASSWORD is missing from GitHub Actions Secrets & exit /b 1)
           echo NEXT_PUBLIC_API_BASE_URL=https://api-flow.primexeu.com > frontend\.env.local
           echo DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus > backend\.env
           echo DB_POOL_SIZE=20 >> backend\.env

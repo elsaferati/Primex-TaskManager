@@ -236,13 +236,15 @@ def normalize_meetings_report_sections(sections: list[dict[str, Any]] | None) ->
             ordered.append({"section_key": title, "title": title, "body": DEFAULT_MANUAL_BODY})
 
     # Keep Common View–synced manuals with the other manuals (after built-in manuals).
+    from app.services.meeting_point_manual_sync import order_custom_manual_sections
+
     if not unknown_sections:
-        return ordered
+        return order_custom_manual_sections("meetings", ordered)
     insert_at = 0
     for index, section in enumerate(ordered):
         if section["title"] in MANUAL_SECTION_TITLES:
             insert_at = index + 1
-    return ordered[:insert_at] + unknown_sections + ordered[insert_at:]
+    return order_custom_manual_sections("meetings", ordered[:insert_at] + unknown_sections + ordered[insert_at:])
 
 
 def _local_date(value: datetime | date | None) -> date | None:

@@ -266,13 +266,15 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
         by_title.get(title, {"section_key": title, "title": title, "body": _default_body(title)})
         for title in DISPLAY_SECTION_TITLES
     ]
+    from app.services.meeting_point_manual_sync import order_custom_manual_sections
+
     if not extras:
-        return known
+        return order_custom_manual_sections("morning", known)
     insert_at = max(
         (index + 1 for index, section in enumerate(known) if section["title"] in MANUAL_SECTION_TITLES),
         default=0,
     )
-    return known[:insert_at] + extras + known[insert_at:]
+    return order_custom_manual_sections("morning", known[:insert_at] + extras + known[insert_at:])
 
 
 def _entry_day(entry: CommonEntry) -> date | None:
