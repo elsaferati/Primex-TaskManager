@@ -17,6 +17,7 @@ import {
   reportSectionPreviewText,
 } from "@/components/report-section-editor"
 import { useAuth } from "@/lib/auth"
+import { addManualReportSection, isCustomManualReportSection, ManualReportQuestionAdd, ManualReportQuestionDelete } from "@/components/manual-report-question-add"
 
 type Section = { section_key?: string; title: string; body: string }
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
@@ -351,6 +352,29 @@ export default function AfterBreakReportPage() {
     void save(nextDraft)
   }
 
+  const addManualQuestion = async (title: string, position: number) => {
+    if (!draft) return false
+    const sections = addManualReportSection(draft.sections, title, position, (section, index) => sectionGroupLabel(section, index) === "Manual questions")
+    if (!sections) {
+      toast.error("Kjo pikë ekziston tashmë")
+      return false
+    }
+    const nextDraft = { ...draft, sections }
+    const addedKey = sections.find((section) => !draft.sections.includes(section))?.section_key
+    const saved = await save(nextDraft)
+    if (!saved) return false
+    if (saved.sections.some((section) => section.section_key === addedKey)) return true
+    toast.error("Pika nuk u ruajt. Provo përsëri.")
+    return false
+  }
+
+  const deleteManualQuestion = async (sectionKey: string) => {
+    if (!draft || saving || user?.role !== "ADMIN") return
+    const nextDraft = { ...draft, sections: draft.sections.filter((section) => section.section_key !== sectionKey) }
+    setDraft(nextDraft)
+    if (!await save(nextDraft)) setDraft(draft)
+  }
+
   const updateRecipients = (kind: keyof Recipients, value: string) => {
     setRecipientInputs((current) => ({ ...current, [kind]: value }))
     setDraft((current) => current ? { ...current, recipients: { ...current.recipients, [kind]: parseRecipients(value) } } : current)
@@ -582,8 +606,9 @@ export default function AfterBreakReportPage() {
               return (
                 <React.Fragment key={`${section.title}-${index}`}>
                   {shouldShowSectionGroup(draft.sections, index) ? (
-                    <div className="rounded-md border bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">
+                    <div className="flex items-center justify-between gap-2 rounded-md border bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">
                       {sectionGroupLabel(section, index)}
+                      {sectionGroupLabel(section, index) === "Manual questions" && canEdit ? <ManualReportQuestionAdd onAdd={addManualQuestion} disabled={saving} /> : null}
                     </div>
                   ) : null}
                   <div className="rounded-lg border bg-white p-4 shadow-sm">
@@ -613,9 +638,14 @@ export default function AfterBreakReportPage() {
                         ) : null}
                       </div>
                       {canEdit && !isEditing ? (
-                        <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
-                          <Pencil className="h-4 w-4" /> Edit
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
+                            <Pencil className="h-4 w-4" /> Edit
+                          </Button>
+                          {user?.role === "ADMIN" && isCustomManualReportSection(section) ? (
+                            <ManualReportQuestionDelete title={section.title} disabled={saving} onDelete={() => deleteManualQuestion(section.section_key!)} />
+                          ) : null}
+                        </div>
                       ) : null}
                     </div>
 

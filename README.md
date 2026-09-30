@@ -29,6 +29,7 @@ Edit `backend/.env`:
 - Set `JWT_SECRET`
 - Set `APP_TIMEZONE` (default `Europe/Budapest`)
 - Optional for cloud dictation: `OPENAI_API_KEY`, `SPEECH_MAX_FILE_MB` (default 20)
+- For scheduled email reports, set `EMAIL_USER=130primex.eu@gmail.com` and `EMAIL_PASSWORD` in `backend/.env` (or the backend process environment). `EMAIL_PASSWORD` must be that account's Google app password. Restart the backend after changing either value. The production deploy requires both GitHub Actions secrets.
 
 Install deps:
 ```powershell

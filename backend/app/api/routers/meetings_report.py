@@ -13,6 +13,7 @@ from app.api.deps import get_current_user, require_manager_or_admin
 from app.db import get_db
 from app.models.meetings_report_draft import MeetingsReportDraft
 from app.models.meetings_report_settings import MeetingsReportSettings
+from app.models.enums import UserRole
 from app.models.user import User
 from app.services.meetings_report import (
     MANUAL_SECTION_TITLES,
@@ -23,7 +24,7 @@ from app.services.meetings_report import (
     send_meetings_report,
     subject_for,
 )
-from app.services.meeting_point_manual_sync import merge_common_view_manual_sections, with_section_keys
+from app.services.meeting_point_manual_sync import merge_common_view_manual_sections, removes_custom_manual_section, with_section_keys
 from app.services.report_section_merge import preserve_manual_sections
 from app.services.primeflow_report import report_timezone
 from app.services.primeflow_report_access import can_manage_reports
@@ -311,6 +312,10 @@ async def update_draft(
     if payload.recipients is not None:
         row.recipients = _recipients_from_payload(payload.recipients)
     if payload.sections is not None:
+        if user.role != UserRole.ADMIN and removes_custom_manual_section(
+            row.sections, [{"section_key": section.section_key} for section in payload.sections]
+        ):
+            raise HTTPException(status_code=403, detail="Only admin can delete manually added report points")
         # Keep user-edited question titles as saved (do not remap via normalize).
         row.sections = with_section_keys("meetings", [
             {

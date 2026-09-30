@@ -30,6 +30,39 @@ DEFAULT_MANUAL_BODY = "(Ploteso manualisht)"
 SECTION_KEY_FIELD = "section_key"
 
 
+def order_custom_manual_sections(kind: ReportKind, sections: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Place report-only questions at their requested 1-based manual position."""
+    manual = [section for section in sections if is_manual_section_title(kind, section.get("title"), section.get(SECTION_KEY_FIELD))]
+    numbered: list[tuple[int, int, dict[str, str]]] = []
+    ordered: list[dict[str, str]] = []
+    for index, section in enumerate(manual):
+        match = re.match(r"^manual:custom:([1-9]\d*):", section.get(SECTION_KEY_FIELD) or "")
+        if match:
+            numbered.append((int(match.group(1)), index, section))
+        else:
+            ordered.append(section)
+    for position, _, section in sorted(numbered, key=lambda entry: (entry[0], entry[1]), reverse=True):
+        ordered.insert(min(position - 1, len(ordered)), section)
+    return ordered + [
+        section for section in sections
+        if not is_manual_section_title(kind, section.get("title"), section.get(SECTION_KEY_FIELD))
+    ]
+
+
+def removes_custom_manual_section(
+    existing_sections: list[dict[str, Any]] | None,
+    incoming_sections: list[dict[str, Any]],
+) -> bool:
+    """Detect removal of a report-only question by its stable section key."""
+    existing_keys = {
+        str(section.get(SECTION_KEY_FIELD) or "")
+        for section in existing_sections or []
+        if str(section.get(SECTION_KEY_FIELD) or "").startswith("manual:custom:")
+    }
+    incoming_keys = {str(section.get(SECTION_KEY_FIELD) or "") for section in incoming_sections}
+    return bool(existing_keys - incoming_keys)
+
+
 def _compact(value: str | None) -> str:
     return re.sub(r"[^A-Z0-9]+", "", (value or "").upper())
 
@@ -259,6 +292,17 @@ async def merge_common_view_manual_sections(
             bodies[title] = section.get("body") or ""
 
     extras: list[dict[str, str]] = []
+    # Questions added directly in M1/M2/M3 belong to this draft and must survive
+    # regeneration, independently of the Common View checklist.
+    for section in existing_sections or []:
+        section_key = str(section.get(SECTION_KEY_FIELD) or "")
+        title = str(section.get("title") or "").strip()
+        if section_key.startswith("manual:custom:") and title:
+            extras.append({
+                SECTION_KEY_FIELD: section_key,
+                "title": title,
+                "body": str(section.get("body") or DEFAULT_MANUAL_BODY),
+            })
     for title in await load_common_view_extra_titles(db, kind):
         extras.append(
             {
@@ -266,7 +310,7 @@ async def merge_common_view_manual_sections(
                 "body": bodies.get(title) or DEFAULT_MANUAL_BODY,
             }
         )
-    return _insert_manual_extras(sections, extras, manuals)
+    return order_custom_manual_sections(kind, _insert_manual_extras(sections, extras, manuals))
 
 
 def _today():
