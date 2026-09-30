@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { TaskOneHMarker } from "@/components/task-one-h-marker"
+import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
 import type { Department, Project, Task, TaskAssignee } from "@/lib/types"
@@ -270,7 +271,7 @@ export default function WaitingConfirmationGaPage() {
                       </div>
                       <span className="flex items-start gap-1.5">
                         <TaskOneHMarker marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} comment={task.one_h_marker_comment} />
-                        <span>{task.title || "-"}</span>
+                        <span className="min-w-0"><TaskMarkerComment comment={task.one_h_marker_comment} taskId={task.id} />{task.title || "-"}</span>
                       </span>
                       {canManageWaitingConfirmation ? (
                         <div className="flex flex-nowrap items-center gap-1.5 sm:hidden">

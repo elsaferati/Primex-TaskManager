@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { DiamondAward, TaskReviewDialog } from "@/components/task-review-dialog"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
+import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { MeetingDetailsDialog } from "@/components/meeting-details-dialog"
 import { useAuth } from "@/lib/auth"
 import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
@@ -5459,13 +5460,13 @@ export default function CommonViewPage() {
                         : ""
                     }`
                 const markerComment = !isMeetingTable && (item as PrintTask).oneHMarkerComment
-                  ? `<div class="print-marker-comment"><strong>KOMENT SIMBOLI:</strong> ${escapePrintHtml((item as PrintTask).oneHMarkerComment || "")}</div>`
+                  ? `<div class="print-marker-comment" title="${escapePrintHtml((item as PrintTask).oneHMarkerComment || "")}"><strong>COM:</strong> ${escapePrintHtml((item as PrintTask).oneHMarkerComment || "")}</div>`
                   : ""
                 const taskNumber = chunkIndex * 6 + cellIndex + 1
                 const startToday = !isMeetingTable && isCommonTaskStartToday(item as PrintTask, targetIso)
                 const content = isMeetingTable
                   ? `${taskNumber}. ${escapePrintHtml(title)}`
-                  : `${taskBadges}<span class="print-task-title">${taskNumber}. ${commonPrintTitleHtml(title)}</span>${markerComment}`
+                  : `${taskBadges}${markerComment}<span class="print-task-title">${taskNumber}. ${commonPrintTitleHtml(title)}</span>`
                 return `<td class="${isMeetingTable ? "print-meeting-cell" : `print-task-cell${startToday ? " has-start-today" : ""}`}"><div>${content}</div>${isMeetingTable ? "" : printTaskDatesHtml(item as PrintTask)}</td>`
               }).join("")
               const rowHeaders =
@@ -5514,6 +5515,7 @@ export default function CommonViewPage() {
   .print-task-cell { position:relative; padding-top:8px; padding-bottom:27px; }
   .print-task-cell.has-start-today { padding-bottom:41px; }
   .print-task-title { font-size:17px; line-height:1.25; }
+  .print-marker-comment { display:block; width:fit-content; max-width:min(100%,150px); box-sizing:border-box; margin:4px 0; padding:2px 6px; border:1px solid #bfdbfe; border-radius:4px; background:#eff6ff; color:#1e3a8a; font-size:11px; font-weight:500; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .print-meeting-cell { padding-top:8px; font-size:13px; line-height:1.3; }
   .print-task-dates { position:absolute; left:5px; right:5px; bottom:4px; display:flex; align-items:flex-end; justify-content:space-between; gap:4px; white-space:nowrap; }
   .print-task-start { display:inline-flex; flex-direction:column; align-items:flex-start; gap:2px; }
@@ -5839,6 +5841,8 @@ export default function CommonViewPage() {
                                       ? dayData.feedback
                                       : []
       if (!entries.length) return []
+      const markerCommentPrefix = (entry: { oneHMarkerComment?: string | null }) =>
+        entry.oneHMarkerComment?.trim() ? `COM: ${entry.oneHMarkerComment.trim()}\n` : ""
 
       if (rowId === "late") {
         return (entries as LateItem[]).map((e, idx: number) => `${idx + 1}. ${e.start || "08:00"}-${e.until}${assigneesSuffix(e)}`)
@@ -5859,18 +5863,18 @@ export default function CommonViewPage() {
       }
       if (rowId === "waitingClient") {
         return (entries as FastTaskEntry[]).map(
-          (e, idx: number) => `${idx + 1}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
+          (e, idx: number) => `${markerCommentPrefix(e)}${idx + 1}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
         )
       }
       if (rowId === "blocked") {
         return (entries as BlockedItem[]).map(
-          (e) => `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
+          (e) => `${markerCommentPrefix(e)}${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
         )
       }
       if (isOneHSlotRowId(rowId) || rowId === "r1") {
         return (entries as (OneHItem | R1Item)[]).map(
           (e: OneHItem | R1Item) =>
-            `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${
+            `${markerCommentPrefix(e)}${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${
               isOneHSlotRowId(rowId) ? `[${getOneHReportSlotLabel((e as OneHItem).oneHReportSlot)}] ` : ""
             }[${getCommonTaskPeriodLabel(e.finishPeriod)}] ${isWaitingConfirmationTask(e) ? "[WFC] " : ""}${
               isOneHSlotRowId(rowId) && (e as OneHItem).oneHMarker
@@ -5878,12 +5882,12 @@ export default function CommonViewPage() {
                     ? `(${getOneHMarkerLabel((e as OneHItem).oneHMarker)})`
                     : `[${getOneHMarkerLabel((e as OneHItem).oneHMarker)}]`} `
                 : ""
-            }${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}${(e as OneHItem).oneHMarkerComment ? ` [KOMENT SIMBOLI: ${(e as OneHItem).oneHMarkerComment}]` : ""}`
+            }${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
         )
       }
       if (isPersonalRowId(rowId)) {
         return (entries as PersonalItem[]).map(
-          (e) => `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. `
+          (e) => `${markerCommentPrefix(e)}${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. `
             + `[${getCommonTaskPeriodLabel(e.finishPeriod)}] ${isWaitingConfirmationTask(e) ? "[WFC] " : ""}`
             + `${commonPrintPersonalTaskTitle(e)}${assigneesSuffix(e)}`
         )
@@ -11099,7 +11103,8 @@ export default function CommonViewPage() {
           font-weight: 700;
           font-size: 14px;
           display: flex;
-          align-items: center;
+          flex-direction: column;
+          align-items: flex-start;
           white-space: pre-wrap;
           line-height: 1.35;
         }
@@ -16207,7 +16212,7 @@ export default function CommonViewPage() {
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
                                   {renderCommonTaskStatusIndicator(e)}
-                                  {renderWfcText(commonPrintTaskTitle(e))}
+                                  <span className="inline-flex min-w-0 flex-col align-middle"><TaskMarkerComment comment={e.oneHMarkerComment} taskId={e.taskId} />{renderWfcText(commonPrintTaskTitle(e))}</span>
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -16272,7 +16277,7 @@ export default function CommonViewPage() {
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
                                   {renderCommonTaskStatusIndicator(e)}
-                                  {renderWfcText(commonPrintTitleLine(e.title))}
+                                  <span className="inline-flex min-w-0 flex-col align-middle"><TaskMarkerComment comment={e.oneHMarkerComment} taskId={e.taskId} />{renderWfcText(commonPrintTitleLine(e.title))}</span>
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -16307,7 +16312,7 @@ export default function CommonViewPage() {
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
                                   {renderCommonTaskStatusIndicator(e, true)}
-                                  {renderWfcText(commonPrintPersonalTaskTitle(e))}
+                                  <span className="inline-flex min-w-0 flex-col align-middle"><TaskMarkerComment comment={e.oneHMarkerComment} taskId={e.taskId} />{renderWfcText(commonPrintPersonalTaskTitle(e))}</span>
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -17023,6 +17028,7 @@ export default function CommonViewPage() {
                                     ) : null}
                                     <div className="swimlane-title">
                                       {!cell.assignees?.length && !cell.assigneeLabels?.length ? taskStatusIndicator : null}
+                                      {isFastTaskRowId(row.id) ? <TaskMarkerComment comment={cell.oneHMarkerComment} taskId={cell.taskId} /> : null}
                                       <span className="swimlane-print-title">
                                         {commonPrintTitleLine(
                                           `${cell.title}${cell.meetingTimeLabel ? ` ${cell.meetingTimeLabel}` : ""}`,

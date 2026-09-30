@@ -5,6 +5,7 @@ import Link from "next/link"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { TaskOneHMarker } from "@/components/task-one-h-marker"
+import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -241,7 +242,7 @@ export default function MonthlyPlannerPage() {
                           >
                             <span className="flex items-start gap-1.5">
                               <TaskOneHMarker marker={t.one_h_marker} markerByGa={t.one_h_marker_by_ga} comment={t.one_h_marker_comment} />
-                              <span>{t.title}</span>
+                              <span className="min-w-0"><TaskMarkerComment comment={t.one_h_marker_comment} taskId={t.id} />{t.title}</span>
                             </span>
                           </Link>
                         ))}

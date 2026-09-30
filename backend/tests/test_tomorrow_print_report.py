@@ -798,8 +798,14 @@ def test_one_h_marker_is_a_separate_badge_next_to_am_pm() -> None:
     assert 'data-task-badge="finish-period"' in report_html
     assert 'data-task-badge="one-h-marker"' in report_html
     assert ">👁</span>" in report_html
-    assert "KOMENT SIMBOLI:</strong> Check again with KA" in report_html
+    assert "COM:</strong> Check again with KA" in report_html
     assert 'data-task-marker-comment="Check again with KA"' in report_html
+    assert report_html.index("COM:</strong> Check again with KA") < report_html.index("2. Question task")
+    assert "width:fit-content;max-width:min(100%,150px)" in report_html
+    assert "white-space:nowrap;overflow:hidden;text-overflow:ellipsis" in report_html
+    assert 'title="Check again with KA"' in report_html
+    assert "border:1px solid #BFDBFE" in report_html
+    assert "background:#EFF6FF" in report_html
 
     _, content, _ = _excel_table_attachment(
         [("1H 10:00", tasks, False)], [], date(2026, 8, 14)
@@ -807,7 +813,8 @@ def test_one_h_marker_is_a_separate_badge_next_to_am_pm() -> None:
     sheet = load_workbook(BytesIO(content)).active
     assert "[AM] [GA]\n" in sheet["C7"].value
     assert "[PM] [👁]\n" in sheet["D7"].value
-    assert "KOMENT SIMBOLI: Check again with KA" in sheet["D7"].value
+    assert "COM: Check again with KA" in sheet["D7"].value
+    assert sheet["D7"].value.index("COM: Check again with KA") < sheet["D7"].value.index("Question task")
     assert "[AM] (?)\n" in sheet["E7"].value
 
 

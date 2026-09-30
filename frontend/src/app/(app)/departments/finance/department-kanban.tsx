@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
+import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import { toast } from "sonner"
 
@@ -857,6 +858,7 @@ export default function DepartmentKanban() {
                         <TableCell className="w-[480px] min-w-[480px] whitespace-normal font-medium text-slate-800">
                           <div className="flex w-full items-start gap-2">
                             <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+                              <TaskMarkerComment comment={row.task.one_h_marker_comment} taskId={row.task.id} />
                               {typeof row.title === "string" && row.title.includes("[[")
                                 ? renderMarkedNoteContent(row.title, row.title)
                                 : row.title}

@@ -211,6 +211,11 @@ jobs:
             throw "Alembic upgrade failed."
           }
 
+          & $python -m scripts.verify_deployed_schema
+          if ($LASTEXITCODE -ne 0) {
+            throw "Required migration columns are missing."
+          }
+
           # Capture stdout only. Alembic writes normal INFO logging to stderr,
           # which Windows PowerShell 5 converts to NativeCommandError when merged.
           $currentOutput = @(& $python -m alembic current)

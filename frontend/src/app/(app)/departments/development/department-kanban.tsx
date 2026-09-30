@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { TaskOneHMarkerEditor } from "@/components/task-one-h-marker-editor"
+import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { TaskOneHMarkerLegend } from "@/components/task-one-h-marker-legend"
 import { useVisibleRefresh } from "@/lib/use-visible-refresh"
 import Link from "next/link"
@@ -2269,11 +2270,11 @@ export default function DepartmentKanban() {
   const renderAllTodayTaskTitle = React.useCallback(
     (task: Task) => {
       const completeTitle = completeTaskTitle(task)
-      if (!completeTitle.includes("[[")) return completeTitle
-      if (task.ga_note_origin_id) return renderMarkedNoteContent(completeTitle, completeTitle)
-      return isTaskStartingOnSelectedAllDate(task)
-        ? renderMarkedNoteContent(completeTitle, completeTitle)
-        : getPlainMarkedText(completeTitle)
+      const title = !completeTitle.includes("[[") ? completeTitle
+        : task.ga_note_origin_id || isTaskStartingOnSelectedAllDate(task)
+          ? renderMarkedNoteContent(completeTitle, completeTitle)
+          : getPlainMarkedText(completeTitle)
+      return <><TaskMarkerComment comment={task.one_h_marker ? task.one_h_marker_comment : null} taskId={task.id} />{title}</>
     },
     [completeTaskTitle, isTaskStartingOnSelectedAllDate]
   )
@@ -7841,6 +7842,7 @@ export default function DepartmentKanban() {
                                     </span>
                                   ) : null}
                                   <span className="min-w-0 flex-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                                    <TaskMarkerComment taskId={row.taskId} />
                                     {(() => {
                                       const hasMarks = typeof visibleTitle === "string" && visibleTitle.includes("[[")
                                       const renderedTitle = hasMarks ? renderMarkedNoteContent(visibleTitle, visibleTitle) : visibleTitle
@@ -9633,6 +9635,7 @@ export default function DepartmentKanban() {
                                 <div className="sm:px-3">
                                   <div className="flex items-center gap-2 flex-wrap min-w-0">
                                       <div className={`min-w-0 whitespace-pre-line break-words text-[12px] font-medium leading-4.5 ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
+                                          <TaskMarkerComment comment={t.one_h_marker_comment} taskId={t.id} />
                                           {typeof t.title === "string" && t.title.includes("[[")
                                             ? renderMarkedNoteContent(t.title, t.title)
                                             : t.title}
@@ -11333,6 +11336,7 @@ export default function DepartmentKanban() {
                                   </span>
                                 ) : null}
                                 <span className="whitespace-pre-wrap break-words">
+                                  <TaskMarkerComment taskId={row.taskId} />
                                   {row.typeLabel === "PRJK" && row.projectTitle ? (
                                     <>
                                       <span className="font-semibold">{row.projectTitle}</span>
@@ -11463,6 +11467,7 @@ export default function DepartmentKanban() {
                               </span>
                             ) : null}
                             <span className="whitespace-pre-wrap break-words">
+                              <TaskMarkerComment taskId={row.taskId} />
                               {row.typeLabel === "PRJK" && row.projectTitle ? (
                                 <>
                                   <span className="font-semibold">{row.projectTitle}</span>

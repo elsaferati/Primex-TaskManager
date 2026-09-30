@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/lib/auth"
 import { TaskReviewsPanel } from "@/components/task-reviews-panel"
 import { TaskOneHMarker } from "@/components/task-one-h-marker"
+import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { PromptLinkButton } from "@/components/knowledge/prompt-link"
 import { clearDepartmentBootstrapCacheByPrefix } from "@/lib/department-bootstrap-cache"
 import { formatDateDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
@@ -553,7 +554,7 @@ export default function TaskDetailsPage() {
                 </Button>
                 <div className="flex items-start gap-2 text-2xl font-semibold text-slate-900">
                   <TaskOneHMarker marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} comment={task.one_h_marker_comment} className="mt-1" />
-                  <span>{renderMarkedNoteContent(title || task.title, title || task.title)}</span>
+                  <span className="min-w-0"><TaskMarkerComment comment={task.one_h_marker_comment} taskId={task.id} />{renderMarkedNoteContent(title || task.title, title || task.title)}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                   <span>Status: {statusText}</span>

@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { TaskSkillField } from "@/components/task-skill-field"
 import { TaskOneHMarker } from "@/components/task-one-h-marker"
+import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { ChevronDown, Eye, Pencil } from "lucide-react"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
@@ -3927,7 +3928,7 @@ export default function ProjectPage() {
                       <div className="grid grid-cols-[minmax(320px,1fr)_100px_140px_130px_110px_230px] items-start gap-3">
                         <div className="font-medium flex items-center gap-2 flex-wrap">
                           <TaskOneHMarker marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} comment={task.one_h_marker_comment} />
-                          <span>{task.title}</span>
+                          <span className="min-w-0"><TaskMarkerComment comment={task.one_h_marker_comment} taskId={task.id} />{task.title}</span>
                           {task.skill_category ? (
                             <Badge variant="outline" className="text-xs">
                               {SKILL_CATEGORIES.find((category) => category.id === task.skill_category)?.label || task.skill_category}

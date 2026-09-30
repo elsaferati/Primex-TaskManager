@@ -22,6 +22,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { TaskSkillField } from "@/components/task-skill-field"
 import { TaskOneHMarker } from "@/components/task-one-h-marker"
+import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { useAuth } from "@/lib/auth"
 import { departmentTableTag, formatDepartmentName } from "@/lib/department-name"
 import { formatDateDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
@@ -851,7 +852,7 @@ export default function OpenTasksPage() {
                           <TableCell className="min-w-0 whitespace-normal px-1.5 py-2 align-middle">
                             <div className="flex items-start gap-1.5 break-words text-sm font-medium leading-snug text-slate-900">
                               <TaskOneHMarker marker={task.one_h_marker} markerByGa={task.one_h_marker_by_ga} comment={task.one_h_marker_comment} />
-                              <span>{renderHighlightedAddedText(task.title)}</span>
+                              <span className="min-w-0"><TaskMarkerComment comment={task.one_h_marker_comment} taskId={task.id} />{renderHighlightedAddedText(task.title)}</span>
                             </div>
                           </TableCell>
                           <TableCell className="px-1.5 py-2 align-middle text-[13px] uppercase text-slate-700">{sourceLabel(task)}</TableCell>

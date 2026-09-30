@@ -19,6 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { TaskSkillField } from "@/components/task-skill-field"
+import { TaskMarkerComment } from "@/components/task-marker-comment"
 import { PromptLinkButton, promptHrefFromText } from "@/components/knowledge/prompt-link"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
@@ -4089,6 +4090,7 @@ export default function GaKaNotesPage() {
                                   </Link>
                                 ) : null}
                                 <span id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
+                                  {note.one_h_marker ? <TaskMarkerComment comment={note.one_h_marker_comment} /> : null}
                                   {renderMarkedNoteContent(note.content, canViewStrikeTimestamps)}
                                 </span>
                               </div>

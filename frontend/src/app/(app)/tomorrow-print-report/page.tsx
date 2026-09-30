@@ -439,7 +439,17 @@ export function PrintReportPage({
       resizeMarkerSelect(select.value, cell.dataset.taskMarkerByGa === "true")
 
       const commentBlock = cell.querySelector<HTMLElement>('[data-task-marker-comment="true"]')
-      if (commentBlock) commentBlock.style.display = "none"
+      const updateCommentBlock = (comment: string) => {
+        if (!commentBlock) return
+        commentBlock.replaceChildren()
+        if (comment) {
+          const label = document.createElement("strong")
+          label.textContent = "COM:"
+          commentBlock.append(label, document.createTextNode(` ${comment}`))
+        }
+        commentBlock.title = comment
+        commentBlock.style.display = comment ? "block" : "none"
+      }
 
       const commentButton = document.createElement("button")
       commentButton.type = "button"
@@ -501,6 +511,7 @@ export function PrintReportPage({
           select.title = updated.one_h_marker_comment || "Task marker"
           resizeMarkerSelect(nextValue, Boolean(updated.one_h_marker_by_ga))
           updateCommentButton(nextValue, updated.one_h_marker_comment || "")
+          updateCommentBlock(updated.one_h_marker_comment || "")
           taskMarkerOptions.forEach((option, index) => {
             const element = select.options[index + 1]
             if (element) {
@@ -542,9 +553,7 @@ export function PrintReportPage({
           cell.dataset.taskMarkerComment = savedComment
           select.title = savedComment || "Task marker"
           updateCommentButton(marker, savedComment)
-          if (commentBlock) {
-            commentBlock.textContent = savedComment ? `KOMENT SIMBOLI: ${savedComment}` : ""
-          }
+          updateCommentBlock(savedComment)
           toast.success("Symbol comment updated")
         } catch (error) {
           toast.error("Symbol comment update failed", { description: String(error) })
