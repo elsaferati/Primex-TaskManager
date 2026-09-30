@@ -5460,7 +5460,7 @@ export default function CommonViewPage() {
                         : ""
                     }`
                 const markerComment = !isMeetingTable && (item as PrintTask).oneHMarkerComment
-                  ? `<div class="print-marker-comment"><strong>COM:</strong> ${escapePrintHtml((item as PrintTask).oneHMarkerComment || "")}</div>`
+                  ? `<div class="print-marker-comment" title="${escapePrintHtml((item as PrintTask).oneHMarkerComment || "")}"><strong>COM:</strong> ${escapePrintHtml((item as PrintTask).oneHMarkerComment || "")}</div>`
                   : ""
                 const taskNumber = chunkIndex * 6 + cellIndex + 1
                 const startToday = !isMeetingTable && isCommonTaskStartToday(item as PrintTask, targetIso)
@@ -5515,7 +5515,7 @@ export default function CommonViewPage() {
   .print-task-cell { position:relative; padding-top:8px; padding-bottom:27px; }
   .print-task-cell.has-start-today { padding-bottom:41px; }
   .print-task-title { font-size:17px; line-height:1.25; }
-  .print-marker-comment { display:block; width:fit-content; max-width:100%; box-sizing:border-box; margin:4px 0; padding:2px 6px; border:1px solid #bfdbfe; border-radius:4px; background:#eff6ff; color:#1e3a8a; font-size:11px; font-weight:500; line-height:1.25; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .print-marker-comment { display:block; width:fit-content; max-width:min(100%,150px); box-sizing:border-box; margin:4px 0; padding:2px 6px; border:1px solid #bfdbfe; border-radius:4px; background:#eff6ff; color:#1e3a8a; font-size:11px; font-weight:500; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .print-meeting-cell { padding-top:8px; font-size:13px; line-height:1.3; }
   .print-task-dates { position:absolute; left:5px; right:5px; bottom:4px; display:flex; align-items:flex-end; justify-content:space-between; gap:4px; white-space:nowrap; }
   .print-task-start { display:inline-flex; flex-direction:column; align-items:flex-start; gap:2px; }

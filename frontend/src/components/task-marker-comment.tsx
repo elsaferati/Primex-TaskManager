@@ -26,7 +26,7 @@ export function TaskMarkerComment({ comment, taskId, className }: {
   const text = current.trim()
   if (!text) return null
   return (
-    <span className={cn("block w-fit max-w-full whitespace-pre-wrap break-words rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium leading-snug text-blue-900", className)}>
+    <span title={text} style={{ maxWidth: "min(100%, 150px)" }} className={cn("block w-fit overflow-hidden text-ellipsis whitespace-nowrap rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium leading-snug text-blue-900", className)}>
       <strong>COM:</strong> {text}
     </span>
   )

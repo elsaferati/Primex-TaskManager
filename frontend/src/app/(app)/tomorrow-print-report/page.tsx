@@ -447,6 +447,7 @@ export function PrintReportPage({
           label.textContent = "COM:"
           commentBlock.append(label, document.createTextNode(` ${comment}`))
         }
+        commentBlock.title = comment
         commentBlock.style.display = comment ? "block" : "none"
       }
 

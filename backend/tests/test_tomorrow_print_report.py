@@ -801,7 +801,9 @@ def test_one_h_marker_is_a_separate_badge_next_to_am_pm() -> None:
     assert "COM:</strong> Check again with KA" in report_html
     assert 'data-task-marker-comment="Check again with KA"' in report_html
     assert report_html.index("COM:</strong> Check again with KA") < report_html.index("2. Question task")
-    assert "width:fit-content;max-width:100%" in report_html
+    assert "width:fit-content;max-width:min(100%,150px)" in report_html
+    assert "white-space:nowrap;overflow:hidden;text-overflow:ellipsis" in report_html
+    assert 'title="Check again with KA"' in report_html
     assert "border:1px solid #BFDBFE" in report_html
     assert "background:#EFF6FF" in report_html
 

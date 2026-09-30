@@ -1377,11 +1377,12 @@ def _html_table(
                         comment_display = "block" if marker_comment else "none"
                         comment_html = (
                             '<div data-task-marker-comment="true" '
-                            'style="clear:both;width:fit-content;max-width:100%;box-sizing:border-box;'
+                            f'title="{html.escape(marker_comment, quote=True)}" '
+                            'style="clear:both;width:fit-content;max-width:min(100%,150px);box-sizing:border-box;'
                             'margin:4px 0;padding:2px 6px;border:1px solid #BFDBFE;'
                             'border-radius:4px;background:#EFF6FF;color:#1E3A8A;'
                             'font-size:11px;font-weight:500;line-height:1.25;'
-                            f'white-space:pre-wrap;overflow-wrap:anywhere;display:{comment_display};">'
+                            f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:{comment_display};">'
                             f'<strong>COM:</strong> {html.escape(marker_comment)}</div>'
                         )
                         task_text_html = (
