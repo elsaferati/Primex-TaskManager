@@ -67,6 +67,7 @@ from app.models.vs_workflow_item import VsWorkflowItem
 from app.models.refresh_token import RefreshToken
 from app.models.realization import (
     RealizationDailyApprovalEvent,
+    RealizationDailyPersonComment,
     RealizationDailyCloseEvent,
     RealizationDepartmentResult,
     RealizationObservation,
@@ -174,6 +175,7 @@ __all__ = [
     "RefreshToken",
     "RealizationDepartmentResult",
     "RealizationDailyApprovalEvent",
+    "RealizationDailyPersonComment",
     "RealizationObservation",
     "RealizationPeriod",
     "RealizationPersonResult",

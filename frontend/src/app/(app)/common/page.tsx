@@ -10661,7 +10661,7 @@ export default function CommonViewPage() {
         }
         .oneh-missing-users {
           display: flex;
-          flex: 1 1 auto;
+          flex: 0 0 auto;
           flex-direction: row;
           flex-wrap: wrap;
           align-content: flex-start;
@@ -10683,7 +10683,7 @@ export default function CommonViewPage() {
           white-space: nowrap;
         }
         .oneh-missing-users.oneh-missing-users-covered {
-          padding-top: 4px;
+          padding-top: 0;
           color: #15803d;
         }
         .oneh-missing-users-covered .oneh-missing-user {

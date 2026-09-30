@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { RealizationReviewCells } from "@/components/realization-review-cells"
+import { RealizationDailyPersonComment } from "@/components/realization-daily-person-comment"
 import { RealizationQuantityDelta } from "@/components/realization-quantity"
 import { RealizationDeadlineStatusGrid, RealizationExtraStatusGrid, RealizationPlanStatusGrid, RealizationStatusLegend, metricBand, metricCell, metricHeadline } from "@/components/realization-plan-status-grid"
 import { RealizationDeadlineTasksPopover, criticalDeadlineCounts, criticalDeadlineSummary, deadlineAlarmCount } from "@/components/realization-deadline-tasks"
@@ -13,7 +14,8 @@ import type { ExtraTaskState } from "@/lib/realization-extras"
 import type { DailyRealizationPerson, Department, RealizationPersonResult } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-export function DailyStaffTable({ people, filterPeople, departments, departmentId, personFilter, onDepartmentFilter, onPersonFilter, periodIds, results, sort, onSort, onSelect, onSelectExtra, onSelectDeadline, reviewVersion, onReviewSaved, onPrepareResult }: {
+export function DailyStaffTable({ people, filterPeople, departments, departmentId, personFilter, onDepartmentFilter, onPersonFilter, periodIds, results, sort, onSort, onSelect, onSelectExtra, onSelectDeadline, reviewVersion, onReviewSaved, onPrepareResult, day }: {
+  day: string
   people: DailyRealizationPerson[]; departments: Department[]; periodIds: Record<string, string>
   results: Record<string, RealizationPersonResult>
   filterPeople: DailyRealizationPerson[]; departmentId: string; personFilter: string
@@ -75,7 +77,7 @@ export function DailyStaffTable({ people, filterPeople, departments, departmentI
             <TableHead className="bg-orange-100 text-[11px] uppercase">Due date / Deadline Kryer/Totali</TableHead>
             <TableHead className="text-center text-[11px] uppercase">Plan RLZ</TableHead>
             <TableHead className="text-[11px] uppercase">Vlerësimi</TableHead>
-            <TableHead className="text-[11px] uppercase">Komenti nga përgjegjësi</TableHead>
+            <TableHead className="text-[11px] uppercase">Koment ditor</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -90,7 +92,8 @@ export function DailyStaffTable({ people, filterPeople, departments, departmentI
                 <TableCell className="text-center tabular-nums text-slate-500">{index + 1}</TableCell>
                 <TableCell><span className="block whitespace-nowrap text-[15px] font-bold leading-5 text-slate-800">{person.user_name}</span></TableCell>
                 <TableCell className="text-center text-xs font-bold uppercase text-slate-600" title={department?.name}>{realizationDepartmentTag(department)}</TableCell>
-                <TableCell colSpan={7} className="bg-slate-100/80 text-center"><span className="inline-flex rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-bold text-slate-700">{statusLabel}</span></TableCell>
+                <TableCell colSpan={6} className="bg-slate-100/80 text-center"><span className="inline-flex rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-bold text-slate-700">{statusLabel}</span></TableCell>
+                <TableCell><RealizationDailyPersonComment periodId={periodIds[person.department_id] || ""} userId={person.user_id} userName={person.user_name} day={day} /></TableCell>
               </TableRow>
             }
             return <TableRow key={`${person.department_id}:${person.user_id}`} className="align-middle hover:bg-slate-50/70">
@@ -127,7 +130,12 @@ export function DailyStaffTable({ people, filterPeople, departments, departmentI
                 <p className={cn(metricHeadline, "justify-center text-base font-bold tabular-nums", realization == null ? "text-slate-400" : realization >= 100 ? "text-emerald-700" : realization >= 50 ? "text-amber-700" : "text-rose-700")}>{realization == null ? "—" : `${realization}%`}</p>
                 {realization != null ? <div className="mx-auto mt-1 h-1.5 w-16 overflow-hidden rounded-full bg-slate-200"><div className={cn("h-full rounded-full", realization >= 100 ? "bg-emerald-500" : realization >= 50 ? "bg-amber-500" : "bg-rose-500")} style={{ width: `${realization}%` }} /></div> : null}
               </TableCell>
-              <RealizationReviewCells periodId={periodIds[person.department_id] || ""} userId={person.user_id} userName={person.user_name} result={results[`${person.department_id}:${person.user_id}`]} scope="daily" refreshKey={reviewVersion} onSaved={onReviewSaved} onPrepareResult={() => onPrepareResult(person.department_id, person.user_id)} />
+              <RealizationReviewCells
+                periodId={periodIds[person.department_id] || ""} userId={person.user_id} userName={person.user_name}
+                result={results[`${person.department_id}:${person.user_id}`]} scope="daily" refreshKey={reviewVersion}
+                onSaved={onReviewSaved} onPrepareResult={() => onPrepareResult(person.department_id, person.user_id)}
+                commentCell={<TableCell><RealizationDailyPersonComment periodId={periodIds[person.department_id] || ""} userId={person.user_id} userName={person.user_name} day={day} /></TableCell>}
+              />
             </TableRow>
           })}
           {!people.length && <TableRow><TableCell colSpan={10} className="text-center text-slate-500">Nuk ka aktivitet për këtë ditë.</TableCell></TableRow>}

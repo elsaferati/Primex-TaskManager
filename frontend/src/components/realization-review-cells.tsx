@@ -65,8 +65,9 @@ function ManualQuestion({ label, draft, disabled, onChange, onSaveComment }: {
   </div>
 }
 
-export function RealizationReviewCells({ periodId, userId, userName, result, scope = "weekly", locked = false, compactTable = false, onSaved, onPrepareResult, refreshKey }: {
+export function RealizationReviewCells({ periodId, userId, userName, result, scope = "weekly", locked = false, compactTable = false, onSaved, onPrepareResult, refreshKey, commentCell }: {
   periodId: string; userId: string; userName: string; result?: RealizationPersonResult; scope?: "daily" | "weekly"; locked?: boolean; compactTable?: boolean; onSaved?: () => void; onPrepareResult?: () => Promise<void>; refreshKey?: unknown
+  commentCell?: React.ReactNode
 }) {
   const { apiFetch } = useAuth()
   const [data, setData] = React.useState<RealizationManagerReviewResponse | null>(null)
@@ -206,12 +207,12 @@ export function RealizationReviewCells({ periodId, userId, userName, result, sco
       <Button type="button" variant="outline" size="sm" className="h-8 w-full min-w-32 justify-between px-2 text-[13px]" onClick={() => void openReview()} disabled={failed}>{ratingLabel}<ChevronRight className="h-3.5 w-3.5" /></Button>
       <p className={cn("mt-0.5 line-clamp-1 text-[11px]", savedComment ? "text-slate-500" : "text-slate-400")}>{savedComment || "Pa koment"}</p>
     </td> : <><td className="p-1" onClick={(event) => event.stopPropagation()}><Button type="button" variant="outline" size="sm" className="h-8 w-full min-w-32 justify-between px-2 text-[13px]" onClick={() => void openReview()} disabled={failed}>{ratingLabel}<ChevronRight className="h-3.5 w-3.5" /></Button></td>
-    <td className="p-1" onClick={(event) => event.stopPropagation()}>
+    {commentCell ?? <td className="p-1" onClick={(event) => event.stopPropagation()}>
       <div className="flex min-w-64 flex-col items-stretch gap-1">
         <Textarea aria-label={`Komenti i përgjegjësit për ${userName}`} className="min-h-20 w-full resize-y bg-white px-2 py-1.5 text-[13px] leading-5" rows={3} maxLength={4000} value={comment} disabled={!canEdit || saving} onChange={(event) => setComment(event.target.value)} placeholder="Shkruaj komentin e përgjegjësit…" />
         {canEdit && reviewDirty ? <Button type="button" size="sm" className="h-8 self-end px-3" disabled={saving} title="Ruaj komentin" onClick={() => void save({ closeDialog: false, saveQuestions: false })}>{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Ruaj komentin"}</Button> : null}
       </div>
-    </td></>}
+    </td>}</>}
     <Dialog open={open} onOpenChange={(next) => { if (!saving) setOpen(next) }}><DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
       <DialogHeader><DialogTitle>Vlerësimi javor — {userName}</DialogTitle><DialogDescription>Një përgjigje për të gjithë javën. Mund ta japësh ose ta ndryshosh nga cilado ditë — tikët, komentet dhe vlerësimi ruhen për javën.</DialogDescription></DialogHeader>
       <section className="rounded-lg border border-slate-200 bg-slate-50 p-3">

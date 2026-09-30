@@ -31,6 +31,7 @@ from app.models.enums import (
 from app.models.realization import (
     RealizationDailyApprovalEvent,
     RealizationDailyCloseEvent,
+    RealizationDailyPersonComment,
     RealizationDepartmentResult,
     RealizationObservation,
     RealizationPeriod,
@@ -51,6 +52,8 @@ from app.schemas.realization import (
     RealizationDepartmentResultOut,
     RealizationAIAnalysisOut,
     RealizationDailyOut,
+    RealizationDailyPersonCommentOut,
+    RealizationDailyPersonCommentUpsert,
     RealizationDailyApprovalOut,
     RealizationDailyApprovalRequest,
     RealizationDailyApprovalRevokeRequest,
@@ -3459,6 +3462,99 @@ async def lock_period(
     await db.commit()
     await db.refresh(period)
     return RealizationPeriodOut.model_validate(period)
+
+
+async def _daily_person_comment_context(
+    db: AsyncSession, *, period_id: uuid.UUID, subject_user_id: uuid.UUID,
+    actor: User, editing: bool,
+) -> tuple[RealizationPeriod, bool]:
+    period = await _period(db, period_id, for_update=editing)
+    if period.period_type != "DAILY" or period.slot != "ALL" or period.department_id is None:
+        raise HTTPException(status_code=422, detail="Daily comments require a daily department period")
+    subject = (await db.execute(select(User).where(User.id == subject_user_id))).scalar_one_or_none()
+    if subject is None or subject.department_id != period.department_id:
+        raise HTTPException(status_code=404, detail="Employee not found in this daily period")
+    if not can_view_person_result(
+        actor, subject_user_id=subject_user_id, subject_department_id=period.department_id
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    can_edit = can_review_realization(actor, department_id=period.department_id)
+    if editing:
+        if not can_edit:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        try:
+            require_unlocked(period)
+        except RealizationWorkflowError as exc:
+            raise _error(exc)
+    return period, can_edit and period.status != RealizationPeriodStatus.LOCKED.value
+
+
+async def _daily_person_comment(
+    db: AsyncSession, *, period_id: uuid.UUID, user_id: uuid.UUID,
+) -> RealizationDailyPersonComment | None:
+    return (await db.execute(select(RealizationDailyPersonComment).where(
+        RealizationDailyPersonComment.period_id == period_id,
+        RealizationDailyPersonComment.user_id == user_id,
+    ))).scalar_one_or_none()
+
+
+def _daily_person_comment_out(
+    period: RealizationPeriod, user_id: uuid.UUID, can_edit: bool,
+    row: RealizationDailyPersonComment | None,
+) -> RealizationDailyPersonCommentOut:
+    return RealizationDailyPersonCommentOut(
+        period_id=period.id, user_id=user_id, day=period.start_date, can_edit=can_edit,
+        comment=row.comment if row else None,
+        updated_by=row.updated_by if row else None,
+        updated_at=row.updated_at if row else None,
+    )
+
+
+@router.get(
+    "/periods/{period_id}/users/{subject_user_id}/daily-comment",
+    response_model=RealizationDailyPersonCommentOut,
+)
+async def get_daily_person_comment(
+    period_id: uuid.UUID, subject_user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+) -> RealizationDailyPersonCommentOut:
+    period, can_edit = await _daily_person_comment_context(
+        db, period_id=period_id, subject_user_id=subject_user_id, actor=user, editing=False,
+    )
+    row = await _daily_person_comment(db, period_id=period.id, user_id=subject_user_id)
+    return _daily_person_comment_out(period, subject_user_id, can_edit, row)
+
+
+@router.put(
+    "/periods/{period_id}/users/{subject_user_id}/daily-comment",
+    response_model=RealizationDailyPersonCommentOut,
+)
+async def put_daily_person_comment(
+    period_id: uuid.UUID, subject_user_id: uuid.UUID, payload: RealizationDailyPersonCommentUpsert,
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+) -> RealizationDailyPersonCommentOut:
+    period, can_edit = await _daily_person_comment_context(
+        db, period_id=period_id, subject_user_id=subject_user_id, actor=user, editing=True,
+    )
+    row = await _daily_person_comment(db, period_id=period.id, user_id=subject_user_id)
+    previous = row.comment if row else None
+    if row is None and payload.comment is None:
+        return _daily_person_comment_out(period, subject_user_id, can_edit, None)
+    if row is None:
+        row = RealizationDailyPersonComment(period_id=period.id, user_id=subject_user_id)
+        db.add(row)
+    row.comment = payload.comment
+    row.updated_by = user.id
+    await db.flush()
+    add_audit_log(
+        db=db, actor_user_id=user.id, entity_type="realization_daily_person_comment", entity_id=row.id,
+        action="daily_comment_saved",
+        before={"comment": previous},
+        after={"comment": row.comment, "day": period.start_date.isoformat(), "user_id": str(subject_user_id)},
+    )
+    await db.commit()
+    await db.refresh(row)
+    return _daily_person_comment_out(period, subject_user_id, can_edit, row)
 
 
 async def _manager_review_context(

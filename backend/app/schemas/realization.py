@@ -217,6 +217,25 @@ class RealizationObservationVoid(RealizationSchema):
     reason: str = Field(min_length=1, max_length=4000)
 
 
+class RealizationDailyPersonCommentUpsert(RealizationSchema):
+    comment: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def normalize_comment(self) -> "RealizationDailyPersonCommentUpsert":
+        self.comment = (self.comment or "").strip() or None
+        return self
+
+
+class RealizationDailyPersonCommentOut(RealizationSchema):
+    period_id: uuid.UUID
+    user_id: uuid.UUID
+    day: date
+    comment: str | None
+    can_edit: bool
+    updated_by: uuid.UUID | None = None
+    updated_at: datetime | None = None
+
+
 class RealizationManagerReviewUpsert(RealizationSchema):
     rating: Literal["GOOD", "VERY_GOOD", "ACTION_REQUIRED", "BAD"] | None = None
     marker: Literal["POSITIVE", "NEGATIVE"]
