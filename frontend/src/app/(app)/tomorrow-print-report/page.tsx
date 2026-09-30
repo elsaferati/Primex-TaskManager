@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { createPortal } from "react-dom"
 import { Minus, Plus, RefreshCw, Save, Send, Settings } from "lucide-react"
 import { toast } from "sonner"
 
@@ -111,6 +112,7 @@ export function PrintReportPage({
   const [sending, setSending] = React.useState(false)
   const [generatingAction, setGeneratingAction] = React.useState<"generate" | null>(null)
   const previewFrameRef = React.useRef<HTMLIFrameElement | null>(null)
+  const [previewFilterContainer, setPreviewFilterContainer] = React.useState<HTMLElement | null>(null)
   const markerModalCleanupRef = React.useRef<(() => void) | null>(null)
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
 
@@ -564,6 +566,27 @@ export function PrintReportPage({
     applyPreviewMarkerFilter()
   }, [applyPreviewMarkerFilter, preview])
 
+  const setupPreviewFilters = () => {
+    const document = previewFrameRef.current?.contentDocument
+    if (!document) return
+    // Saved reports also need the controls, including tables with no tasks.
+    const taskTable = Array.from(document.querySelectorAll("table")).find((table) =>
+      Array.from(table.querySelectorAll("thead th")).some((heading) => heading.textContent?.trim() === "TASKS")
+    )
+    if (!taskTable) {
+      setPreviewFilterContainer(null)
+      return
+    }
+    let container = document.querySelector<HTMLElement>("[data-task-filter-toolbar]")
+    if (!container) {
+      container = document.createElement("div")
+      container.dataset.taskFilterToolbar = "true"
+      container.style.cssText = "display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin:12px 0 8px;font-family:Arial,sans-serif"
+      taskTable.before(container)
+    }
+    setPreviewFilterContainer(container)
+  }
+
   const sendNow = async () => {
     setSending(true)
     try {
@@ -581,10 +604,14 @@ export function PrintReportPage({
   if (!authLoading && !user) return <div className="rounded-lg border bg-white p-8">Sign in to access {reportName}.</div>
 
   const markerFilterControl = (
-    <label className="flex items-center gap-2 rounded-md border border-blue-300 bg-blue-50 px-3 text-sm font-medium text-[#0F2A5F]">
+    <label
+      className="flex items-center gap-2 rounded-md border border-blue-300 bg-blue-50 px-3 text-sm font-medium text-[#0F2A5F]"
+      style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid #93C5FD", borderRadius: 6, background: "#EFF6FF", padding: "0 12px", fontSize: 14, fontWeight: 500, color: "#0F2A5F" }}
+    >
       Symbol
       <select
         className="h-8 bg-transparent text-sm font-black text-[#0F2A5F] outline-none"
+        style={{ height: 32, border: 0, background: "transparent", fontSize: 14, fontWeight: 900, color: "#0F2A5F", outline: "none" }}
         value={markerFilter}
         onChange={(event) => setMarkerFilter(event.target.value as TaskMarkerFilter)}
         aria-label="Filter tasks by symbol"
@@ -598,10 +625,14 @@ export function PrintReportPage({
   )
 
   const dueDateFilterControl = (
-    <label className="flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-3 text-sm font-medium text-red-900">
+    <label
+      className="flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-3 text-sm font-medium text-red-900"
+      style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid #FCA5A5", borderRadius: 6, background: "#FEF2F2", padding: "0 12px", fontSize: 14, fontWeight: 500, color: "#7F1D1D" }}
+    >
       Due date
       <select
         className={`h-8 bg-transparent text-sm font-black outline-none ${dueDateFilter === "deadline" ? "text-red-600" : "text-red-900"}`}
+        style={{ height: 32, border: 0, background: "transparent", fontSize: 14, fontWeight: 900, color: dueDateFilter === "deadline" ? "#DC2626" : "#7F1D1D", outline: "none" }}
         value={dueDateFilter}
         onChange={(event) => setDueDateFilter(event.target.value as TaskDueDateFilter)}
         aria-label="Filter tasks by due date"
@@ -642,11 +673,16 @@ export function PrintReportPage({
         onLoad={() => {
           applyReportIntroVisibility()
           setupPreviewMarkerControls()
+          setupPreviewFilters()
         }}
         title={`${reportName} generated email`}
         srcDoc={preview.html.replace('<div data-report-intro="true">', '<div data-report-intro="true" hidden>')}
         className={`w-full rounded border bg-white ${embedded ? "h-[620px]" : "h-dvh min-h-dvh"}`}
       />
+      {previewFilterContainer ? createPortal(
+        <>{dueDateFilterControl}{markerFilterControl}</>,
+        previewFilterContainer,
+      ) : null}
     </div>
   ) : null
 
