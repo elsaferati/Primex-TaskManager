@@ -959,7 +959,7 @@ type SwimlaneRow = {
   badgeClass: string
   badges?: { value: number; className: string; label?: string }[]
   headerBreakdown?: { value: number; label: string; className?: string }[]
-  missingOneHUsers?: { id: string; label: string; initials: string }[]
+  missingOneHUsers?: { id: string; label: string; initials: string; hasBlockedTask: boolean }[]
   missingBlockedUsers?: { id: string; label: string; initials: string; hasOneHAt16: boolean }[]
   items: SwimlaneCell[]
 }
@@ -8470,6 +8470,15 @@ export default function CommonViewPage() {
       }
       return usersWithSlot
     }
+    const usersWithBlockedTask = new Set<string>()
+    for (const item of commonData.blocked) {
+      if (item.date !== selectedOneHDate || isWaitingClientTask(item)) continue
+      if (item.userId) usersWithBlockedTask.add(item.userId)
+      for (const assignee of entryAssignees(item)) {
+        const assigneeId = oneHUserIdByName.get(assignee.trim().toLowerCase())
+        if (assigneeId) usersWithBlockedTask.add(assigneeId)
+      }
+    }
     const buildMissingOneHUsers = (slot: OneHReportSlot | null) => {
       if (!selectedOneHDate || !slot) return []
       const usersWithSlot = usersWithOneHSlot(slot)
@@ -8477,21 +8486,12 @@ export default function CommonViewPage() {
         .filter((userEntry) => !usersWithSlot.has(userEntry.id))
         .map((userEntry) => {
           const label = userEntry.full_name || userEntry.username || userEntry.email || "Unknown"
-          return { id: userEntry.id, label, initials: initials(label) }
+          return { id: userEntry.id, label, initials: initials(label), hasBlockedTask: slot === "16:00" && usersWithBlockedTask.has(userEntry.id) }
         })
     }
     const missingBlockedUsers = selectedOneHDate
       ? (() => {
-          const usersWithBlockedTask = new Set<string>()
           const usersWithOneHAt16 = usersWithOneHSlot("16:00")
-          for (const item of commonData.blocked) {
-            if (item.date !== selectedOneHDate || isWaitingClientTask(item)) continue
-            if (item.userId) usersWithBlockedTask.add(item.userId)
-            for (const assignee of entryAssignees(item)) {
-              const assigneeId = oneHUserIdByName.get(assignee.trim().toLowerCase())
-              if (assigneeId) usersWithBlockedTask.add(assigneeId)
-            }
-          }
           return oneHEligibleUsers
             .filter((userEntry) => !usersWithBlockedTask.has(userEntry.id))
             .map((userEntry) => {
@@ -10682,11 +10682,11 @@ export default function CommonViewPage() {
           text-align: center;
           white-space: nowrap;
         }
-        .oneh-missing-users.oneh-missing-users-at-16 {
+        .oneh-missing-users.oneh-missing-users-covered {
           padding-top: 4px;
           color: #15803d;
         }
-        .oneh-missing-users-at-16 .oneh-missing-user {
+        .oneh-missing-users-covered .oneh-missing-user {
           color: #15803d;
         }
         .oneh-missing-users .oneh-missing-user:not(:last-child)::after {
@@ -16740,12 +16740,24 @@ export default function CommonViewPage() {
                                   </span>
                                   {badges}
                                 </div>
-                                {row.missingOneHUsers?.length ? (
+                                {row.missingOneHUsers?.some((entry) => !entry.hasBlockedTask) ? (
                                   <div
                                     className="oneh-missing-users"
-                                    aria-label={`Pa slot ${headerSubtext}: ${row.missingOneHUsers.map((entry) => entry.label).join(", ")}`}
+                                    aria-label={`Pa slot ${headerSubtext}: ${row.missingOneHUsers.filter((entry) => !entry.hasBlockedTask).map((entry) => entry.label).join(", ")}`}
                                   >
-                                    {row.missingOneHUsers.map((entry) => (
+                                    {row.missingOneHUsers.filter((entry) => !entry.hasBlockedTask).map((entry) => (
+                                      <span key={entry.id} className="oneh-missing-user" title={entry.label}>
+                                        {entry.initials}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                {row.missingOneHUsers?.some((entry) => entry.hasBlockedTask) ? (
+                                  <div
+                                    className="oneh-missing-users oneh-missing-users-covered"
+                                    aria-label={`Pa 1H 16:00, me BLL: ${row.missingOneHUsers.filter((entry) => entry.hasBlockedTask).map((entry) => entry.label).join(", ")}`}
+                                  >
+                                    {row.missingOneHUsers.filter((entry) => entry.hasBlockedTask).map((entry) => (
                                       <span key={entry.id} className="oneh-missing-user" title={entry.label}>
                                         {entry.initials}
                                       </span>
@@ -16766,7 +16778,7 @@ export default function CommonViewPage() {
                                 ) : null}
                                 {row.missingBlockedUsers?.some((entry) => entry.hasOneHAt16) ? (
                                   <div
-                                    className="oneh-missing-users oneh-missing-users-at-16"
+                                    className="oneh-missing-users oneh-missing-users-covered"
                                     aria-label={`Pa BLL, me 1H 16:00: ${row.missingBlockedUsers.filter((entry) => entry.hasOneHAt16).map((entry) => entry.label).join(", ")}`}
                                   >
                                     {row.missingBlockedUsers.filter((entry) => entry.hasOneHAt16).map((entry) => (
