@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     MEETING_REMINDER_SCHEDULER_ENABLED: bool = True
     MEETING_REMINDER_POLL_SECONDS: int = 30
     SYSTEM_TASK_SCHEDULER_ENABLED: bool = True
+    # Disable API-owned report delivery loops when running a local API.
+    REPORT_SCHEDULERS_ENABLED: bool = True
     TOMORROW_PRINT_REPORT_SCHEDULER_ENABLED: bool = True
     TODAY_PRINT_REPORT_SCHEDULER_ENABLED: bool = True
     PRIMEFLOW_API_BASE_URL: str = "http://127.0.0.1:8000"
