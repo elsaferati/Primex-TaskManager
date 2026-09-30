@@ -75,6 +75,28 @@ npm run dev
 
 Open `http://localhost:3000`.
 
+### Local API using the server database
+
+When `DATABASE_URL` points to the server database, let the server own background
+jobs. Set these values in the local `backend/.env` before starting the API:
+
+```dotenv
+REPORT_SCHEDULERS_ENABLED=false
+SYSTEM_TASK_SCHEDULER_ENABLED=false
+MS_CALENDAR_SYNC_ENABLED=false
+STD_FEEDBACK_SYNC_ENABLED=false
+MEETING_REMINDER_SCHEDULER_ENABLED=false
+AUTH_COOKIE_SECURE=false
+AUTH_COOKIE_SAMESITE=lax
+```
+
+`REPORT_SCHEDULERS_ENABLED` controls all six API-owned report delivery loops,
+including morning and today/tomorrow print reports. It defaults to `true` on the
+server and does not control standalone report scheduler or Celery processes.
+Scheduled email failures do not prevent the API from starting. Manual report
+email still requires `EMAIL_USER=130primex.eu@gmail.com` and that account's Gmail
+app password in `EMAIL_PASSWORD`.
+
 ## MCP for ChatGPT / Codex
 
 This repo includes an MCP server that lets an MCP-capable client call Primeflow through the existing FastAPI API. Local MCP clients can use stdio. ChatGPT Apps/connectors need the server deployed as a reachable HTTPS remote MCP endpoint.

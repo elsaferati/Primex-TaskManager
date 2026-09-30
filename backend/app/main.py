@@ -73,14 +73,15 @@ async def _startup() -> None:
         system_task_daily_reconciliation_task = asyncio.create_task(
             run_system_task_daily_reconciliation_forever()
         )
-    meetings_report_scheduler_task = asyncio.create_task(run_meetings_report_scheduler_forever())
-    after_break_report_scheduler_task = asyncio.create_task(run_after_break_report_scheduler_forever())
-    end_week_bz_report_scheduler_task = asyncio.create_task(run_end_week_bz_report_scheduler_forever())
-    morning_report_scheduler_task = asyncio.create_task(run_morning_report_scheduler_forever())
-    if settings.TOMORROW_PRINT_REPORT_SCHEDULER_ENABLED:
-        tomorrow_print_report_scheduler_task = asyncio.create_task(run_tomorrow_print_report_scheduler_forever())
-    if settings.TODAY_PRINT_REPORT_SCHEDULER_ENABLED:
-        today_print_report_scheduler_task = asyncio.create_task(run_today_print_report_scheduler_forever())
+    if settings.REPORT_SCHEDULERS_ENABLED:
+        meetings_report_scheduler_task = asyncio.create_task(run_meetings_report_scheduler_forever())
+        after_break_report_scheduler_task = asyncio.create_task(run_after_break_report_scheduler_forever())
+        end_week_bz_report_scheduler_task = asyncio.create_task(run_end_week_bz_report_scheduler_forever())
+        morning_report_scheduler_task = asyncio.create_task(run_morning_report_scheduler_forever())
+        if settings.TOMORROW_PRINT_REPORT_SCHEDULER_ENABLED:
+            tomorrow_print_report_scheduler_task = asyncio.create_task(run_tomorrow_print_report_scheduler_forever())
+        if settings.TODAY_PRINT_REPORT_SCHEDULER_ENABLED:
+            today_print_report_scheduler_task = asyncio.create_task(run_today_print_report_scheduler_forever())
     if settings.STD_FEEDBACK_SYNC_ENABLED:
         std_feedback_sync_task = asyncio.create_task(run_std_feedback_ticket_sync_forever())
     if settings.MS_CALENDAR_SYNC_ENABLED:
