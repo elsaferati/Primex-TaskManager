@@ -1270,6 +1270,8 @@ def _html_table(
     rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: bool = False,
     report_date: date | None = None, missing_one_h_by_slot: dict[str, list[str]] | None = None,
     missing_blocked_initials: list[str] | None = None,
+    missing_blocked_with_one_h_at_16_initials: list[str] | None = None,
+    missing_one_h_at_16_with_blocked_initials: list[str] | None = None,
 ) -> str:
     header = "MEETING" if meeting else "TASK"
     label_header = "LLOJI" if meeting else "LLOJI DHE SLOTI"
@@ -1283,22 +1285,40 @@ def _html_table(
                 f'{" ".join(escaped_lines[1:])}</span>'
             )
         label_html = "<br>".join(escaped_lines)
-        if label.splitlines()[0].strip().upper() == "BLL" and missing_blocked_initials:
-            missing_html = " &bull; ".join(html.escape(value) for value in missing_blocked_initials)
-            label_html += (
-                '<br><span data-missing-blocked-users="true" '
-                'style="display:inline-block;margin-top:7px;color:#DC2626;font-size:11px;'
-                f'font-weight:800;line-height:1.35;">{missing_html}</span>'
-            )
+        if label.splitlines()[0].strip().upper() == "BLL":
+            with_one_h_at_16 = set(missing_blocked_with_one_h_at_16_initials or [])
+            red_initials = [value for value in missing_blocked_initials or [] if value not in with_one_h_at_16]
+            green_initials = [value for value in missing_blocked_initials or [] if value in with_one_h_at_16]
+            for initials, attribute, color in (
+                (red_initials, "data-missing-blocked-users", "#DC2626"),
+                (green_initials, "data-missing-blocked-with-one-h-at-16-users", "#15803D"),
+            ):
+                if not initials:
+                    continue
+                missing_html = " &bull; ".join(html.escape(value) for value in initials)
+                label_html += (
+                    f'<span {attribute}="true" '
+                    f'style="display:block;margin-top:7px;color:{color};font-size:11px;'
+                    f'font-weight:800;line-height:1.35;">{missing_html}</span>'
+                )
         slot = _one_h_slot_from_label(label)
         missing = (missing_one_h_by_slot or {}).get(slot or "", [])
         if missing:
-            missing_html = " &bull; ".join(html.escape(value) for value in missing)
-            label_html += (
-                '<br><span data-missing-one-h-users="true" '
-                'style="display:inline-block;margin-top:7px;color:#DC2626;font-size:11px;'
-                f'font-weight:800;line-height:1.35;">{missing_html}</span>'
-            )
+            with_blocked = set(missing_one_h_at_16_with_blocked_initials or []) if slot == "16:00" else set()
+            red_initials = [value for value in missing if value not in with_blocked]
+            green_initials = [value for value in missing if value in with_blocked]
+            for initials, attribute, color in (
+                (red_initials, "data-missing-one-h-users", "#DC2626"),
+                (green_initials, "data-missing-one-h-with-blocked-users", "#15803D"),
+            ):
+                if not initials:
+                    continue
+                missing_html = " &bull; ".join(html.escape(value) for value in initials)
+                label_html += (
+                    f'<span {attribute}="true" '
+                    f'style="display:block;margin-top:7px;color:{color};font-size:11px;'
+                    f'font-weight:800;line-height:1.35;">{missing_html}</span>'
+                )
         return label_html
 
     for number, (label, values, *rest) in enumerate(rows, 1):
@@ -3235,6 +3255,12 @@ async def _build_print_report(
     comment_initials = _comment_user_initials(payload)
     missing_one_h_by_slot = _missing_one_h_initials(payload, target_date)
     missing_blocked_users = _missing_blocked_initials(payload, target_date)
+    missing_at_16 = set(missing_one_h_by_slot.get("16:00", []))
+    missing_blocked_with_one_h_at_16 = [value for value in missing_blocked_users if value not in missing_at_16]
+    missing_blocked_set = set(missing_blocked_users)
+    missing_one_h_at_16_with_blocked = [
+        value for value in missing_one_h_by_slot.get("16:00", []) if value not in missing_blocked_set
+    ]
     task_rows = _task_rows(items, target_date)
     meeting_dates = [target_date, next_working_day(target_date)] if include_meetings else []
     next_meeting_payload = payload
@@ -3283,7 +3309,7 @@ async def _build_print_report(
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
 <div data-report-intro="true">
 <div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">{report_title}</div>
-{_one_h_checklists_html(checklist_date)}{_task_marker_legend_html()}</div>{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date, missing_one_h_by_slot=missing_one_h_by_slot, missing_blocked_initials=missing_blocked_users)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
+{_one_h_checklists_html(checklist_date)}{_task_marker_legend_html()}</div>{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date, missing_one_h_by_slot=missing_one_h_by_slot, missing_blocked_initials=missing_blocked_users, missing_blocked_with_one_h_at_16_initials=missing_blocked_with_one_h_at_16, missing_one_h_at_16_with_blocked_initials=missing_one_h_at_16_with_blocked)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
     content_html = (
         '<div data-today-print-report="true" style="margin:18px 0 14px">'
         + re.sub(r"^.*?<body[^>]*>|</body>.*$", "", html_body, flags=re.S)

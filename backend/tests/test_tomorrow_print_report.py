@@ -1,8 +1,10 @@
 from io import BytesIO
 import asyncio
+import re
 from datetime import date
 from unittest.mock import patch
 
+import pytest
 from openpyxl import load_workbook
 from openpyxl.cell.rich_text import CellRichText
 
@@ -132,6 +134,111 @@ def test_blocked_row_shows_present_users_without_a_blocked_task_in_red() -> None
     generated = asyncio.run(build_today_print_report(date(2026, 9, 28), payload=payload))
     assert 'data-missing-blocked-users="true"' in generated["html"]
     assert "FG &bull; RA" in generated["html"]
+
+
+@pytest.mark.parametrize("tomorrow", [False, True])
+def test_blocked_row_separates_users_with_one_h_at_16_on_a_green_line(tomorrow: bool) -> None:
+    payload = {
+        "users": [
+            {"id": user_id, "full_name": name, "role": "STAFF", "is_active": True}
+            for user_id, name in [
+                ("at", "Arta Tafa"), ("ef", "Era Fana"), ("ra", "Rina Aliu"),
+                ("fg", "Fiona Gashi"), ("ep", "Elira Pula"), ("es", "Era Sopa"),
+            ]
+        ],
+        "items": {
+            "blocked": [{"title": "EF: BLL", "date": "2026-09-30", "userId": "ef"}],
+            "oneH": [
+                {"title": "AT: Test", "date": "2026-09-30", "oneHReportSlot": "16:00",
+                 "assignees": ["Arta Tafa"]},
+                {"title": "EF: Task", "date": "2026-09-30", "oneHReportSlot": "16:00", "userId": "ef"},
+                {"title": "FG: Another day", "date": "2026-09-29", "oneHReportSlot": "16:00", "userId": "fg"},
+                {"title": "EP: WFE", "date": "2026-09-30", "oneHReportSlot": "16:00",
+                 "userId": "ep", "status": "WAITING_CLIENT"},
+                {"title": "ES: On leave", "date": "2026-09-30", "oneHReportSlot": "16:00", "userId": "es"},
+            ],
+            "leave": [{"startDate": "2026-09-30", "endDate": "2026-09-30", "userId": "es"}],
+        },
+    }
+    if tomorrow:
+        report = asyncio.run(build_tomorrow_print_report(date(2026, 9, 29), payload=payload))
+    else:
+        report = asyncio.run(build_today_print_report(date(2026, 9, 30), payload=payload))
+    red = re.search(r'<span data-missing-blocked-users="true"[^>]*>(.*?)</span>', report["html"])
+    green = re.search(r'<span data-missing-blocked-with-one-h-at-16-users="true"[^>]*>(.*?)</span>', report["html"])
+
+    assert red is not None and green is not None
+    assert set(red.group(1).split(" &bull; ")) == {"EP", "FG", "RA"}
+    assert green.group(1) == "AT"
+    assert "display:block" in green.group(0) and "color:#15803D" in green.group(0)
+    assert "color:#DC2626" in red.group(0)
+    assert red.end() <= green.start()
+
+
+def test_blocked_row_can_show_only_the_green_line() -> None:
+    report_html = _html_table(
+        [("BLL\n14:30 - 16:00\nRAP 16:10", [], False)],
+        missing_blocked_initials=["AT", "RA"],
+        missing_blocked_with_one_h_at_16_initials=["AT", "RA"],
+    )
+    assert 'data-missing-blocked-users="true"' not in report_html
+    assert 'data-missing-blocked-with-one-h-at-16-users="true"' in report_html
+    assert "AT &bull; RA" in report_html
+
+
+@pytest.mark.parametrize("tomorrow", [False, True])
+def test_one_h_at_16_separates_users_with_blocked_tasks_on_a_green_line(tomorrow: bool) -> None:
+    payload = {
+        "users": [
+            {"id": user_id, "full_name": name, "role": "STAFF", "is_active": True}
+            for user_id, name in [
+                ("at", "Arta Tafa"), ("ef", "Era Fana"), ("ra", "Rina Aliu"),
+                ("fg", "Fiona Gashi"), ("ep", "Elira Pula"), ("es", "Era Sopa"),
+            ]
+        ],
+        "items": {
+            "blocked": [
+                {"title": "AT: BLL - test 1H 16:00", "date": "2026-09-30", "assignees": ["Arta Tafa"]},
+                {"title": "EF: BLL", "date": "2026-09-30", "userId": "ef"},
+                {"title": "FG: Another day", "date": "2026-09-29", "userId": "fg"},
+                {"title": "EP: WFE", "date": "2026-09-30", "userId": "ep", "status": "WAITING_CLIENT"},
+                {"title": "ES: On leave", "date": "2026-09-30", "userId": "es"},
+            ],
+            "oneH": [
+                {"title": "AT: Another slot", "date": "2026-09-30", "oneHReportSlot": "10:00", "userId": "at"},
+                {"title": "EF: Task", "date": "2026-09-30", "oneHReportSlot": "16:00", "userId": "ef"},
+            ],
+            "leave": [{"startDate": "2026-09-30", "endDate": "2026-09-30", "userId": "es"}],
+        },
+    }
+    if tomorrow:
+        report = asyncio.run(build_tomorrow_print_report(date(2026, 9, 29), payload=payload))
+    else:
+        report = asyncio.run(build_today_print_report(date(2026, 9, 30), payload=payload))
+    slot_label = re.search(r'<th\b[^>]*>1H 16:00(.*?)</th>', report["html"], re.S).group(1)
+    red = re.search(r'<span data-missing-one-h-users="true"[^>]*>(.*?)</span>', slot_label)
+    green = re.search(r'<span data-missing-one-h-with-blocked-users="true"[^>]*>(.*?)</span>', slot_label)
+
+    assert red is not None and green is not None
+    assert set(red.group(1).split(" &bull; ")) == {"EP", "FG", "RA"}
+    assert green.group(1) == "AT"
+    assert "display:block" in green.group(0) and "color:#15803D" in green.group(0)
+    assert red.end() <= green.start()
+    assert report["html"].count('data-missing-one-h-with-blocked-users="true"') == 1
+
+
+def test_one_h_blocked_green_line_is_only_for_the_16_slot_and_can_stand_alone() -> None:
+    report_html = _html_table(
+        [("1H 10:00", [], False), ("1H 16:00", [], False)],
+        missing_one_h_by_slot={"10:00": ["AT"], "16:00": ["AT"]},
+        missing_one_h_at_16_with_blocked_initials=["AT"],
+    )
+    early_label = report_html.split("1H 10:00", 1)[1].split("</th>", 1)[0]
+    late_label = report_html.split("1H 16:00", 1)[1].split("</th>", 1)[0]
+    assert 'data-missing-one-h-users="true"' in early_label
+    assert 'data-missing-one-h-with-blocked-users="true"' not in early_label
+    assert 'data-missing-one-h-users="true"' not in late_label
+    assert 'data-missing-one-h-with-blocked-users="true"' in late_label
 
 
 def test_missing_one_h_users_follow_the_same_department_and_person_order_as_tasks() -> None:
