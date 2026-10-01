@@ -1,4 +1,4 @@
-"""Check columns required by the revisions around the restored 0135 marker."""
+"""Check columns required by the restored 0135 marker and its successor."""
 
 import asyncio
 
@@ -12,6 +12,9 @@ EXPECTED_COLUMNS = {
     ("knowledge_prompts", "tester_id"),
     ("knowledge_prompts", "test_task_id"),
     ("realization_daily_close_events", "daily_comment"),
+    *(("realization_daily_person_comments", column) for column in (
+        "id", "period_id", "user_id", "comment", "updated_by", "created_at", "updated_at",
+    )),
 }
 
 

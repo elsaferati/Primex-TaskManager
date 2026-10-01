@@ -173,7 +173,7 @@ jobs:
           REM process. This catches missing modules and startup-time config errors.
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -c "from app.main import app; print('Backend application import: OK')"
           if errorlevel 1 exit /b 1
-          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_mcp_server
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_mcp_server tests.test_migration_graph
           if errorlevel 1 exit /b 1
 
       - name: Apply Database Migrations
