@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 import httpx
@@ -10,6 +12,15 @@ from app.config import settings
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _safe_error_detail(value: object) -> str:
+    text = str(value)
+    if settings.OPENAI_API_KEY:
+        text = text.replace(settings.OPENAI_API_KEY, "[REDACTED]")
+    text = re.sub(r"\bsk-[A-Za-z0-9_-]+", "[REDACTED]", text)
+    return text[:500]
 
 
 def _parse_allowed_mime() -> set[str] | None:
@@ -65,7 +76,10 @@ async def transcribe_audio(
 
     filename = file.filename or "audio"
     payload: dict[str, str] = {"model": settings.SPEECH_TRANSCRIBE_MODEL}
-    if language:
+    # The hosted whisper-1 API rejects an explicit Albanian language hint.
+    # Omit that optional hint and let it detect the spoken language instead.
+    is_albanian = (language or "").strip().lower().replace("_", "-").split("-", 1)[0] == "sq"
+    if language and not (settings.SPEECH_TRANSCRIBE_MODEL == "whisper-1" and is_albanian):
         payload["language"] = language
     if prompt:
         payload["prompt"] = prompt
@@ -80,7 +94,11 @@ async def transcribe_audio(
                 data=payload,
                 files={"file": (filename, data, content_type or "application/octet-stream")},
             )
-    except httpx.RequestError:
+    except httpx.RequestError as exc:
+        logger.warning(
+            "speech_transcription_connection_failed error=%s model=%r mime=%r bytes=%d",
+            type(exc).__name__, settings.SPEECH_TRANSCRIBE_MODEL, content_type, len(data),
+        )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Transcription service unreachable")
 
     if response.status_code >= 400:
@@ -90,11 +108,21 @@ async def transcribe_audio(
             detail = body.get("error", {}).get("message", detail)
         except json.JSONDecodeError:
             pass
+        logger.warning(
+            "speech_transcription_rejected status=%d request_id=%r model=%r mime=%r bytes=%d detail=%r",
+            response.status_code, response.headers.get("x-request-id"),
+            settings.SPEECH_TRANSCRIBE_MODEL, content_type, len(data), _safe_error_detail(detail),
+        )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
 
     try:
         body = response.json()
     except json.JSONDecodeError:
+        logger.warning(
+            "speech_transcription_invalid_response status=%d request_id=%r content_type=%r",
+            response.status_code, response.headers.get("x-request-id"),
+            response.headers.get("content-type"),
+        )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invalid transcription response")
 
     text = str(body.get("text", "")).strip()

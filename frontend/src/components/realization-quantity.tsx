@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils"
 import type { DailyRealizationMetrics, DailyRealizationTask } from "@/lib/types"
 
-export function RealizationQuantitySummary({ metrics }: { metrics: DailyRealizationMetrics }) {
+export function RealizationQuantitySummary({ metrics }: { metrics: Pick<DailyRealizationMetrics, "quantity_task_count" | "quantity_planned_count" | "quantity_completed_count" | "quantity_delta"> }) {
   if (!metrics.quantity_task_count) return null
   return <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-md border border-teal-200 bg-teal-50 px-4 py-3 text-xs">
     <b>Sasi · produkte / pika</b>
