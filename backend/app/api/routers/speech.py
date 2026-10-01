@@ -76,7 +76,10 @@ async def transcribe_audio(
 
     filename = file.filename or "audio"
     payload: dict[str, str] = {"model": settings.SPEECH_TRANSCRIBE_MODEL}
-    if language:
+    # The hosted whisper-1 API rejects an explicit Albanian language hint.
+    # Omit that optional hint and let it detect the spoken language instead.
+    is_albanian = (language or "").strip().lower().replace("_", "-").split("-", 1)[0] == "sq"
+    if language and not (settings.SPEECH_TRANSCRIBE_MODEL == "whisper-1" and is_albanian):
         payload["language"] = language
     if prompt:
         payload["prompt"] = prompt

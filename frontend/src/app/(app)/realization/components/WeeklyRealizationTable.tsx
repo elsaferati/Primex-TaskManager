@@ -1,7 +1,8 @@
 "use client"
 
 import { RealizationReviewCells } from "@/components/realization-review-cells"
-import { RealizationQuantityDelta } from "@/components/realization-quantity"
+import { RealizationQuantityDelta, RealizationQuantitySummary } from "@/components/realization-quantity"
+import { RealizationPlanSummary } from "@/components/realization-plan-summary"
 import { RealizationDeadlineStatusGrid, RealizationExtraStatusGrid, RealizationPlanStatusGrid, RealizationStatusLegend, metricBand, metricCell, metricHeadline } from "@/components/realization-plan-status-grid"
 import { RealizationDeadlineTasksPopover, criticalDeadlineCounts, criticalDeadlineSummary, deadlineAlarmCount, sortDeadlineTasks } from "@/components/realization-deadline-tasks"
 import type { RealizationDeadlineTask, RealizationPersonResult, RealizationWeeklyResponse } from "@/lib/types"
@@ -120,7 +121,25 @@ export function WeeklyRealizationTable({ reports, personId, onSelect, loading, o
   }
   const percentCell = (percent: number) => <><p className={cn(metricHeadline, "justify-center text-base font-bold tabular-nums", percent >= 100 ? "text-emerald-700" : percent >= 50 ? "text-amber-700" : "text-rose-700")}>{percent}%</p><div className="mx-auto mt-1 h-1.5 w-16 overflow-hidden rounded-full bg-slate-200"><div className={cn("h-full rounded-full", percent >= 100 ? "bg-emerald-500" : percent >= 50 ? "bg-amber-500" : "bg-rose-500")} style={{ width: `${percent}%` }} /></div></>
 
-  return <section className="overflow-hidden rounded-md border border-slate-300 bg-white" aria-label="Tabela e realizimit javor">
+  return <>
+    <RealizationPlanSummary metrics={{
+      original_planned_count: total.planned,
+      total_completed_today_count: total.completed,
+      in_progress_count: total.progress,
+      postponed_count: total.postponed,
+      no_progress_count: total.noProgress,
+      additional_count: total.extra,
+      additional_completed_count: total.extraCompleted,
+      raw_plan_realization: totalPercent,
+      adjusted_plan_realization: null,
+    }} />
+    <RealizationQuantitySummary metrics={{
+      quantity_task_count: total.quantityTasks,
+      quantity_planned_count: total.quantityPlanned,
+      quantity_completed_count: total.quantityCompleted,
+      quantity_delta: total.quantityDelta,
+    }} />
+    <section className="overflow-hidden rounded-md border border-slate-300 bg-white" aria-label="Tabela e realizimit javor">
     <div className="flex items-center justify-between gap-3 border-b px-3 py-2 text-xs"><div className="flex min-w-0 items-center gap-4"><strong>Përmbledhje javore sipas përdoruesve</strong><RealizationStatusLegend /></div><span className="shrink-0 text-slate-500">{rows.length} përdorues</span></div>
     <div className="overflow-x-auto">
       <table style={{ width: "100%", minWidth: 1500 }} className="table-fixed border-collapse text-[13px] [&_th]:border [&_th]:border-slate-200 [&_th]:px-2 [&_th]:py-1.5 [&_td]:border [&_td]:border-slate-200 [&_td]:px-2 [&_td]:py-1">
@@ -166,5 +185,6 @@ export function WeeklyRealizationTable({ reports, personId, onSelect, loading, o
       <p className="bg-white px-3 py-2"><b className="text-slate-700">Ekstra:</b> detyrat e krijuara gjatë kësaj jave, të mbledhura nga të gjitha ditët dhe të ndara në kryer, progres, shtyrë dhe pa progres. Ato që u shtuan, mbetën pa u nisur dhe u shtynë për më vonë shfaqen veçmas si <b className="text-slate-700">shtyrë</b> dhe nuk hyjnë në ngarkesën e javës.</p>
       <p className="bg-white px-3 py-2"><b className="text-slate-700">Sasia dhe deadline:</b> totalet e të gjitha ditëve të javës; afatet me prioritet dallohen me border të kuq, kurse kutia me unazë të kuqe mban sipër numrin e kuq të atyre që janë deadline important. Kliko qelizën e afateve për të parë cilat detyra ishin dhe çfarë ndodhi me secilën.</p>
     </div>
-  </section>
+    </section>
+  </>
 }

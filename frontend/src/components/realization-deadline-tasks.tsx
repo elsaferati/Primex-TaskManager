@@ -131,14 +131,19 @@ export function RealizationDeadlineTasksPopover({ tasks, title, children }: {
     // The tables scroll inside their card, so a portalled panel would drift
     // away from its cell. Closing keeps it anchored to what it describes.
     const close = () => setAnchor(null)
+    const onScroll = (event: Event) => {
+      // Capturing also receives scrolls from the deadline list itself.
+      if (event.target instanceof Node && panelRef.current?.contains(event.target)) return
+      close()
+    }
     document.addEventListener("pointerdown", onPointerDown)
     document.addEventListener("keydown", onKeyDown)
-    window.addEventListener("scroll", close, true)
+    window.addEventListener("scroll", onScroll, true)
     window.addEventListener("resize", close)
     return () => {
       document.removeEventListener("pointerdown", onPointerDown)
       document.removeEventListener("keydown", onKeyDown)
-      window.removeEventListener("scroll", close, true)
+      window.removeEventListener("scroll", onScroll, true)
       window.removeEventListener("resize", close)
     }
   }, [open])
@@ -176,7 +181,7 @@ export function RealizationDeadlineTasksPopover({ tasks, title, children }: {
         {alarms.length ? <p className="mb-1 rounded border border-red-300 bg-red-50 px-2 py-1 text-[11px] leading-4 text-red-900">
           <b>{alarms.length} alarm{alarms.length === 1 ? "" : "e"}:</b> detyra me deadline important që nuk u mbyllën brenda afatit.
         </p> : null}
-        <ul className="max-h-80 space-y-0.5 overflow-y-auto">
+        <ul className="max-h-80 space-y-0.5 overflow-y-auto overscroll-contain">
           {tasks.map((task, index) => <li
             key={`${task.task_id ?? "anonymous"}:${task.day ?? index}`}
             className={cn(
