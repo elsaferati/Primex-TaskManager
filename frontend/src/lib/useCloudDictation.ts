@@ -15,11 +15,11 @@ const MAX_CLOUD_AUDIO_BYTES = MAX_CLOUD_AUDIO_MB * 1024 * 1024
 function pickRecorderMimeType(): string | undefined {
   if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) return undefined
   const candidates = [
+    "audio/mp4",
     "audio/webm;codecs=opus",
     "audio/webm",
     "audio/ogg;codecs=opus",
     "audio/ogg",
-    "audio/mp4",
   ]
   return candidates.find((type) => MediaRecorder.isTypeSupported(type))
 }
@@ -65,7 +65,8 @@ export function useCloudDictation(options: UseCloudDictationOptions) {
   const recorderRef = React.useRef<MediaRecorder | null>(null)
   const streamRef = React.useRef<MediaStream | null>(null)
   const chunksRef = React.useRef<Blob[]>([])
-  const mimeTypeRef = React.useRef<string | undefined>(undefined)
+  const startingRef = React.useRef(false)
+  const mountedRef = React.useRef(true)
 
   React.useEffect(() => {
     const supported =
@@ -85,27 +86,38 @@ export function useCloudDictation(options: UseCloudDictationOptions) {
 
   const transcribe = React.useCallback(
     async (blob: Blob) => {
+      if (!blob.size) {
+        toast.error("No audio recorded. Please speak and try again.")
+        return
+      }
       if (blob.size > MAX_CLOUD_AUDIO_BYTES) {
         toast.error(`Audio too large. Max ${MAX_CLOUD_AUDIO_MB}MB.`)
         return
       }
 
-      const mimeType = mimeTypeRef.current || blob.type
+      const mimeType = blob.type
       const ext = extensionForMimeType(mimeType)
       const formData = new FormData()
       formData.append("file", blob, `dictation.${ext}`)
       if (lang) formData.append("language", lang)
 
-      const res = await apiFetch("/speech/transcribe", {
+      const res = await apiFetch(`${window.location.origin}/api/speech/transcribe`, {
         method: "POST",
         body: formData,
       })
 
       if (!res?.ok) {
-        let message = "Transcription failed"
+        // apiFetch already reports a failed connection. Avoid a second,
+        // misleading transcription toast for the same network error.
+        if (res?.statusText === "Network error" || res?.status === 499) return
+        let message = res?.status === 413
+          ? "Audio too large. Please try a shorter recording."
+          : res?.status === 401
+            ? "Your session expired. Please sign in again."
+            : "Unable to transcribe audio. Please try again."
         try {
           const data = (await res?.json()) as { detail?: string }
-          if (data?.detail) message = data.detail
+          if (typeof data?.detail === "string") message = data.detail
         } catch {
           // ignore
         }
@@ -116,7 +128,8 @@ export function useCloudDictation(options: UseCloudDictationOptions) {
       try {
         const data = (await res.json()) as { text?: string }
         const text = (data.text || "").trim()
-        if (text) onFinalText(text)
+        if (text && mountedRef.current) onFinalText(text)
+        else if (!text) toast.error("No speech detected. Please try again.")
       } catch {
         toast.error("Invalid transcription response")
       }
@@ -135,17 +148,21 @@ export function useCloudDictation(options: UseCloudDictationOptions) {
   }, [cleanupStream])
 
   const start = React.useCallback(async () => {
-    if (isRecording || isTranscribing) return
+    if (startingRef.current || isRecording || isTranscribing) return
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       toast.error("Voice dictation not supported in this browser")
       return
     }
 
+    startingRef.current = true
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
       streamRef.current = stream
       const mimeType = pickRecorderMimeType()
-      mimeTypeRef.current = mimeType
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
       recorderRef.current = recorder
       chunksRef.current = []
@@ -157,24 +174,40 @@ export function useCloudDictation(options: UseCloudDictationOptions) {
       }
 
       recorder.onerror = () => {
+        recorder.onstop = null
+        recorderRef.current = null
+        chunksRef.current = []
+        cleanupStream()
+        setIsRecording(false)
         toast.error("Recording failed")
       }
 
       recorder.onstop = async () => {
-        const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current || undefined })
+        // Safari may choose its own format when no explicit type is supported.
+        // Use the actual recorder/chunk type so MP4 is never named as WebM.
+        const recordedType = recorder.mimeType || chunksRef.current[0]?.type || mimeType
+        const blob = new Blob(chunksRef.current, { type: recordedType })
         chunksRef.current = []
+        recorderRef.current = null
         cleanupStream()
         setIsRecording(false)
         setIsTranscribing(true)
-        await transcribe(blob)
-        setIsTranscribing(false)
+        try {
+          await transcribe(blob)
+        } catch {
+          toast.error("Unable to send audio. Please check your connection and try again.")
+        } finally {
+          if (mountedRef.current) setIsTranscribing(false)
+        }
       }
 
-      recorder.start()
+      recorder.start(1000)
       setIsRecording(true)
     } catch (error) {
       cleanupStream()
       toast.error(microphoneErrorToMessage(error))
+    } finally {
+      startingRef.current = false
     }
   }, [cleanupStream, isRecording, isTranscribing, transcribe])
 
@@ -184,11 +217,21 @@ export function useCloudDictation(options: UseCloudDictationOptions) {
   }, [isRecording, start, stop])
 
   React.useEffect(() => {
+    mountedRef.current = true
     return () => {
-      stop()
+      mountedRef.current = false
+      const recorder = recorderRef.current
+      if (recorder) {
+        recorder.ondataavailable = null
+        recorder.onstop = null
+        recorder.onerror = null
+        if (recorder.state !== "inactive") recorder.stop()
+      }
+      recorderRef.current = null
+      chunksRef.current = []
       cleanupStream()
     }
-  }, [cleanupStream, stop])
+  }, [cleanupStream])
 
   return { isSupported, isRecording, isTranscribing, start, stop, toggle }
 }

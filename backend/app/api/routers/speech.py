@@ -15,7 +15,7 @@ router = APIRouter()
 def _parse_allowed_mime() -> set[str] | None:
     if not settings.SPEECH_ALLOWED_MIME:
         return None
-    return {item.strip().lower() for item in settings.SPEECH_ALLOWED_MIME.split(",") if item.strip()}
+    return {item.split(";", 1)[0].strip().lower() for item in settings.SPEECH_ALLOWED_MIME.split(",") if item.strip()}
 
 
 async def _read_upload_with_limit(upload: UploadFile, max_bytes: int) -> bytes:
@@ -49,7 +49,8 @@ async def transcribe_audio(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No audio file provided")
 
     allowed = _parse_allowed_mime()
-    content_type = (file.content_type or "").lower()
+    # Recorder MIME types may include codec parameters, including Safari AAC.
+    content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
     if allowed and content_type not in allowed:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported audio format")
 
