@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": ["src/app/(app)/m3-reporting-points/page.tsx", "src/components/m3-reporting-points-view.tsx"],
+  "exclude": ["node_modules"]
+}

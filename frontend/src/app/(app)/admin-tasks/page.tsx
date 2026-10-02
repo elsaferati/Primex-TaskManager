@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { createPortal } from "react-dom"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -45,6 +46,31 @@ const FINISH_PERIOD_NONE_LABEL = "None (all day)"
 const TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] as const
 const SYSTEM_STATUS_OPTIONS = ["OPEN", "DONE"] as const
 type AdminTasksSectionId = "all-tasks" | "common" | "ga-time" | "one-h-print"
+
+// Last loaded GA time table data, kept on the device so the table paints at
+// once on the next visit while fresh data is fetched behind it.
+const GA_VIEW_CACHE_PREFIX = "primeflow-ga-view:"
+function readGaViewCache<T>(key: string): T | null {
+  try {
+    const raw = window.localStorage.getItem(GA_VIEW_CACHE_PREFIX + key)
+    return raw ? (JSON.parse(raw) as T) : null
+  } catch {
+    return null
+  }
+}
+function writeGaViewCache(key: string, value: unknown) {
+  try {
+    // One entry per kind: older weeks are dropped so storage cannot fill up.
+    const kind = key.split("|")[0]
+    for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+      const existing = window.localStorage.key(index)
+      if (existing?.startsWith(`${GA_VIEW_CACHE_PREFIX}${kind}|`)) window.localStorage.removeItem(existing)
+    }
+    window.localStorage.setItem(GA_VIEW_CACHE_PREFIX + key, JSON.stringify(value))
+  } catch {
+    // Storage full or blocked: the table simply loads from the network.
+  }
+}
 const NO_PROJECT_TYPES = [
   { id: "normal", label: "Normal", description: "General tasks without a project." },
   { id: "personal", label: "Personal", description: "Personal tasks tracked only in this view." },
@@ -1290,6 +1316,59 @@ const gaTimeEntryStyle = (entry: Partial<GaTimeEntryFormat>): React.CSSPropertie
   fontStyle: entry.is_italic ? "italic" : "normal",
 })
 
+// On a phone the table cell is far too narrow for the editor, and the keyboard
+// covers whatever is below it. Touch devices therefore get the same editor in a
+// full-width panel pinned to the top of the visible screen, with finger-sized
+// controls; desktop keeps the inline editor inside the cell.
+function GaTimeEditorShell({ className, children }: { className: string; children: React.ReactNode }) {
+  const [isTouch] = React.useState(
+    () => typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches
+  )
+  const [viewport, setViewport] = React.useState<{ top: number; height: number } | null>(null)
+
+  React.useEffect(() => {
+    if (!isTouch) return
+    const visual = window.visualViewport
+    // The visual viewport shrinks when the keyboard opens and shifts when iOS
+    // scrolls the page under it; follow both so the panel stays in view.
+    const sync = () =>
+      setViewport({ top: visual?.offsetTop ?? 0, height: visual?.height ?? window.innerHeight })
+    sync()
+    visual?.addEventListener("resize", sync)
+    visual?.addEventListener("scroll", sync)
+    return () => {
+      visual?.removeEventListener("resize", sync)
+      visual?.removeEventListener("scroll", sync)
+    }
+  }, [isTouch])
+
+  if (!isTouch) return <div className={className}>{children}</div>
+
+  return createPortal(
+    <div className="fixed inset-0 z-[300] bg-black/40 print:hidden">
+      <div
+        style={{ top: (viewport?.top ?? 0) + 8, maxHeight: Math.max((viewport?.height ?? 320) - 16, 160) }}
+        className={[
+          "absolute inset-x-2 flex flex-col gap-3 overflow-y-auto rounded-xl border border-blue-200 bg-white p-3 shadow-2xl",
+          // 16px text stops iOS from zooming the page when the field is focused.
+          "[&_[role=textbox]]:min-h-12 [&_[role=textbox]]:px-3 [&_[role=textbox]]:py-2 [&_[role=textbox]]:text-base",
+          // Selecting text makes iOS show its copy/paste bubble right under the
+          // field; the colour row sits below that bubble so it stays tappable.
+          "[&_[role=textbox]+div]:mt-14",
+          "[&_span]:text-xs [&_.flex]:gap-2.5",
+          "[&_button.rounded-full]:h-8 [&_button.rounded-full]:w-8",
+          "[&_button:not(.rounded-full)]:h-10 [&_button:not(.rounded-full)]:min-w-10 [&_button:not(.rounded-full)]:px-4 [&_button:not(.rounded-full)]:text-sm",
+          // Cancel / Save stay reachable even when the panel has to scroll.
+          "[&>div:last-child]:sticky [&>div:last-child]:bottom-0 [&>div:last-child]:bg-white [&>div:last-child]:pt-1",
+        ].join(" ")}
+      >
+        {children}
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 function GaTimeEntryEditor({
   initialContent = "",
   initialFormat,
@@ -1320,7 +1399,7 @@ function GaTimeEntryEditor({
   }, [onCancel, save])
 
   return (
-    <div className="w-full space-y-2 rounded-md border border-blue-200 bg-white p-2">
+    <GaTimeEditorShell className="w-full space-y-2 rounded-md border border-blue-200 bg-white p-2">
       <GaTimeRichTextEditor
         value={content}
         onChange={setContent}
@@ -1361,7 +1440,7 @@ function GaTimeEntryEditor({
           </Button>
         </div>
       </div>
-    </div>
+    </GaTimeEditorShell>
   )
 }
 
@@ -1395,9 +1474,7 @@ function GaTimeRowCommentEditor({
   }, [onCancel, save])
 
   return (
-    <div
-      className="flex min-w-[158px] flex-col gap-2 rounded-md border border-blue-200 bg-white p-2"
-    >
+    <GaTimeEditorShell className="flex min-w-[158px] flex-col gap-2 rounded-md border border-blue-200 bg-white p-2">
       <GaTimeRichTextEditor
         value={comment}
         onChange={setComment}
@@ -1439,7 +1516,7 @@ function GaTimeRowCommentEditor({
           </Button>
         </div>
       </div>
-    </div>
+    </GaTimeEditorShell>
   )
 }
 
@@ -1966,6 +2043,8 @@ export default function AdminTasksPage() {
   const [pendingCompletionCommentSaving, setPendingCompletionCommentSaving] = React.useState(false)
 
   const [printTarget, setPrintTarget] = React.useState<AdminTasksSectionId | null>(null)
+  // True when the page was opened through /admin-tasks#ga-time-table.
+  const [gaTimeTableFirst, setGaTimeTableFirst] = React.useState(false)
   const [printTotalPages, setPrintTotalPages] = React.useState(1)
   const [collapsedAdminSections, setCollapsedAdminSections] = React.useState<Record<AdminTasksSectionId, boolean>>({
     "all-tasks": false,
@@ -2113,6 +2192,9 @@ export default function AdminTasksPage() {
   const gaTimeNewRowStartRef = React.useRef<HTMLInputElement | null>(null)
   const gaTimeNewRowEndRef = React.useRef<HTMLInputElement | null>(null)
   const [secondarySectionsReady, setSecondarySectionsReady] = React.useState(false)
+  // The GA time table does not depend on the heavy task lists, so the direct
+  // link loads it at once instead of queueing it behind them.
+  const gaSectionsReady = secondarySectionsReady || gaTimeTableFirst
   const confirmerCandidates = React.useMemo(
     () => getConfirmerCandidates(users as UserLookup[]),
     [users]
@@ -2228,13 +2310,21 @@ export default function AdminTasksPage() {
   )
 
   React.useEffect(() => {
-    if (!secondarySectionsReady) return
+    if (!gaSectionsReady) return
     let mounted = true
     async function loadCommonWeek() {
-      setCommonLoading(true)
+      const weekStartIso = toISODate(commonWeekStart)
+      const cacheKey = `common|${user?.id || ""}|${weekStartIso}`
+      const cached = readGaViewCache<{ users: any; departments: any; data: any }>(cacheKey)
+      if (cached?.data) {
+        setCommonUsers(cached.users || [])
+        setCommonDepartments(cached.departments || [])
+        setCommonData(cached.data)
+      } else {
+        setCommonLoading(true)
+      }
       setCommonError(null)
       try {
-        const weekStartIso = toISODate(commonWeekStart)
         const include = "users,departments,entries,meetings,system_tasks,tasks"
         const res = await apiFetch(
           `/common-view?week_start=${encodeURIComponent(weekStartIso)}&include=${encodeURIComponent(include)}&include_all_departments=true`
@@ -2294,9 +2384,7 @@ export default function AdminTasksPage() {
           userId: item.userId || item.user_id || undefined,
         }))
         if (!mounted) return
-        setCommonUsers(payload.users || [])
-        setCommonDepartments(payload.departments || [])
-        setCommonData({
+        const nextCommonData = {
           late: payload.items.late,
           absent: normalizedAbsent,
           leave: payload.items.leave,
@@ -2310,10 +2398,18 @@ export default function AdminTasksPage() {
           feedback: normalizedFeedback,
           priority: payload.items.priority,
           bz: payload.items.bz,
+        }
+        setCommonUsers(payload.users || [])
+        setCommonDepartments(payload.departments || [])
+        setCommonData(nextCommonData)
+        writeGaViewCache(cacheKey, {
+          users: payload.users || [],
+          departments: payload.departments || [],
+          data: nextCommonData,
         })
       } catch (err) {
         console.error("Failed to load common view data", err)
-        if (mounted) setCommonError("Failed to load common week table.")
+        if (mounted && !cached?.data) setCommonError("Failed to load common week table.")
       } finally {
         if (mounted) setCommonLoading(false)
       }
@@ -2322,7 +2418,7 @@ export default function AdminTasksPage() {
     return () => {
       mounted = false
     }
-  }, [apiFetch, commonWeekStart, secondarySectionsReady])
+  }, [apiFetch, commonWeekStart, gaSectionsReady, user?.id])
 
   const isAdmin = String(user?.role || "").trim().toUpperCase() === "ADMIN"
   const ganeUser = React.useMemo(
@@ -2490,13 +2586,20 @@ export default function AdminTasksPage() {
   }, [])
 
   React.useEffect(() => {
-    if (!secondarySectionsReady) return
+    if (!gaSectionsReady) return
     let mounted = true
     async function loadGaTimeSlots() {
-      setGaTimeLoading(true)
+      const weekStartIso = toISODate(commonWeekStart)
+      const cacheKey = `slots|${user?.id || ""}|${weekStartIso}`
+      const cached = readGaViewCache<{ rows: GaTimeRow[]; entries: GaTimeSlotEntry[] }>(cacheKey)
+      if (cached?.rows && cached.entries) {
+        setGaTimeRows(cached.rows)
+        setGaTimeEntries(cached.entries)
+      } else {
+        setGaTimeLoading(true)
+      }
       setGaTimeError(null)
       try {
-        const weekStartIso = toISODate(commonWeekStart)
         const [rowsRes, entriesRes] = await Promise.all([
           apiFetch("/ga-time-slots/rows"),
           apiFetch(`/ga-time-slots?week_start=${encodeURIComponent(weekStartIso)}`),
@@ -2510,11 +2613,13 @@ export default function AdminTasksPage() {
         const rows = normalizeGaTimeRows((await rowsRes.json()) as GaTimeTableRowResponse[])
         const data = (await entriesRes.json()) as GaTimeSlotEntry[]
         if (!mounted) return
-        setGaTimeRows(rows.length ? rows : [...DEFAULT_GA_TIME_ROWS])
+        const nextRows = rows.length ? rows : [...DEFAULT_GA_TIME_ROWS]
+        setGaTimeRows(nextRows)
         setGaTimeEntries(data)
+        writeGaViewCache(cacheKey, { rows: nextRows, entries: data })
       } catch (err) {
         console.error("Failed to load GA time slots", err)
-        if (mounted) setGaTimeError("Failed to load GA time slots.")
+        if (mounted && !cached) setGaTimeError("Failed to load GA time slots.")
       } finally {
         if (mounted) setGaTimeLoading(false)
       }
@@ -2523,7 +2628,7 @@ export default function AdminTasksPage() {
     return () => {
       mounted = false
     }
-  }, [apiFetch, commonWeekStart, secondarySectionsReady])
+  }, [apiFetch, commonWeekStart, gaSectionsReady, user?.id])
 
   React.useEffect(() => {
     if (!secondarySectionsReady) return
@@ -4448,6 +4553,36 @@ export default function AdminTasksPage() {
       setExportingGaTime(false)
     }
   }
+
+  // Direct link for phones: /admin-tasks#ga-time-table opens the page at the GA
+  // time table. The sections above it load late and push it down, so the
+  // scroll is repeated while the page settles.
+  React.useEffect(() => {
+    // Phones and tablets always get this view, link or not: the address loses
+    // its "#ga-time-table" after a login redirect or when opened from the menu.
+    const isTouchDevice = window.matchMedia("(pointer: coarse)").matches
+    if (window.location.hash !== "#ga-time-table" && !isTouchDevice) return
+    // Only the GA time table starts open; the others stay one tap away on "+".
+    setCollapsedAdminSections({ "all-tasks": true, common: true, "one-h-print": true, "ga-time": false })
+    setGaTimeTableFirst(true)
+    const startedAt = Date.now()
+    let timer = 0
+    const stop = () => {
+      window.clearInterval(timer)
+      userEvents.forEach((name) => window.removeEventListener(name, stop))
+    }
+    // Hand control back the moment the user scrolls or taps.
+    const userEvents = ["touchstart", "wheel", "keydown", "mousedown"] as const
+    userEvents.forEach((name) => window.addEventListener(name, stop, { passive: true }))
+    timer = window.setInterval(() => {
+      if (Date.now() - startedAt > 15000) return stop()
+      const table = document.getElementById("ga-time-table")
+      if (table && Math.abs(table.getBoundingClientRect().top) > 24) {
+        table.scrollIntoView({ block: "start" })
+      }
+    }, 250)
+    return stop
+  }, [])
 
   const sectionCardClass = "rounded-xl border border-slate-200 bg-white shadow-sm"
   const sectionHeaderClass = "flex flex-wrap items-center justify-center gap-3"
@@ -7158,7 +7293,7 @@ export default function AdminTasksPage() {
             </AdminTasksSection>
           </div>
         </div>
-        <div className="print-section order-2" data-print-section="ga-time">
+        <div className={cn("print-section", gaTimeTableFirst ? "order-first" : "order-2")} data-print-section="ga-time">
           <div className="print-only">
             <div className="print-page">
               <div className="print-header">
@@ -7309,7 +7444,7 @@ export default function AdminTasksPage() {
               </div>
             </div>
           </div>
-          <div className="print:hidden">
+          <div id="ga-time-table" className="scroll-mt-4 print:hidden">
           <AdminTasksSection
             sectionId="ga-time"
             title={`GA TIME TABLE${weekTitleRange ? ` (${weekTitleRange})` : ""}`}

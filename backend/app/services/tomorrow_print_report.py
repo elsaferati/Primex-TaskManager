@@ -3240,6 +3240,7 @@ async def _build_print_report(
     closing_report_day: date | None = None,
     include_docx: bool = False,
     checklist_date: date | None = None,
+    next_day_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if payload is None:
         base_url = settings.PRIMEFLOW_API_BASE_URL
@@ -3264,13 +3265,13 @@ async def _build_print_report(
     ]
     task_rows = _task_rows(items, target_date)
     meeting_dates = [target_date, next_working_day(target_date)] if include_meetings else []
-    next_meeting_payload = payload
+    next_meeting_payload = next_day_payload or payload
     if len(meeting_dates) > 1 and payload.get("week_end"):
         try:
             payload_week_end = date.fromisoformat(str(payload["week_end"])[:10])
         except ValueError:
             payload_week_end = meeting_dates[-1]
-        if meeting_dates[-1] > payload_week_end:
+        if meeting_dates[-1] > payload_week_end and next_day_payload is None:
             base_url = settings.PRIMEFLOW_API_BASE_URL
             if not base_url:
                 raise RuntimeError("PRIMEFLOW_API_BASE_URL is required to load next-day meetings")
@@ -3464,13 +3465,14 @@ async def build_tomorrow_print_report(
 
 
 async def build_today_print_report(
-    report_date: date, *, include_attachment: bool = False, payload: dict[str, Any] | None = None
+    report_date: date, *, include_attachment: bool = False, payload: dict[str, Any] | None = None,
+    next_day_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build today's task grid plus today/next-working-day meeting sections."""
     return await _build_print_report(
         report_date, include_attachment=include_attachment, include_meetings=True,
         include_png=True, first_meeting_day_label="SOT", report_day_label="SOT",
-        checklist_date=report_date, payload=payload
+        checklist_date=report_date, payload=payload, next_day_payload=next_day_payload,
     )
 
 

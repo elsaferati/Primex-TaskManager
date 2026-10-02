@@ -49,7 +49,8 @@ class MigrationGraphTests(unittest.TestCase):
                 # stamps, without connecting to or modifying a server database.
                 steps = scripts._upgrade_revs("heads", deployed)
                 revisions = [step.revision.revision for step in steps]
-                self.assertEqual(revisions[-1], "0141_merge_person_comment_ids")
+                self.assertEqual(revisions[-1], scripts.get_current_head())
+                self.assertIn("0141_merge_person_comment_ids", revisions)
                 self.assertNotIn("0136_person_comments", revisions)
                 self.assertNotIn("20260811_add_realization_review_answers", revisions)
 

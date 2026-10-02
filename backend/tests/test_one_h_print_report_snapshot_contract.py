@@ -20,20 +20,20 @@ def test_today_and_tomorrow_pages_persist_manual_generation():
         assert "save_one_h_print_snapshot" in source
 
 
-def test_manual_and_automatic_email_delivery_still_build_fresh_reports():
+def test_today_email_uses_cutoff_report_and_tomorrow_remains_live():
     today = (ROOT / "backend/app/api/routers/today_print_report.py").read_text(encoding="utf-8")
     tomorrow = (ROOT / "backend/app/api/routers/tomorrow_print_report.py").read_text(encoding="utf-8")
     today_send = _route_function(today, "send", "history")
     tomorrow_send = _route_function(tomorrow, "send", "history")
 
-    assert "build_today_print_report(delivery_date, include_attachment=True)" in today_send
+    assert "_report(db, delivery_date, include_attachment=True)" in today_send
     assert "build_tomorrow_print_report(delivery_date, include_attachment=True, db=db)" in tomorrow_send
     assert "get_one_h_print_snapshot" not in today_send
     assert "get_one_h_print_snapshot" not in tomorrow_send
 
     today_scheduler = (ROOT / "backend/app/services/today_print_report_scheduler.py").read_text(encoding="utf-8")
     tomorrow_scheduler = (ROOT / "backend/app/services/tomorrow_print_report_scheduler.py").read_text(encoding="utf-8")
-    assert "build_today_print_report" in today_scheduler
+    assert "today_report(db, delivery_date, include_attachment=True)" in today_scheduler
     assert "build_tomorrow_print_report" in tomorrow_scheduler
     assert "get_one_h_print_snapshot" not in today_scheduler
     assert "get_one_h_print_snapshot" not in tomorrow_scheduler

@@ -5,15 +5,20 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import exists, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_manager_or_admin
 from app.models.today_print_report_delivery import TodayPrintReportDelivery
 from app.models.today_print_report_settings import TodayPrintReportSettings
+from app.models.one_h_print_report_snapshot import OneHPrintReportSnapshot
 from app.models.user import User
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import report_timezone
+from app.services.today_print_report_freeze import (
+    FROZEN_KIND, TodayPrintFreezeMissing, frozen_history, frozen_report, is_closed, local_now,
+    today_report, view_metadata,
+)
 from app.services.one_h_print_report_snapshot import (
     get_one_h_print_snapshot,
     save_one_h_print_snapshot,
@@ -21,7 +26,6 @@ from app.services.one_h_print_report_snapshot import (
 )
 from app.services.tomorrow_print_report import (
     REQUIRED_SHTYPI_RECIPIENTS,
-    build_today_print_report,
     ensure_required_shtypi_recipient,
     send_tomorrow_print_report,
 )
@@ -120,9 +124,38 @@ async def update_settings(
 
 
 @router.get("/preview")
-async def preview(report_date: date | None = None, _: User = Depends(get_current_user)) -> dict:
+async def preview(report_date: date | None = None, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict:
     target_date = report_date or datetime.now(report_timezone()).date()
-    return await build_today_print_report(target_date)
+    return await _report(db, target_date)
+
+
+async def _report(db: AsyncSession, day: date, *, include_attachment: bool = False) -> dict:
+    try:
+        return await today_report(db, day, include_attachment=include_attachment)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+async def _frozen(db: AsyncSession, day: date) -> dict:
+    try:
+        return await frozen_report(db, day)
+    except TodayPrintFreezeMissing as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/frozen-history")
+async def get_frozen_history(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> list[dict]:
+    return await frozen_history(db)
+
+
+@router.get("/freeze-status")
+async def freeze_status(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict:
+    day = local_now().date()
+    ready = (await db.execute(select(exists().where(
+        OneHPrintReportSnapshot.report_kind == FROZEN_KIND,
+        OneHPrintReportSnapshot.report_date == day,
+    )))).scalar() if is_closed(day) else False
+    return {"report_date": day.isoformat(), "freeze_ready": bool(ready), **view_metadata(day)}
 
 
 @router.get("/snapshot")
@@ -132,10 +165,15 @@ async def get_snapshot(
     _: User = Depends(get_current_user),
 ) -> dict:
     snapshot_date = report_date or datetime.now(report_timezone()).date()
+    if is_closed(snapshot_date):
+        return await _frozen(db, snapshot_date)
     row = await get_one_h_print_snapshot(db, "TODAY", snapshot_date)
     if row is None:
         raise HTTPException(status_code=404, detail="Generated report not found")
-    return await serialize_one_h_print_snapshot(db, row)
+    result = await serialize_one_h_print_snapshot(db, row)
+    if is_closed(snapshot_date):
+        return await _frozen(db, snapshot_date)
+    return {**result, **view_metadata(snapshot_date)}
 
 
 @router.post("/generate")
@@ -145,7 +183,17 @@ async def generate_snapshot(
     user: User = Depends(get_current_user),
 ) -> dict:
     snapshot_date = report_date or datetime.now(report_timezone()).date()
-    report = await build_today_print_report(snapshot_date)
+    if is_closed(snapshot_date):
+        return await _frozen(db, snapshot_date)
+    if snapshot_date != local_now().date():
+        raise HTTPException(status_code=400, detail="Generate Today only for today's date")
+    # Serialize manual generations for this date; a delayed request cannot
+    # replace a snapshot or return live data across the freeze boundary.
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+                     {"key": f"today_print_generate|{snapshot_date.isoformat()}"})
+    report = await _report(db, snapshot_date)
+    if report.get("is_frozen"):
+        return report
     row = await save_one_h_print_snapshot(
         db,
         report_kind="TODAY",
@@ -153,16 +201,18 @@ async def generate_snapshot(
         report=report,
         user=user,
     )
-    return await serialize_one_h_print_snapshot(db, row)
+    if is_closed(snapshot_date):
+        return await _frozen(db, snapshot_date)
+    return {**await serialize_one_h_print_snapshot(db, row), **view_metadata(snapshot_date)}
 
 
 @router.get("/print-preview")
 async def print_preview(
-    report_date: date | None = None, _: User = Depends(get_current_user)
+    report_date: date | None = None, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)
 ) -> dict:
     """Return the canonical Today report for printing from Common View."""
     target_date = report_date or datetime.now(report_timezone()).date()
-    return await build_today_print_report(target_date)
+    return await _report(db, target_date)
 
 
 @router.post("/send")
@@ -179,7 +229,7 @@ async def send(
             select(TodayPrintReportDelivery).where(TodayPrintReportDelivery.delivery_date == delivery_date)
         )
     ).scalar_one_or_none()
-    report = await build_today_print_report(delivery_date, include_attachment=True)
+    report = await _report(db, delivery_date, include_attachment=True)
     if existing is None:
         existing = TodayPrintReportDelivery(
             delivery_date=delivery_date,

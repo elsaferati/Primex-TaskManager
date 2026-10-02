@@ -22,12 +22,25 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     const mediaQuery = window.matchMedia("(min-width: 768px)")
 
-    const syncSidebarForViewport = () => {
+    const syncSidebarForViewport = (event?: MediaQueryListEvent) => {
       const nextIsDesktop = mediaQuery.matches
       setIsDesktop(nextIsDesktop)
 
       if (!nextIsDesktop) {
-        setIsOpen(true)
+        // Rotating a phone back to portrait must not throw the menu over the
+        // page the user is reading; it opens only on a fresh load.
+        // Admin Tasks is opened on phones straight at the GA time table, so
+        // there the menu stays closed even then. The top bar button opens it.
+        setIsOpen(!event && !window.location.pathname.startsWith("/admin-tasks"))
+        return
+      }
+
+      // A phone held sideways is wide enough to count as desktop. The GA time
+      // table link is used that way, and the table needs the full width.
+      const gaTimeTableView =
+        window.location.hash === "#ga-time-table" || window.matchMedia("(pointer: coarse)").matches
+      if (window.location.pathname.startsWith("/admin-tasks") && gaTimeTableView) {
+        setIsOpen(false)
         return
       }
 

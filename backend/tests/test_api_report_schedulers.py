@@ -9,11 +9,13 @@ from app import main
 
 REPORT_LOOPS = (
     "meetings_report",
+    "m3_reporting_points",
     "after_break_report",
     "end_week_bz_report",
     "morning_report",
     "tomorrow_print_report",
     "today_print_report",
+    "today_print_report_freeze",
 )
 
 
@@ -41,7 +43,7 @@ class ApiReportSchedulerTests(unittest.IsolatedAsyncioTestCase):
             try:
                 await main._startup()
                 for name, loop in loops.items():
-                    expected = enabled and (print_enabled or "print" not in name)
+                    expected = enabled and (print_enabled or "print" not in name or name == "today_print_report_freeze")
                     self.assertEqual(loop.call_count, int(expected), name)
                     self.assertEqual(
                         getattr(main, f"{name}_scheduler_task") is not None, expected, name
