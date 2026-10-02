@@ -179,7 +179,8 @@ class RenderingTests(unittest.TestCase):
         ]}
         report["realization"]["departments"] = [{"department_id": "dev", "code": "DEV", "percent": 75, "comment": "Mbi 50%"}]
         html = service.render_html(report)
-        self.assertIn("DETYRAT E SISTEMIT:", html)
+        self.assertIn("DET FT DHE PRJK PA PROGRES:", html)
+        self.assertIn("DETYRAT E SISTEMIT PA PROGRES:", html)
         self.assertIn("bgcolor='#dc2626'", html)
         self.assertIn("border-top:3px solid #dc2626", html)
         self.assertIn("data-task-symbol='true'", html)

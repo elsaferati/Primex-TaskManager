@@ -37,7 +37,11 @@ type Preview = {
   report_date: string
   generated_at: string | null
   generated_by: string | null
+  is_frozen?: boolean
+  frozen_at?: string
+  source_captured_at?: string
 }
+type FrozenHistory = { report_date: string; frozen_at: string; source_captured_at: string }
 type TaskMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "F" | "BZ1N1" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT" | "SHARE"
 type TaskMarkerFilter = "all" | "with" | "none" | TaskMarker
 type TaskDueDateFilter = "all" | "today" | "deadline" | "starts_today"
@@ -108,12 +112,16 @@ export function PrintReportPage({
   const [history, setHistory] = React.useState<Delivery[]>([])
   const [loading, setLoading] = React.useState(true)
   const [snapshotLoading, setSnapshotLoading] = React.useState(true)
+  const [snapshotError, setSnapshotError] = React.useState("")
+  const [frozenHistory, setFrozenHistory] = React.useState<FrozenHistory[]>([])
+  const [selectedReportDate, setSelectedReportDate] = React.useState("")
   const [saving, setSaving] = React.useState(false)
   const [sending, setSending] = React.useState(false)
   const [generatingAction, setGeneratingAction] = React.useState<"generate" | null>(null)
   const previewFrameRef = React.useRef<HTMLIFrameElement | null>(null)
   const [previewFilterContainer, setPreviewFilterContainer] = React.useState<HTMLElement | null>(null)
   const markerModalCleanupRef = React.useRef<(() => void) | null>(null)
+  const observedTodayDateRef = React.useRef("")
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
 
   const applyReportIntroVisibility = React.useCallback(() => {
@@ -197,22 +205,75 @@ export function PrintReportPage({
   const loadSnapshot = React.useCallback(async () => {
     if (authLoading || !user?.id) return
     setSnapshotLoading(true)
+    setSnapshotError("")
     try {
-      const response = await apiFetch(`${API}/snapshot`, { cache: "no-store" })
+      const response = selectedReportDate && today
+        ? await apiFetch(`${API}/snapshot?report_date=${selectedReportDate}`, { cache: "no-store" })
+        : await apiFetch(`${API}/snapshot`, { cache: "no-store" })
       if (response.status === 404) {
         setPreview(null)
         return
       }
-      if (!response.ok) throw new Error(await response.text())
+      if (!response.ok) {
+        const error = await response.json().catch(() => null)
+        throw new Error(error?.detail || "Saved report could not be loaded")
+      }
       setPreview(await response.json())
     } catch (error) {
-      toast.error("Saved report could not be loaded", { description: String(error) })
+      setPreview(null)
+      setSnapshotError(error instanceof Error ? error.message : String(error))
     } finally {
       setSnapshotLoading(false)
     }
-  }, [API, apiFetch, authLoading, user?.id])
+  }, [API, apiFetch, authLoading, selectedReportDate, today, user?.id])
 
   React.useEffect(() => { void loadSnapshot() }, [loadSnapshot])
+
+  React.useEffect(() => {
+    if (!today || authLoading || !user?.id) return
+    let cancelled = false
+    const loadFrozenHistory = async () => {
+      try {
+        const response = await apiFetch(`${API}/frozen-history`, { cache: "no-store" })
+        if (response.ok && !cancelled) setFrozenHistory(await response.json())
+      } catch { /* Keep the report usable if history is temporarily unavailable. */ }
+    }
+    void loadFrozenHistory()
+    return () => { cancelled = true }
+  }, [API, apiFetch, authLoading, today, user?.id, preview?.frozen_at])
+
+  React.useEffect(() => {
+    if (!today || selectedReportDate || authLoading || !user?.id) return
+    let cancelled = false
+    let pending = false
+    const checkBoundary = async () => {
+      if (pending) return
+      pending = true
+      try {
+        const response = await apiFetch(`${API}/freeze-status`, { cache: "no-store" })
+        if (!response.ok || cancelled) return
+        const state = await response.json() as { report_date: string; is_frozen: boolean; freeze_ready: boolean }
+        const dayChanged = Boolean(observedTodayDateRef.current && observedTodayDateRef.current !== state.report_date)
+        observedTodayDateRef.current = state.report_date
+        if (dayChanged || (preview && preview.report_date !== state.report_date) || (state.is_frozen && !preview?.is_frozen)) {
+          // Remove yesterday/live data immediately, including its marker editors.
+          setPreview(null)
+          if (!state.is_frozen || state.freeze_ready) await loadSnapshot()
+          else setSnapshotError("Raporti po ngrihet në 16:00. Kopja e ngrirë do të hapet sapo të jetë gati.")
+        }
+      } catch { /* Retry on the next tick after temporary network failures. */ }
+      finally { pending = false }
+    }
+    const timer = window.setInterval(() => { void checkBoundary() }, 5000)
+    const onVisibility = () => { if (document.visibilityState === "visible") void checkBoundary() }
+    document.addEventListener("visibilitychange", onVisibility)
+    void checkBoundary()
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
+  }, [API, apiFetch, authLoading, loadSnapshot, preview, selectedReportDate, today, user?.id])
 
   React.useEffect(() => () => markerModalCleanupRef.current?.(), [])
 
@@ -249,6 +310,7 @@ export function PrintReportPage({
   }
 
   const generateReport = async () => {
+    if (today && (preview?.is_frozen || selectedReportDate)) return
     if (preview && !window.confirm("Regenerate this saved report with the latest data?")) return
     setGeneratingAction("generate")
     try {
@@ -311,7 +373,7 @@ export function PrintReportPage({
 
   const setupPreviewMarkerControls = React.useCallback(() => {
     const document = previewFrameRef.current?.contentDocument
-    if (!document) return
+    if (!document || (today && (preview?.is_frozen || selectedReportDate))) return
 
     const openMarkerCommentModal = (initialValue: string) => new Promise<string | null>((resolve) => {
       markerModalCleanupRef.current?.()
@@ -569,7 +631,7 @@ export function PrintReportPage({
       else content.prepend(markerControl)
     })
     applyPreviewMarkerFilter()
-  }, [apiFetch, applyPreviewMarkerFilter])
+  }, [apiFetch, applyPreviewMarkerFilter, preview?.is_frozen, selectedReportDate, today])
 
   React.useEffect(() => {
     applyPreviewMarkerFilter()
@@ -656,6 +718,9 @@ export function PrintReportPage({
 
   const generatedPreview = preview ? (
     <div className="space-y-3 rounded-lg border bg-white p-4">
+      {today ? <p className={`rounded-md px-3 py-2 text-sm font-semibold ${preview.is_frozen ? "bg-blue-50 text-blue-900" : "bg-amber-50 text-amber-900"}`}>
+        {preview.is_frozen ? `Raport i ngrirë në 16:00 — ${preview.report_date}. Ndryshimet e mëvonshme nuk përfshihen.` : "Në 16:00 ruhet gjendja deri në 15:59. Nesër hapet raporti i ditës së re."}
+      </p> : null}
       <div className="flex items-center gap-3">
         <Button
           type="button"
@@ -704,10 +769,10 @@ export function PrintReportPage({
           <Button
             variant="outline"
             onClick={() => void generateReport()}
-            disabled={!user || generatingAction !== null || snapshotLoading}
+            disabled={!user || generatingAction !== null || snapshotLoading || (today && (Boolean(preview?.is_frozen) || Boolean(selectedReportDate)))}
           >
             <RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} />
-            {generatingAction === "generate" ? "Generating..." : preview ? "Regenerate" : "Generate"}
+            {today && preview?.is_frozen ? "Raport i ngrirë" : generatingAction === "generate" ? "Generating..." : preview ? "Regenerate" : "Generate"}
           </Button>
         </div>
         {generatedPreview}
@@ -724,8 +789,8 @@ export function PrintReportPage({
         </div>
         <div className="flex flex-wrap gap-2">
           {preview ? <>{dueDateFilterControl}{markerFilterControl}</> : null}
-          <Button variant="outline" onClick={() => void generateReport()} disabled={!user || generatingAction !== null || snapshotLoading}><RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} /> {generatingAction === "generate" ? "Generating..." : preview ? "Regenerate" : "Generate"}</Button>
-          {canManage ? <Button onClick={() => void sendNow()} disabled={sending}><Send /> {sending ? "Sending..." : "Send now"}</Button> : null}
+          <Button variant="outline" onClick={() => void generateReport()} disabled={!user || generatingAction !== null || snapshotLoading || (today && (Boolean(preview?.is_frozen) || Boolean(selectedReportDate)))}><RefreshCw className={generatingAction === "generate" ? "animate-spin" : ""} /> {today && preview?.is_frozen ? "Raport i ngrirë" : generatingAction === "generate" ? "Generating..." : preview ? "Regenerate" : "Generate"}</Button>
+          {canManage ? <Button onClick={() => void sendNow()} disabled={sending || (today && Boolean(selectedReportDate))}><Send /> {sending ? "Sending..." : "Send now"}</Button> : null}
         </div>
       </div>
 
@@ -775,9 +840,17 @@ export function PrintReportPage({
 
       {generatedPreview}
 
+      {today ? <div className="flex items-center gap-3 rounded-lg border bg-white p-4">
+        <Label htmlFor="today-frozen-history">Historiku i raporteve të ngrira</Label>
+        <select id="today-frozen-history" className="h-9 rounded-md border px-3 text-sm" value={selectedReportDate} onChange={(event) => { setPreview(null); setSelectedReportDate(event.target.value) }}>
+          <option value="">Raporti i sotëm</option>
+          {frozenHistory.map((row) => <option key={row.report_date} value={row.report_date}>{row.report_date} — 16:00</option>)}
+        </select>
+      </div> : null}
+
       {!snapshotLoading && !preview ? (
         <div className="rounded-lg border bg-white p-8 text-center text-sm text-muted-foreground">
-          No saved report for this date. Select Generate to create it.
+          {snapshotError || "No saved report for this date. Select Generate to create it."}
         </div>
       ) : null}
 

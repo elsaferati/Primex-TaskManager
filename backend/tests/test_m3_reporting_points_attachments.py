@@ -57,8 +57,8 @@ class ReportingPointsAttachmentTests(unittest.TestCase):
         self.assertIn("Aktive përpara DONE", table_text)
         self.assertNotIn("DONE në fund", table_text)
         self.assertEqual(len(document.tables), 8)
-        self.assertIn("DETYRAT E SISTEMIT:", paragraphs)
-        self.assertIn("DETYRAT:", paragraphs)
+        self.assertIn("DETYRAT E SISTEMIT PA PROGRES:", paragraphs)
+        self.assertIn("DET FT DHE PRJK PA PROGRES:", paragraphs)
         self.assertIn("75%", table_text)
         self.assertIn("25%", table_text)
         self.assertIn("👁 Detyrë me status TODO", table_text)
@@ -100,7 +100,7 @@ class ReportingPointsAttachmentTests(unittest.TestCase):
         visible = "".join(value for _, value, _ in calls)
         self.assertNotIn("CREATION / START / DUE", visible)
         self.assertNotIn("DONE në fund", visible)
-        for title in (*report_service.AUTO_TITLES.values(), report_service.GA_TITLE, "FUNDI MANUAL", "FUND KOMENTI", "62%", "75%", "25%", "DETYRAT E SISTEMIT:"):
+        for title in (*report_service.AUTO_TITLES.values(), report_service.GA_TITLE, "FUNDI MANUAL", "FUND KOMENTI", "62%", "75%", "25%", "DET FT DHE PRJK PA PROGRES:", "DETYRAT E SISTEMIT PA PROGRES:"):
             self.assertIn(title.replace(" ", ""), visible.replace(" ", ""))
         self.assertIn("X" * 150, visible.replace(" ", ""))
         probe = ImageDraw.Draw(image)

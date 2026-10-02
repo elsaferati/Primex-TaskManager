@@ -155,7 +155,7 @@ function TaskGrid({ rows, kind, movement }: { rows: TaskRow[]; kind: TableKind; 
 
 export function ReportingTaskTable({ rows, kind }: { rows: TaskRow[]; kind: TableKind }) {
   if (kind === "untouched") return <div>{[
-    { label: "DETYRAT", system: false }, { label: "DETYRAT E SISTEMIT", system: true },
+    { label: "DET FT DHE PRJK PA PROGRES", system: false }, { label: "DETYRAT E SISTEMIT PA PROGRES", system: true },
   ].map(({ label, system }) => <div key={label}><h4 className="border-b bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-950">{label}:</h4><TaskGrid rows={rows.filter((row) => !!(row.is_system_task || row.task_type === "SYS") === system)} kind={kind} /></div>)}</div>
   if (kind !== "postponed" && kind !== "ga_postponed") return <TaskGrid rows={rows} kind={kind} />
   const groups: { label: string; movement: Movement }[] = [

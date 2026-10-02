@@ -70,7 +70,8 @@ test("untouched splits SYS tasks and priority styling overrides status colors", 
     { ...row, task_id: "system", title: "08:00 System task", task_type: "SYS", is_system_task: true, marker: "👁" },
   ] }))
   assert.equal((html.match(/<table /g) || []).length, 2)
-  assert.match(html, /DETYRAT E SISTEMIT:/)
+  assert.match(html, /DET FT DHE PRJK PA PROGRES:/)
+  assert.match(html, /DETYRAT E SISTEMIT PA PROGRES:/)
   assert.match(html, /background-color:#dc2626;color:#ffffff/)
   assert.match(html, /border-top:3px solid #dc2626/)
   assert.match(html, /border-right:3px solid #dc2626/)

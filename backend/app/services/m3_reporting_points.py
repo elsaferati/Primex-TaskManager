@@ -314,8 +314,8 @@ def task_table_groups(rows: list[dict], key: str) -> list[tuple[str, str, list[d
     if key == "same_day":
         rows = [row for row in rows if row.get("status") != "DONE"]
     if key == "untouched":
-        return [("DETYRAT", "", [row for row in rows if not is_system_row(row)]),
-                ("DETYRAT E SISTEMIT", "", [row for row in rows if is_system_row(row)])]
+        return [("DET FT DHE PRJK PA PROGRES", "", [row for row in rows if not is_system_row(row)]),
+                ("DETYRAT E SISTEMIT PA PROGRES", "", [row for row in rows if is_system_row(row)])]
     if key not in {"postponed", "ga_postponed"}:
         return [("", "", rows)]
     groups = [("SHTYER START DHE DUE DATE", "start_due"), ("SHTYER DUE DATE", "due")]
