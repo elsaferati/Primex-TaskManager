@@ -1352,6 +1352,9 @@ function GaTimeEditorShell({ className, children }: { className: string; childre
           "absolute inset-x-2 flex flex-col gap-3 overflow-y-auto rounded-xl border border-blue-200 bg-white p-3 shadow-2xl",
           // 16px text stops iOS from zooming the page when the field is focused.
           "[&_[role=textbox]]:min-h-12 [&_[role=textbox]]:px-3 [&_[role=textbox]]:py-2 [&_[role=textbox]]:text-base",
+          // Selecting text makes iOS show its copy/paste bubble right under the
+          // field; the colour row sits below that bubble so it stays tappable.
+          "[&_[role=textbox]+div]:mt-14",
           "[&_span]:text-xs [&_.flex]:gap-2.5",
           "[&_button.rounded-full]:h-8 [&_button.rounded-full]:w-8",
           "[&_button:not(.rounded-full)]:h-10 [&_button:not(.rounded-full)]:min-w-10 [&_button:not(.rounded-full)]:px-4 [&_button:not(.rounded-full)]:text-sm",
