@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { TaskTitleLimitHint } from "@/components/task-title-limit-hint"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
@@ -4752,6 +4753,7 @@ export default function GaKaNotesPage() {
                   onChange={(e) => setTaskTitle(e.target.value)}
                   className="min-h-[72px]"
                 />
+                <TaskTitleLimitHint title={taskTitle} />
               </div>
               <div className="space-y-2">
                 <Label>Description</Label>

@@ -4801,7 +4801,7 @@ export default function WeeklyPlannerPage() {
                                                     type="button"
                                                     onClick={() => openTaskTitle(fullTitle)}
                                                     className={[
-                                                      "min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded",
+                                                      "block w-full min-w-0 truncate whitespace-nowrap font-semibold text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded",
                                                       "weekly-task-title",
                                                       titleColorClass,
                                                     ].join(" ")}
@@ -4897,7 +4897,7 @@ export default function WeeklyPlannerPage() {
                                               type="button"
                                               onClick={() => openTaskTitle(fullTitle)}
                                               className={[
-                                                "min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded",
+                                                "block w-full min-w-0 truncate whitespace-nowrap font-semibold text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded",
                                                 "weekly-task-title",
                                                 titleColorClass,
                                               ].join(" ")}
@@ -4975,7 +4975,7 @@ export default function WeeklyPlannerPage() {
                                           type="button"
                                           onClick={() => openTaskTitle(fullTitle)}
                                           className={[
-                                            "min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded",
+                                            "block w-full min-w-0 truncate whitespace-nowrap font-semibold text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded",
                                             "weekly-task-title",
                                             titleColorClass,
                                           ].join(" ")}
