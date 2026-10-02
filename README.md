@@ -90,7 +90,8 @@ AUTH_COOKIE_SECURE=false
 AUTH_COOKIE_SAMESITE=lax
 ```
 
-`REPORT_SCHEDULERS_ENABLED` controls all six API-owned report delivery loops,
+`REPORT_SCHEDULERS_ENABLED` controls all six API-owned report delivery loops
+and the M3 reporting points capture at 16:15,
 including morning and today/tomorrow print reports. It defaults to `true` on the
 server and does not control standalone report scheduler or Celery processes.
 Scheduled email failures do not prevent the API from starting. Manual report

@@ -22,6 +22,13 @@ export type TaskRow = {
   project: string
   status: string
   progress: number
+  am_pm?: string
+  task_type?: string
+  is_system_task?: boolean
+  deadline_important?: boolean
+  eight_am?: boolean
+  marker?: string
+  postponement_kind?: "start_due" | "due" | "start"
   created_date?: string | null
   start_date?: string | null
   due_date?: string | null
@@ -49,6 +56,7 @@ export type ReportingPointsReport = {
     comment: string
     baseline_available: boolean
     people: { user_id: string; name: string; percent: number | null }[]
+    departments?: { department_id: string; code: string; name: string; percent: number | null; employees: number; comment: string }[]
   } | null
   realization_captured_at: string | null
   generated_at: string | null
@@ -64,64 +72,115 @@ export function reportDate(value?: string | null) {
 
 export function reportTime(value?: string | null) {
   if (!value) return "—"
-  return new Intl.DateTimeFormat("sq-AL", { timeZone: "Europe/Tirane", hour: "2-digit", minute: "2-digit" }).format(new Date(value))
+  return new Intl.DateTimeFormat("sq-AL", { timeZone: "Europe/Tirane", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(value))
 }
 
-function Status({ value }: { value: string }) {
-  const colors = value === "DONE" ? "bg-green-100 text-green-900" : value === "TODO" ? "bg-pink-100 text-pink-900" : value === "IN_PROGRESS" ? "bg-yellow-100 text-yellow-900" : "bg-slate-100 text-slate-900"
-  return <Badge className={`border-0 ${colors}`}>{value}</Badge>
+const STATUS_COLORS: Record<string, string> = {
+  TODO: "#FFC4ED", IN_PROGRESS: "#FFFF00", WAITING_CLIENT: "#E2C15B",
+  WAITING_CONFIRMATION: "#FFEDD5", DONE: "#C4FDC4",
 }
 
-export function ReportingTaskTable({ rows, kind }: { rows: TaskRow[]; kind: "postponed" | "untouched" | "same_day" | "ga_postponed" }) {
+function taskTitle(value: string) {
+  const lines = value.replace(/\[\[\s*\/?\s*(?:added|done)\s*\]\]/gi, "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  const title = lines.find((line) => /^[A-Z]{1,4}(?:\/[A-Z]{1,4})?\s*:\s*/i.test(line)) || lines.find((line) => !/^\d+\./.test(line)) || "—"
+  return title.replace(/\s+due\s+\d{1,2}:\d{2}\s*$/i, "").replace(/\s+/g, " ").trim()
+}
+
+type TableKind = "postponed" | "untouched" | "same_day" | "ga_postponed"
+type Movement = "start_due" | "due" | "start"
+type Column = { key: keyof TaskRow | "nr" | "from" | "to"; label: string; width: number }
+
+function postponementKind(row: TaskRow): Movement {
+  if (row.postponement_kind) return row.postponement_kind
+  const start = row.old_start_date && row.start_date && row.start_date > row.old_start_date
+  const due = row.old_due_date && row.due_date && row.due_date > row.old_due_date
+  return start && due ? "start_due" : start ? "start" : "due"
+}
+
+function columnsFor(kind: TableKind, movement?: Movement): Column[] {
+  const columns: Column[] = [
+    { key: "nr", label: "NR", width: 28 }, { key: "assignees", label: "KUSH", width: 42 },
+    { key: "department", label: "DEP", width: 44 }, { key: "project", label: "PRJK", width: 96 },
+    { key: "am_pm", label: "AM/PM", width: 48 }, { key: "task_type", label: "LLOJI", width: 48 },
+  ]
   const moved = kind === "postponed" || kind === "ga_postponed"
-  if (!rows.length) return <p className="px-5 py-6 text-sm text-muted-foreground">Asnjë detyrë për këtë pikë.</p>
-  const th = "whitespace-nowrap border-b px-3 py-3 text-left text-xs font-semibold"
-  const td = "border-b px-3 py-3 align-top text-sm"
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full border-collapse" aria-label={kind === "untouched" ? "Të gjitha detyrat TODO" : kind === "same_day" ? "Detyrat sot për sot" : "Detyrat e shtyra"}>
-        <thead className="bg-muted/50"><tr>
-          <th className={th}>Detyra</th><th className={th}>Personi</th><th className={th}>Departamenti / Projekti</th>
-          <th className={th}>Statusi</th><th className={th}>Progresi</th>
-          {moved ? <><th className={th}>Start para → pas</th><th className={th}>Due para → pas</th><th className={th}>Arsyeja</th><th className={th}>Komenti i user-it</th><th className={th}>Vlerësimi</th></> : null}
-          {kind === "same_day" ? <><th className={th}>Creation / Start / Due</th><th className={th}>Progresi sot</th></> : null}
-          {kind === "ga_postponed" ? <th className={th}>Lloji</th> : null}
-        </tr></thead>
-        <tbody>{rows.map((row) => <tr key={row.task_id}>
-          <td className={`${td} min-w-64 max-w-md whitespace-pre-wrap break-words font-medium`}>{row.title}</td>
-          <td className={`${td} min-w-40`}>{row.assignees}</td>
-          <td className={`${td} min-w-40`}><div>{row.department}</div><div className="mt-1 text-xs text-muted-foreground">{row.project}</div></td>
-          <td className={td}><Status value={row.status} /></td><td className={td}>{row.progress}%</td>
-          {moved ? <>
-            <td className={`${td} whitespace-nowrap`}>{reportDate(row.old_start_date)}<br />→ {reportDate(row.start_date)}</td>
-            <td className={`${td} whitespace-nowrap`}>{reportDate(row.old_due_date)}<br />→ {reportDate(row.due_date)}</td>
-            <td className={`${td} min-w-36 whitespace-pre-wrap`}>{row.reason || "—"}</td>
-            <td className={`${td} min-w-60 max-w-md whitespace-pre-wrap break-words`}>{row.comment || "Pa koment"}</td>
-            <td className={`${td} font-bold ${row.risk === "RREZIK" ? "bg-red-100 text-red-900" : "bg-green-100 text-green-900"}`}>{row.risk}</td>
-          </> : null}
-          {kind === "same_day" ? <>
-            <td className={`${td} whitespace-nowrap`}>{reportDate(row.created_date)}<br />{reportDate(row.start_date)}<br />{reportDate(row.due_date)}</td>
-            <td className={td}>{row.completed_today ?? 0}{row.total_value ? <div className="mt-1 text-xs text-muted-foreground">{row.completed_value ?? 0} / {row.total_value} gjithsej</div> : null}</td>
-          </> : null}
-          {kind === "ga_postponed" ? <td className={`${td} whitespace-nowrap`}>{row.category}</td> : null}
-        </tr>)}</tbody>
-      </table>
-    </div>
-  )
+  if (moved) {
+    const width = movement === "start_due" ? 124 : 88
+    columns.push({ key: "from", label: "NGA", width }, { key: "to", label: "NE", width })
+  }
+  columns.push({ key: "title", label: "TITULLI", width: 360 })
+  columns.push({ key: "reason", label: "ARSYEJA", width: 124 }, { key: "comment", label: "KOMENTI", width: 160 })
+  if (moved) columns.push({ key: "risk", label: "VLERËSIMI", width: 80 })
+  if (kind === "ga_postponed") columns.push({ key: "category", label: "KUSHTI", width: 100 })
+  return columns
 }
 
-function Point({ title, note, rows, kind }: { title: string; note: string; rows: TaskRow[]; kind: Parameters<typeof ReportingTaskTable>[0]["kind"] }) {
+function dateRange(row: TaskRow, to: boolean, movement?: Movement) {
+  const start = reportDate(to ? row.start_date : row.old_start_date)
+  const due = reportDate(to ? row.due_date : row.old_due_date)
+  if (movement === "start_due") return <>
+    <span className="mb-0.5 block border-b-[3px] border-black pb-0.5">START: {start}</span>
+    <span className="block pt-0.5">DUE: {due}</span>
+  </>
+  return movement === "start" ? start : due
+}
+
+function TaskGrid({ rows, kind, movement }: { rows: TaskRow[]; kind: TableKind; movement?: Movement }) {
+  const orderedRows = kind === "same_day" ? rows.filter((row) => row.status !== "DONE") : rows
+  if (!orderedRows.length) return <p className="px-5 py-6 text-sm text-muted-foreground">Asnjë detyrë për këtë pikë.</p>
+  const columns = columnsFor(kind, movement)
+  const cell = (row: TaskRow, column: Column, index: number) => {
+    if (column.key === "nr") return index + 1
+    if (column.key === "title") return <div className="w-full whitespace-normal break-words font-medium">{row.marker ? <strong className={`mr-1 text-sm font-black ${row.deadline_important || row.category?.includes("Deadline Important") ? "text-white" : "text-red-600"}`} data-task-symbol="true">{row.marker}</strong> : null}{taskTitle(row.title)}</div>
+    if (column.key === "from" || column.key === "to") return dateRange(row, column.key === "to", movement)
+    if (column.key.endsWith("_date")) return reportDate(row[column.key as "created_date" | "start_date" | "due_date"])
+    return row[column.key] || "—"
+  }
+  return <div className="mx-3 my-3 overflow-x-auto sm:mx-5">
+    <table className="w-full table-fixed border-collapse border border-black text-xs leading-5 text-slate-950" style={{ minWidth: columns.reduce((sum, column) => sum + column.width, 0) }} aria-label={kind === "untouched" ? "Detyrat TODO për datën e raportit" : kind === "same_day" ? "Detyrat sot për sot" : "Detyrat e shtyra"}>
+      <colgroup>{columns.map((column) => <col key={column.key} style={column.key === "title" ? undefined : { width: column.width }} />)}</colgroup>
+      <thead className="bg-slate-200"><tr>{columns.map((column) => <th key={column.key} className="border border-black px-1 py-1.5 text-left align-top text-[11px] font-semibold">{column.label}</th>)}</tr></thead>
+      <tbody>{orderedRows.map((row, index) => {
+        const deadline = row.deadline_important || row.category?.includes("Deadline Important")
+        const system = row.is_system_task || row.task_type === "SYS"
+        const eightAm = row.eight_am || /\b0?8:00\b/.test(row.title) || (!system && /\bEM\b/i.test(row.title))
+        return <tr key={row.task_id} style={{ backgroundColor: deadline ? "#dc2626" : STATUS_COLORS[row.status] || "#FFFFFF", color: deadline ? "#ffffff" : "#000000" }}>
+        {columns.map((column, columnIndex) => <td key={column.key} style={eightAm ? { borderTop: "3px solid #dc2626", borderBottom: "3px solid #dc2626", ...(columnIndex === 0 ? { borderLeft: "3px solid #dc2626" } : {}), ...(columnIndex === columns.length - 1 ? { borderRight: "3px solid #dc2626" } : {}) } : undefined} className={`border border-black px-1 py-1.5 align-top ${column.key === "risk" ? `font-bold ${row.risk === "RREZIK" ? "bg-red-100 text-red-900" : "bg-green-100 text-green-900"}` : "whitespace-pre-wrap break-words"}`}>
+          {cell(row, column, index)}
+        </td>)}
+      </tr>})}</tbody>
+    </table>
+  </div>
+}
+
+export function ReportingTaskTable({ rows, kind }: { rows: TaskRow[]; kind: TableKind }) {
+  if (kind === "untouched") return <div>{[
+    { label: "DETYRAT", system: false }, { label: "DETYRAT E SISTEMIT", system: true },
+  ].map(({ label, system }) => <div key={label}><h4 className="border-b bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-950">{label}:</h4><TaskGrid rows={rows.filter((row) => !!(row.is_system_task || row.task_type === "SYS") === system)} kind={kind} /></div>)}</div>
+  if (kind !== "postponed" && kind !== "ga_postponed") return <TaskGrid rows={rows} kind={kind} />
+  const groups: { label: string; movement: Movement }[] = [
+    { label: "SHTYER START DHE DUE DATE", movement: "start_due" }, { label: "SHTYER DUE DATE", movement: "due" },
+  ]
+  if (rows.some((row) => postponementKind(row) === "start")) groups.push({ label: "SHTYER START DATE", movement: "start" })
+  return <div>{groups.map(({ label, movement }) => <div key={movement}>
+    <h4 className="border-b bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-950">{label}:</h4>
+    <TaskGrid rows={rows.filter((row) => postponementKind(row) === movement)} kind={kind} movement={movement} />
+  </div>)}</div>
+}
+
+function Point({ title, note, rows, kind }: { title: string; note: React.ReactNode; rows: TaskRow[]; kind: Parameters<typeof ReportingTaskTable>[0]["kind"] }) {
   return <section className="overflow-hidden rounded-xl border bg-card">
-    <div className="border-b px-5 py-4"><div className="flex items-center gap-3"><h3 className="font-semibold">{title}</h3><Badge variant="secondary">{rows.length}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{note}</p></div>
+    <div className="border-b px-5 py-4"><div className="flex items-center gap-3"><h3 className="font-semibold">{title}</h3><Badge variant="secondary">{rows.length}</Badge></div><p className={kind === "postponed" ? "mt-2 text-sm font-bold leading-6 text-slate-950" : "mt-1 text-xs text-muted-foreground"}>{note}</p></div>
     <ReportingTaskTable rows={rows} kind={kind} />
   </section>
 }
 
-export function M3ReportingPointsView({ report, answers, onAnswerChange, disabled = false }: {
+export function M3ReportingPointsView({ report, answers, onAnswerChange, disabled = false, gaOnly = false }: {
   report: ReportingPointsReport
   answers: ManualAnswers
   onAnswerChange: (key: ManualKey, value: string) => void
   disabled?: boolean
+  gaOnly?: boolean
 }) {
   const data = report.data
   const realization = report.realization
@@ -131,14 +190,14 @@ export function M3ReportingPointsView({ report, answers, onAnswerChange, disable
       placeholder="Shkruaj përgjigjen…" disabled={disabled} maxLength={10000} autoResize className="min-h-24" />
   </div>
   return <div className="space-y-10">
-    <section className="space-y-5" aria-labelledby="m3-points-title">
+    {!gaOnly ? <section className="space-y-5" aria-labelledby="m3-points-title">
       <div><h2 id="m3-points-title" className="text-xl font-bold">PIKAT PËR RAPORTIM M3</h2><p className="mt-1 text-sm text-muted-foreground">Përgjigjet manuale dhe gjendja e detyrave për {reportDate(report.report_date)}.</p></div>
-      <div className="grid gap-5 rounded-xl border bg-card p-5 md:grid-cols-2">
-        {manual("underload")}{manual("overload")}<div className="md:col-span-2">{manual("reorganization")}</div>
+      <div className="space-y-5 rounded-xl border bg-card p-5">
+        {manual("underload")}{manual("overload")}{manual("reorganization")}
       </div>
-      <Point title="1. DET QË JANË SHTY NGA KJO JAVË NË JAVËN TJETËR / BRENDA JAVËS" note="Shtyrjet e bëra gjatë ditës. Brenda javës: OK. Për të premten ose javën tjetër: RREZIK." rows={data.postponed || []} kind="postponed" />
-      <Point title="2. PSE PA PREK TËRË DITËN?" note="Të gjitha detyrat TODO llogariten të paprekura." rows={data.untouched || []} kind="untouched" />
-      <Point title="3. SOT PËR SOT — PROGRESI?" note="Creation Date, Start Date dhe Due Date janë të tria në datën e këtij raporti." rows={data.same_day || []} kind="same_day" />
+      <Point title="1. DET QË JANË SHTY NGA KJO JAVË NË JAVËN TJETËR / BRENDA JAVËS" note={<>Shtyrjet e bëra gjatë ditës. <span className="rounded bg-green-100 px-1 py-0.5 text-green-900">Brenda javës: OK.</span>{" "}<span className="rounded bg-red-100 px-1 py-0.5 text-red-900">Për të premten ose javën tjetër: RREZIK.</span></>} rows={data.postponed || []} kind="postponed" />
+      <Point title="2. PSE PA PREK TËRË DITËN?" note="Detyrat TODO ku data e raportit është brenda intervalit Start–Due, pavarësisht progresit të mëparshëm." rows={data.untouched || []} kind="untouched" />
+      <Point title="3. SOT PËR SOT — PROGRESI?" note="Vetëm detyrat që nuk janë DONE dhe kanë Creation Date, Start Date dhe Due Date në datën e këtij raporti." rows={(data.same_day || []).filter((row) => row.status !== "DONE")} kind="same_day" />
       <section className="rounded-xl border bg-card p-5" aria-labelledby="m3-realization-title">
         <h3 id="m3-realization-title" className="font-semibold">4. REALIZIMI — A MBËRRIHET?</h3>
         <p className="mt-1 text-xs text-muted-foreground">Realizimi ditor i gjithë stafit, i ruajtur në 16:15.</p>
@@ -148,12 +207,13 @@ export function M3ReportingPointsView({ report, answers, onAnswerChange, disable
           </div>
           <div><p className="font-medium">{realization.comment}</p><p className="mt-1 text-xs text-muted-foreground">{realization.employees} persona · Marrë në {reportTime(report.realization_captured_at)}</p></div>
         </div> : <p className="mt-5 rounded-lg bg-muted px-4 py-3 text-sm">Nuk ka ende një vlerë të ruajtur për orën 16:15 të kësaj date.</p>}
+        {realization?.departments?.length ? <div className="mt-5 overflow-x-auto"><table className="w-full border-collapse text-sm"><thead className="bg-slate-200"><tr>{["DEPARTAMENTI", "REALIZIMI", "VLERËSIMI"].map((label) => <th key={label} className="border border-black p-2 text-left">{label}</th>)}</tr></thead><tbody>{realization.departments.map((item) => <tr key={item.department_id}><td className="border border-black p-2 font-semibold">{item.code}</td><td className={`border border-black p-2 font-bold ${item.percent == null ? "bg-muted" : item.percent < 50 ? "bg-red-100 text-red-900" : "bg-green-100 text-green-900"}`}>{item.percent == null ? "Pa të dhëna" : `${item.percent}%`}</td><td className="border border-black p-2">{item.comment}</td></tr>)}</tbody></table></div> : realization ? <p className="mt-4 text-sm text-muted-foreground">Nuk ka ndarje sipas departamentit të ruajtur për këtë datë.</p> : null}
       </section>
-    </section>
+    </section> : null}
     <section className="space-y-5" aria-labelledby="ga-points-title">
       <h2 id="ga-points-title" className="text-xl font-bold">PIKAT PËR RAPORTIM PËR GA</h2>
       <div className="rounded-xl border bg-card p-5">{manual("ga_reorganization")}</div>
-      <Point title="1. A KA DET QË SHTYHET (SOT/SOT) OSE DEADLINE?" note="Detyrat e shtyra me Deadline Important, ose që para shtyrjes kishin Creation, Start dhe Due Date në datën e raportit." rows={data.ga_postponed || []} kind="ga_postponed" />
+      <Point title="2. A KA DET QË SHTYHET (SOT/SOT) OSE DEADLINE?" note="Detyrat e shtyra me Deadline Important, ose që para shtyrjes kishin Creation, Start dhe Due Date në datën e raportit." rows={data.ga_postponed || []} kind="ga_postponed" />
     </section>
   </div>
 }

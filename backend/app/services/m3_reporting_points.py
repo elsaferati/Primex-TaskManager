@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import asyncio
 import uuid
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
@@ -24,8 +25,16 @@ from app.services.daily_realization_events import semantic_local_day
 from app.services.daily_realization_live import build_live_daily_realization
 from app.services.daily_realization_metrics import calculate_daily_metrics
 from app.services.daily_rlz_compliance import REASON_LABELS
+from app.services.meetings_report import (
+    _clean_task_title, _initials, _local_time, _m3_am_pm_label, _m3_department_label,
+    _m3_task_type_label, _task_owners, apply_weekly_planner_task_order,
+    common_view_task_sort_key, _render_table_cell_html,
+)
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import GmailService, report_timezone
+from app.services.tomorrow_print_report import STATUS_COLORS
+from app.services.task_title_rules import title_has_eight_am_indicator
+from app.services.task_marker import active_one_h_marker, active_one_h_marker_by_ga, one_h_marker_label
 
 M3_TITLE = "PIKAT PER RAPORTIM M3"
 GA_TITLE = "PIKAT PER RAPORTIM PER GA"
@@ -40,7 +49,7 @@ AUTO_TITLES = {
     "untouched": "2. PSE PA PREK TERE DITEN?",
     "same_day": "3. SOT PER SOT - PROGRESI?",
     "realization": "4. REALIZIMI - A MBERRIHET?",
-    "ga_postponed": "1. A KA DET QE SHTYHET (SOT/SOT) OSE DEADLINE?",
+    "ga_postponed": "2. A KA DET QE SHTYHET (SOT/SOT) OSE DEADLINE?",
 }
 DATE_ACTIONS = {"task.due_date_changed": "due_date", "task.start_date_changed": "start_date"}
 
@@ -57,7 +66,7 @@ def postponement_risk(original: date, moved_to: date) -> tuple[str, str]:
 
 
 def select_task_sections(tasks: list[Any], events: list[Any], day: date) -> dict[str, list[dict]]:
-    """Classify current tasks; TODO alone determines the untouched section."""
+    """Classify today's tasks using current status and pre-change planning dates."""
     events_by_task: dict[Any, list[Any]] = defaultdict(list)
     for event in events:
         if event.action in DATE_ACTIONS and semantic_local_day(event.created_at) == day:
@@ -74,16 +83,33 @@ def select_task_sections(tasks: list[Any], events: list[Any], day: date) -> dict
             if before_date is not None:
                 original[DATE_ACTIONS[event.action]] = before_date
         created_today = semantic_local_day(task.created_at) == day
+        dates_before_event = dict(original)
+        originally_same_day = False
+        for event in task_events:
+            field = DATE_ACTIONS[event.action]
+            before_date = semantic_local_day((event.before or {}).get("value"))
+            after_date = semantic_local_day((event.after or {}).get("value"))
+            dates_before_event[field] = before_date
+            if (created_today and before_date and after_date and after_date > before_date
+                    and dates_before_event["start_date"] == day and dates_before_event["due_date"] == day):
+                originally_same_day = True
+            dates_before_event[field] = after_date
         status = str(getattr(task.status, "value", task.status)).upper()
-        base = {"task_id": str(task.id), "title": task.title, "status": status,
+        is_system = bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None))
+        base = {"task_id": str(task.id), "title": _clean_task_title(task.title, is_system_task=is_system), "status": status,
+                "am_pm": _m3_am_pm_label(task), "task_type": _m3_task_type_label(task),
                 "progress": task.progress_percentage or 0,
                 "created_date": semantic_local_day(task.created_at).isoformat() if task.created_at else None,
                 "start_date": current["start_date"].isoformat() if current["start_date"] else None,
                 "due_date": current["due_date"].isoformat() if current["due_date"] else None,
-                "deadline_important": bool(task.is_deadline_important)}
-        if status == "TODO":
+                "deadline_important": bool(task.is_deadline_important), "is_system_task": is_system,
+                "marker": one_h_marker_label(active_one_h_marker(task, day), active_one_h_marker_by_ga(task, day)),
+                "eight_am": title_has_eight_am_indicator(task.title, is_system_task=is_system)
+                    or (isinstance(task.due_date, datetime) and _local_time(task.due_date) == "08:00")}
+        if (status == "TODO" and current["start_date"] and current["due_date"]
+                and current["start_date"] <= day <= current["due_date"]):
             sections["untouched"].append(dict(base))
-        if created_today and current["start_date"] == day and current["due_date"] == day:
+        if status != "DONE" and created_today and current["start_date"] == day and current["due_date"] == day:
             sections["same_day"].append(dict(base))
         moved_fields = []
         for field in ("start_date", "due_date"):
@@ -97,21 +123,27 @@ def select_task_sections(tasks: list[Any], events: list[Any], day: date) -> dict
         if not moved_fields:
             continue
         old_due = original["due_date"]
-        new_due = current["due_date"]
         # Due changes determine risk when present; otherwise use the moved start.
         _, before, after = next((item for item in moved_fields if item[0] == "due_date"), moved_fields[0])
-        risk, color = postponement_risk(before, after)
+        risk, color = postponement_risk(day, after)
         row = {**base, "old_start_date": original["start_date"].isoformat() if original["start_date"] else None,
                "old_due_date": old_due.isoformat() if old_due else None,
+               "postponement_kind": "start_due" if len(moved_fields) == 2 else "start" if moved_fields[0][0] == "start_date" else "due",
                "from_date": before.isoformat(), "to_date": after.isoformat(), "risk": risk, "risk_color": color,
                "change_reason": next((str((event.after or {}).get("reason") or "") for event in reversed(task_events)
                                       if (event.after or {}).get("reason")), "")}
-        # This-week postponements include both safe moves and next-week risks.
+        # The original planning interval must overlap the report's week.
         week_start = day - timedelta(days=day.weekday())
-        if any(week_start <= old < week_start + timedelta(days=7) for _, old, _ in moved_fields):
+        week_end = week_start + timedelta(days=6)
+        old_start = original["start_date"]
+        planned_this_week = (old_start <= week_end and old_due >= week_start
+                             if old_start and old_due and old_start <= old_due
+                             else any(week_start <= old <= week_end for _, old, _ in moved_fields))
+        if planned_this_week:
             sections["postponed"].append(dict(row))
-        originally_same_day = created_today and original["start_date"] == day and old_due == day
         if task.is_deadline_important or originally_same_day:
+            if originally_same_day:
+                row["old_start_date"] = row["old_due_date"] = day.isoformat()
             row["category"] = " / ".join(label for flag, label in (
                 (bool(task.is_deadline_important), "Deadline Important"), (originally_same_day, "SOT/SOT"),
             ) if flag)
@@ -134,7 +166,7 @@ async def build_task_data(db: AsyncSession, day: date) -> dict:
         return sections
     users = {user.id: user.full_name or user.username or user.email
              for user in (await db.execute(select(User))).scalars().all()}
-    departments = {item.id: item.name for item in (await db.execute(select(Department))).scalars().all()}
+    department_codes = {item.id: item.code for item in (await db.execute(select(Department))).scalars().all()}
     projects = {item.id: item.title for item in (await db.execute(select(Project).where(
         Project.id.in_({task.project_id for task in tasks if task.id in selected and task.project_id})
     ))).scalars().all()}
@@ -142,6 +174,11 @@ async def build_task_data(db: AsyncSession, day: date) -> dict:
     for task_id, user_id in (await db.execute(select(TaskAssignee.task_id, TaskAssignee.user_id)
                                             .where(TaskAssignee.task_id.in_(selected)))).all():
         owners[task_id].add(user_id)
+    selected_tasks = [task for task in tasks if task.id in selected]
+    for task in selected_tasks:
+        if task.assigned_to:
+            owners[task.id].add(task.assigned_to)
+    await apply_weekly_planner_task_order(db, selected_tasks, owners, department_codes)
     states: dict[Any, list[Any]] = defaultdict(list)
     for state in (await db.execute(select(TaskDailyRlzState).where(
         TaskDailyRlzState.day_date == day, TaskDailyRlzState.task_id.in_(selected),
@@ -151,24 +188,30 @@ async def build_task_data(db: AsyncSession, day: date) -> dict:
         TaskDailyProgress.day_date == day, TaskDailyProgress.task_id.in_(selected),
     ))).scalars().all()}
     by_id = {task.id: task for task in tasks}
-    for rows in sections.values():
+    for key, rows in sections.items():
         for row in rows:
             task_id = uuid.UUID(row["task_id"])
             task = by_id[task_id]
             if task.assigned_to:
                 owners[task_id].add(task.assigned_to)
-            row["assignees"] = ", ".join(sorted(users.get(owner, str(owner)) for owner in owners[task_id])) or "Pa person"
-            row["department"] = departments.get(task.department_id, "-")
+            row["assignees"] = _task_owners(task, users, owners)
+            row["department"] = _m3_department_label(task, department_codes)
             row["project"] = projects.get(task.project_id, "-")
             evidence = states[task_id]
-            row["comment"] = "\n".join(f"{users.get(item.user_id, 'User')}: {item.comment.strip()}"
-                                        for item in evidence if item.comment and item.comment.strip()) or row.get("change_reason") or "Pa koment"
-            row["reason"] = "; ".join(dict.fromkeys(REASON_LABELS.get(item.reason_code, item.reason_code)
-                                                    for item in evidence if item.reason_code)) or row.get("change_reason") or "-"
+            # My View writes day-scoped reasons/comments to TaskDailyRlzState.
+            # Do not replace absent daily evidence with the date-change audit reason.
+            prefix = lambda item: f"{_initials(users.get(item.user_id))}: " if len(evidence) > 1 else ""
+            row["comment"] = "\n".join(prefix(item) + item.comment.strip()
+                                        for item in evidence if item.comment and item.comment.strip()) or "-"
+            row["reason"] = "\n".join(prefix(item) + REASON_LABELS.get(item.reason_code, item.reason_code)
+                                       for item in evidence if item.reason_code) or "-"
             daily = progress.get(task_id)
             row["completed_today"] = daily.completed_delta if daily else 0
             row["completed_value"] = daily.completed_value if daily else None
             row["total_value"] = daily.total_value if daily else None
+        rows.sort(key=lambda row: (
+            *common_view_task_sort_key(by_id[uuid.UUID(row["task_id"])], users, owners), row["task_id"],
+        ))
     return sections
 
 
@@ -176,22 +219,37 @@ async def build_realization_capture(db: AsyncSession, day: date) -> dict:
     users = list((await db.execute(select(User).where(User.is_active.is_(True),
         User.role == UserRole.STAFF, User.department_id.is_not(None)))).scalars().all())
     ids = {str(user.id) for user in users}
-    rows, people, missing = [], [], []
-    for department_id in sorted({user.department_id for user in users}, key=str):
+    department_ids = {user.department_id for user in users}
+    department_by_id = {item.id: item for item in (await db.execute(select(Department).where(Department.id.in_(department_ids)))).scalars().all()}
+    rows, people, missing, departments = [], [], [], []
+    for department_id in sorted(department_ids, key=lambda value: (
+        {"DEV": 0, "GD": 1, "PCM": 2}.get(getattr(department_by_id.get(value), "code", ""), 3),
+        getattr(department_by_id.get(value), "code", str(value)),
+    )):
         live = await build_live_daily_realization(db, department_id=department_id, day=day)
+        department_rows = []
         if not live.get("baseline_available"):
             missing.append(str(department_id))
         for person in live.get("people", []):
             if str(person["user_id"]) not in ids:
                 continue
-            rows.extend(person.get("tasks") or [])
+            department_rows.extend(person.get("tasks") or [])
             people.append({"user_id": str(person["user_id"]), "name": person.get("user_name"),
                            "percent": (person.get("metrics") or {}).get("raw_plan_realization")})
+        rows.extend(department_rows)
+        department_metrics = calculate_daily_metrics(department_rows)
+        department_percent = department_metrics["raw_plan_realization"] if live.get("baseline_available") else None
+        department = department_by_id.get(department_id)
+        departments.append({"department_id": str(department_id), "code": getattr(department, "code", str(department_id)),
+                            "name": getattr(department, "name", ""), "percent": department_percent,
+                            "employees": sum(user.department_id == department_id for user in users),
+                            "baseline_available": bool(live.get("baseline_available")), "metrics": department_metrics,
+                            "comment": realization_comment(department_percent)})
     metrics = calculate_daily_metrics(rows)
     percent = metrics["raw_plan_realization"] if not missing and users else None
     return {"percent": percent, "employees": len(users), "people": people, "metrics": metrics,
             "baseline_available": not missing and bool(users), "missing_departments": missing,
-            "comment": realization_comment(percent)}
+            "comment": realization_comment(percent), "departments": departments}
 
 
 def realization_comment(percent: float | None) -> str:
@@ -232,7 +290,9 @@ async def refresh_report(db: AsyncSession, row: M3ReportingPointsReport) -> None
 
 def report_payload(row: M3ReportingPointsReport) -> dict:
     return {"id": str(row.id), "report_date": row.report_date.isoformat(), "subject": subject_for(row.report_date),
-            "manual_answers": row.manual_answers or {}, "data": row.data or {}, "realization": row.realization,
+            "manual_answers": row.manual_answers or {},
+            "data": {key: [item for item in rows if item.get("status") != "DONE"] if key == "same_day" else rows
+                     for key, rows in (row.data or {}).items()}, "realization": row.realization,
             "realization_captured_at": row.realization_captured_at.isoformat() if row.realization_captured_at else None,
             "generated_at": row.generated_at.isoformat() if row.generated_at else None, "status": row.status,
             "sent_at": row.sent_at.isoformat() if row.sent_at else None, "last_error": row.last_error}
@@ -242,35 +302,158 @@ def _cell(value: Any) -> str:
     return html.escape(str(value if value is not None else "-"), quote=True).replace("\n", "<br>")
 
 
+def postponement_kind(row: dict) -> str:
+    if row.get("postponement_kind") in {"start_due", "due", "start"}:
+        return row["postponement_kind"]
+    start_moved = bool(row.get("old_start_date") and row.get("start_date") and row["start_date"] > row["old_start_date"])
+    due_moved = bool(row.get("old_due_date") and row.get("due_date") and row["due_date"] > row["old_due_date"])
+    return "start_due" if start_moved and due_moved else "start" if start_moved else "due"
+
+
+def task_table_groups(rows: list[dict], key: str) -> list[tuple[str, str, list[dict]]]:
+    if key == "same_day":
+        rows = [row for row in rows if row.get("status") != "DONE"]
+    if key == "untouched":
+        return [("DETYRAT", "", [row for row in rows if not is_system_row(row)]),
+                ("DETYRAT E SISTEMIT", "", [row for row in rows if is_system_row(row)])]
+    if key not in {"postponed", "ga_postponed"}:
+        return [("", "", rows)]
+    groups = [("SHTYER START DHE DUE DATE", "start_due"), ("SHTYER DUE DATE", "due")]
+    if any(postponement_kind(row) == "start" for row in rows):
+        groups.append(("SHTYER START DATE", "start"))
+    return [(caption, kind, [row for row in rows if postponement_kind(row) == kind]) for caption, kind in groups]
+
+
+def is_system_row(row: dict) -> bool:
+    return bool(row.get("is_system_task") or row.get("task_type") == "SYS")
+
+
+def task_row_appearance(row: dict) -> tuple[str, str, bool]:
+    deadline = bool(row.get("deadline_important") or "Deadline Important" in str(row.get("category") or ""))
+    eight_am = bool(row.get("eight_am") or title_has_eight_am_indicator(row.get("title"), is_system_task=is_system_row(row)))
+    return ("#dc2626" if deadline else STATUS_COLORS.get(row.get("status"), "#ffffff"),
+            "#ffffff" if deadline else "#000000", eight_am)
+
+
+def report_table_columns(key: str, movement: str = "") -> list[tuple[str, str, int]]:
+    columns = [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
+               ("project", "PRJK", 96), ("am_pm", "AM/PM", 48), ("task_type", "LLOJI", 48)]
+    if key in {"postponed", "ga_postponed"}:
+        date_width = 124 if movement == "start_due" else 88
+        columns += [("from", "NGA", date_width), ("to", "NE", date_width)]
+    columns.append(("title", "TITULLI", 360))
+    columns += [("reason", "ARSYEJA", 124), ("comment", "KOMENTI", 160)]
+    if key in {"postponed", "ga_postponed"}:
+        columns.append(("risk", "VLERESIMI", 80))
+        if key == "ga_postponed":
+            columns.append(("category", "KUSHTI", 100))
+    return columns
+
+
+def report_table_value(row: dict, column: str, index: int, kind: str) -> Any:
+    def formatted(value):
+        day = semantic_local_day(value)
+        return day.strftime("%d.%m.%Y") if day else "-"
+    if column == "nr":
+        return index
+    if column == "title":
+        title = _clean_task_title(row.get("title"), is_system_task=True)
+        return f"{row['marker']} {title}" if row.get("marker") else title
+    if column in {"from", "to"}:
+        prefix = "old_" if column == "from" else ""
+        if kind == "start_due":
+            return f"START: {formatted(row.get(prefix + 'start_date'))}\nDUE: {formatted(row.get(prefix + 'due_date'))}"
+        field = "start_date" if kind == "start" else "due_date"
+        return formatted(row.get(prefix + field))
+    if column.endswith("_date"):
+        return formatted(row.get(column))
+    return row.get(column) or "-"
+
+
 def render_html(report: dict) -> str:
-    cell_style = "border:1px solid #cbd5e1;padding:8px;vertical-align:top;text-align:left;overflow-wrap:anywhere"
+    cell_style = "border:1px solid #000;padding:6px 4px;vertical-align:top;text-align:left;overflow-wrap:anywhere"
     def manual(keys):
         return "".join(f"<h3>{_cell(MANUAL_POINTS[key])}</h3><p style='white-space:pre-wrap'>{_cell(report['manual_answers'].get(key) or 'Pa pergjigje')}</p>" for key in keys)
 
     def table(key):
-        columns = [("title", "Detyra"), ("assignees", "Personi"), ("department", "Departamenti"),
-                   ("project", "Projekti"), ("status", "Statusi"), ("progress", "Progresi %")]
-        if key in {"postponed", "ga_postponed"}:
-            columns += [("old_start_date", "Start para"), ("start_date", "Start pas"),
-                        ("old_due_date", "Due para"), ("due_date", "Due pas"),
-                        ("reason", "Arsyeja"), ("comment", "Komenti"), ("risk", "Vleresimi")]
-            if key == "ga_postponed":
-                columns.append(("category", "Lloji"))
-        elif key == "same_day":
-            columns += [("created_date", "Creation"), ("start_date", "Start"), ("due_date", "Due"),
-                        ("completed_today", "Progresi sot")]
-        rows = report["data"].get(key, [])
-        header = "".join(f"<th style='{cell_style};background:#f1f5f9'>{label}</th>" for _, label in columns)
-        body = "".join("<tr>" + "".join(
-            f"<td style='{cell_style}" + (f";background:{'#fee2e2' if row.get('risk') == 'RREZIK' else '#dcfce7'};font-weight:bold" if column == "risk" else "")
-            + f"'>{_cell(row.get(column))}</td>" for column, _ in columns) + "</tr>" for row in rows)
-        return f"<h3>{_cell(AUTO_TITLES[key])}</h3>" + (f"<table style='width:100%;border-collapse:collapse;font-size:12px'><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table>" if rows else "<p>Asnje detyre.</p>")
+        parts = [f"<h3>{_cell(AUTO_TITLES[key])}</h3>"]
+        if key == "postponed":
+            parts.append(
+                "<p style='font-size:14px;font-weight:700;line-height:1.5'>Shtyrjet e bëra gjatë ditës. "
+                "<span style='background-color:#dcfce7;color:#14532d;padding:2px 4px'>Brenda javës: OK.</span> "
+                "<span style='background-color:#fee2e2;color:#7f1d1d;padding:2px 4px'>Për të premten ose javën tjetër: RREZIK.</span></p>"
+            )
+        for caption, kind, rows in task_table_groups(report["data"].get(key, []), key):
+            columns = report_table_columns(key, kind)
+            if caption:
+                parts.append(f"<h4>{caption}:</h4>")
+            if not rows:
+                parts.append("<p>Asnje detyre.</p>")
+                continue
+            header = "".join(
+                f"<th bgcolor='#e2e8f0' style='{cell_style};background-color:#e2e8f0;font-size:11px;font-weight:700"
+                + (f";width:{width}px" if column != "title" else "") + f"'>{label}</th>"
+                for column, label, width in columns
+            )
+            body = []
+            for index, row in enumerate(rows, 1):
+                cells = []
+                row_fill, row_color, eight_am = task_row_appearance(row)
+                for column_index, (column, _, width) in enumerate(columns):
+                    color = ("#fee2e2" if row.get("risk") == "RREZIK" else "#dcfce7") if column == "risk" else row_fill
+                    style = f"{cell_style};background:{color};white-space:normal;word-break:break-word"
+                    style += f";color:{row_color}"
+                    if eight_am:
+                        style += ";border-top:3px solid #dc2626;border-bottom:3px solid #dc2626"
+                        if column_index == 0:
+                            style += ";border-left:3px solid #dc2626"
+                        if column_index == len(columns) - 1:
+                            style += ";border-right:3px solid #dc2626"
+                    if column != "title":
+                        style += f";width:{width}px"
+                    if column == "risk":
+                        style += ";font-weight:700;color:" + ("#7f1d1d" if row.get("risk") == "RREZIK" else "#14532d")
+                    value = _cell(report_table_value(row, column, index, kind))
+                    if column == "title":
+                        if row.get("marker"):
+                            value = (f"<strong data-task-symbol='true' style='display:inline-block;margin-right:4px;color:{'#ffffff' if row_color == '#ffffff' else '#DC2626'};font-size:1.18em;font-weight:900'>"
+                                     f"{_cell(row['marker'])}</strong>{_cell(_clean_task_title(row.get('title'), is_system_task=True))}")
+                        else:
+                            value = _render_table_cell_html("TITULLI", report_table_value(row, column, index, kind))
+                        if row_color == "#ffffff":
+                            value = value.replace("color:#DC2626;", "color:#ffffff;")
+                        value = f"<div style='white-space:normal;overflow-wrap:anywhere'>{value}</div>"
+                    elif column in {"from", "to"} and kind == "start_due":
+                        first, second = value.split("<br>", 1)
+                        # Presentation tables preserve the full-width divider in
+                        # email clients that do not honor block styles on spans.
+                        value = (
+                            "<table role='presentation' width='100%' border='0' cellpadding='0' cellspacing='0' "
+                            "style='width:100%;border-collapse:collapse;font:inherit;color:inherit'>"
+                            f"<tr><td style='border:0;border-bottom:3px solid #000;padding:0 0 3px'>{first}</td></tr>"
+                            f"<tr><td style='border:0;padding:3px 0 0'>{second}</td></tr></table>"
+                        )
+                    cells.append(f"<td bgcolor='{color}' valign='top' style='{style}'>{value}</td>")
+                body.append("<tr>" + "".join(cells) + "</tr>")
+            colgroup = "".join("<col>" if column == "title" else f"<col style='width:{width}px'>" for column, _, width in columns)
+            parts.append(f"<div style='overflow-x:auto'><table width='100%' border='1' cellpadding='0' cellspacing='0' style='width:100%;min-width:{sum(width for _, _, width in columns)}px;table-layout:fixed;border-collapse:collapse;border:1px solid #000;font-size:12px;line-height:1.5'><colgroup>{colgroup}</colgroup><thead><tr>{header}</tr></thead><tbody>{''.join(body)}</tbody></table></div>")
+        return "".join(parts)
 
     realization = report.get("realization")
     if realization:
         percent = realization.get("percent")
         summary = f"{percent:g}%" if percent is not None else "Pa te dhena"
         realization_html = f"<p><strong>{summary}</strong> — {_cell(realization['comment'])}</p><p>Marrë në: {_cell(report.get('realization_captured_at'))}</p>"
+        if realization.get("departments"):
+            realization_html += "<table width='100%' border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;border:1px solid #000'><tr>"
+            realization_html += "".join(f"<th bgcolor='#e2e8f0' style='{cell_style};background-color:#e2e8f0'>{label}</th>" for label in ("DEPARTAMENTI", "REALIZIMI", "VLERËSIMI")) + "</tr>"
+            for item in realization["departments"]:
+                value = item.get("percent")
+                fill = "#e2e8f0" if value is None else "#fee2e2" if value < 50 else "#dcfce7"
+                realization_html += (f"<tr><td style='{cell_style}'>{_cell(item['code'])}</td>"
+                                     f"<td bgcolor='{fill}' style='{cell_style};background-color:{fill};font-weight:700'>{f'{value:g}%' if value is not None else 'Pa të dhëna'}</td>"
+                                     f"<td style='{cell_style}'>{_cell(item['comment'])}</td></tr>")
+            realization_html += "</table>"
     else:
         realization_html = "<p>Vlera e realizimit merret ne 16:15. Nuk ka vlere te ruajtur per kete date.</p>"
     return ("<!doctype html><html><head><meta charset='utf-8'></head><body style='font-family:Arial,sans-serif;color:#0f172a'>"
@@ -289,15 +472,24 @@ def render_plain_text(report: dict) -> str:
         if key == "ga_postponed":
             lines += [GA_TITLE, MANUAL_POINTS["ga_reorganization"], report["manual_answers"].get("ga_reorganization") or "Pa pergjigje"]
         lines.append(AUTO_TITLES[key])
+        if key == "postponed":
+            lines.append("Shtyrjet e bëra gjatë ditës. Brenda javës: OK. Për të premten ose javën tjetër: RREZIK.")
         if key == "realization":
             realization = report.get("realization")
             lines.append(f"{realization.get('percent')}% - {realization['comment']}" if realization and realization.get("percent") is not None
                          else "Pa te dhena te ruajtura ne 16:15.")
+            for item in (realization or {}).get("departments", []):
+                value = item.get("percent")
+                lines.append(f"{item['code']}: " + (f"{value:g}%" if value is not None else "Pa të dhëna") + f" - {item['comment']}")
             continue
-        rows = report["data"].get(key, [])
-        lines.extend(" | ".join(f"{name}: {value}" for name, value in row.items() if name not in {"task_id", "risk_color"}) for row in rows)
-        if not rows:
-            lines.append("Asnje detyre.")
+        for caption, kind, rows in task_table_groups(report["data"].get(key, []), key):
+            if caption:
+                lines.append(caption)
+            lines.extend(" | ".join(f"{label}: {report_table_value(row, column, index, kind)}"
+                                    for column, label, _ in report_table_columns(key, kind))
+                         for index, row in enumerate(rows, 1))
+            if not rows:
+                lines.append("Asnje detyre.")
     return "\n\n".join(lines)
 
 
@@ -312,8 +504,15 @@ async def send_report(db: AsyncSession, row: M3ReportingPointsReport, recipients
         gmail = GmailService()
         message = await gmail.find_exact(report["subject"], recipients)
         if not message:
+            html_body = render_html(report)
+            from app.services.m3_reporting_points_attachments import report_attachments
+            attachments = await asyncio.to_thread(report_attachments, report)
+            # A full TODO list can exceed an email client's inline display limit.
+            # Keep every row in a standalone copy as well as in the email body.
             message = await gmail.send_verified(report["subject"], recipients,
-                                                 render_plain_text(report), render_html(report))
+                                                 render_plain_text(report), html_body,
+                                                 attachments=[(f"pikat_m3_ga_{row.report_date.isoformat()}.html",
+                                                               html_body.encode("utf-8"), "text/html"), *attachments])
     except Exception as exc:
         row.status, row.last_error = "FAILED", str(exc)[:2000]
         await db.commit()

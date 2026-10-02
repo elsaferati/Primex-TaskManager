@@ -1,14 +1,15 @@
 "use client"
 
 import * as React from "react"
-import { Eye, History, RefreshCw, Save, Send } from "lucide-react"
+import { CalendarDays, CheckCircle2, Clock3, Eye, History, Mail, Pencil, RefreshCw, Save, Send } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { clearSavedManualDraft, readManualDraft, writeManualDraft } from "@/lib/m3-reporting-points-draft"
 import { M3ReportingPointsView, MANUAL_POINTS, reportDate, reportTime, type ManualAnswers, type ManualKey, type ReportingPointsReport } from "@/components/m3-reporting-points-view"
 
 const API = "/m3-reporting-points"
@@ -17,6 +18,10 @@ type HistoryRow = Pick<ReportingPointsReport, "id" | "report_date" | "status" | 
 
 function today() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Tirane", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+}
+
+function draftStorage() {
+  try { return window.localStorage } catch { return null }
 }
 
 async function responseJson<T>(response: Response): Promise<T> {
@@ -37,15 +42,22 @@ export default function M3ReportingPointsPage() {
   const [previewHtml, setPreviewHtml] = React.useState<string | null>(null)
   const [history, setHistory] = React.useState<HistoryRow[] | null>(null)
   const [sendOpen, setSendOpen] = React.useState(false)
-  const canAccess = !!user && (["ADMIN", "MANAGER"].includes(user.role) || (user.full_name || "").trim().toLowerCase() === "laurent hoxha")
+  const [tab, setTab] = React.useState("report")
+  const [gaOnly, setGaOnly] = React.useState(false)
+  const [savingAnswers, setSavingAnswers] = React.useState(false)
+  const [saveError, setSaveError] = React.useState<string | null>(null)
+  const canAccess = !!user
+  const canManage = !!user && (["ADMIN", "MANAGER"].includes(user.role) || (user.full_name || "").trim().toLowerCase() === "laurent hoxha")
   const dirty = !!report && (Object.keys(MANUAL_POINTS) as ManualKey[]).some((key) => (answers[key] || "") !== (report.manual_answers[key] || ""))
   const sent = report?.status === "SENT"
 
   const acceptReport = React.useCallback((value: ReportingPointsReport) => {
     setReport(value)
-    setAnswers(value.manual_answers || {})
+    const local = canManage && value.status !== "SENT" && user?.id ? readManualDraft(draftStorage(), user.id, value.report_date) : null
+    setAnswers({ ...value.manual_answers, ...local })
     setError(null)
-  }, [])
+    setSaveError(null)
+  }, [user?.id, canManage])
 
   React.useEffect(() => {
     if (!canAccess) return
@@ -65,22 +77,48 @@ export default function M3ReportingPointsPage() {
   React.useEffect(() => {
     if (!canAccess) return
     let active = true
+    if (!canManage) return
     apiFetch(`${API}/recipients`).then(responseJson<{ recipients: Recipients }>).then((value) => {
       if (active) setRecipients(value.recipients)
     }).catch((error: Error) => { if (active) setError(error.message) })
     return () => { active = false }
-  }, [apiFetch, canAccess])
+  }, [apiFetch, canAccess, canManage])
 
   // Pick up the automatic 16:15 capture without replacing unsaved answers.
   React.useEffect(() => {
-    if (!canAccess || day !== today() || dirty || busy || sent) return
+    if (!canAccess || day !== today() || dirty || busy || sent || savingAnswers) return
+    let active = true
     const timer = window.setInterval(() => {
       apiFetch(`${API}?report_date=${day}`, { cache: "no-store" }).then(async (response) => {
-        if (response.ok) acceptReport(await responseJson<ReportingPointsReport>(response))
+        if (response.ok) {
+          const value = await responseJson<ReportingPointsReport>(response)
+          if (active) acceptReport(value)
+        }
       }).catch(() => {})
     }, 30000)
-    return () => window.clearInterval(timer)
-  }, [apiFetch, day, canAccess, dirty, busy, sent, acceptReport])
+    return () => { active = false; window.clearInterval(timer) }
+  }, [apiFetch, day, canAccess, dirty, busy, sent, savingAnswers, acceptReport])
+
+  React.useEffect(() => {
+    if (!report || !dirty || !canManage || sent || savingAnswers || busy || saveError) return
+    const reportId = report.id
+    const savedAnswers = { ...answers }
+    const savedDay = report.report_date
+    const timer = window.setTimeout(async () => {
+      setSavingAnswers(true)
+      try {
+        const value = await responseJson<ReportingPointsReport>(await apiFetch(`${API}/${reportId}/answers`, {
+          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manual_answers: savedAnswers }),
+        }))
+        // Preserve newer edits; the next save starts after this one finishes.
+        setReport((previous) => previous?.id === reportId ? value : previous)
+        if (user?.id) clearSavedManualDraft(draftStorage(), user.id, savedDay, savedAnswers)
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : "Përgjigjet nuk u ruajtën.")
+      } finally { setSavingAnswers(false) }
+    }, 700)
+    return () => window.clearTimeout(timer)
+  }, [answers, apiFetch, report, dirty, canManage, sent, savingAnswers, busy, saveError, user?.id])
 
   const action = async (name: string, work: () => Promise<void>) => {
     setBusy(name)
@@ -95,11 +133,18 @@ export default function M3ReportingPointsPage() {
     toast.success("Pikat automatike u përditësuan.")
   })
 
+  const refresh = () => action("refresh", async () => {
+    const response = await apiFetch(`${API}?report_date=${day}`, { cache: "no-store" })
+    if (response.status === 404) { setReport(null); return }
+    acceptReport(await responseJson<ReportingPointsReport>(response))
+  })
+
   const save = () => action("save", async () => {
     if (!report) return
     const value = await responseJson<ReportingPointsReport>(await apiFetch(`${API}/${report.id}/answers`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manual_answers: answers }),
     }))
+    if (user?.id) clearSavedManualDraft(draftStorage(), user.id, day, answers)
     acceptReport(value)
     toast.success("Përgjigjet u ruajtën.")
   })
@@ -114,6 +159,13 @@ export default function M3ReportingPointsPage() {
     setHistory(await responseJson<HistoryRow[]>(await apiFetch(`${API}/history`)))
   })
 
+  const changeAnswer = (key: ManualKey, value: string) => {
+    const next = { ...answers, [key]: value }
+    if (user?.id) writeManualDraft(draftStorage(), user.id, day, next)
+    setSaveError(null)
+    setAnswers(next)
+  }
+
   const send = () => action("send", async () => {
     if (!report) return
     const value = await responseJson<ReportingPointsReport>(await apiFetch(`${API}/${report.id}/send`, { method: "POST" }))
@@ -123,36 +175,66 @@ export default function M3ReportingPointsPage() {
   })
 
   if (authLoading) return <p className="p-8 text-sm text-muted-foreground">Duke ngarkuar…</p>
-  if (!canAccess) return <p className="rounded-xl border p-8">Ky raport është i disponueshëm për drejtuesit e raporteve.</p>
+  if (!canAccess) return <p className="rounded-xl border p-8">Hyr në platformë për të parë raportin.</p>
 
-  return <div className="mx-auto max-w-[1600px] space-y-6 p-4 md:p-6">
-    <header className="flex flex-wrap items-start justify-between gap-4">
-      <div><h1 className="text-2xl font-bold">Pikat për raportim M3 / GA</h1><p className="mt-1 text-sm text-muted-foreground">Pikat ditore të raportimit. Dërgimi bëhet vetëm me butonin Dërgo.</p></div>
-      <Button variant="outline" onClick={loadHistory} disabled={!!busy}><History className="mr-2 h-4 w-4" />Historiku</Button>
+  return <div className="mx-auto max-w-[1480px] space-y-6">
+    <header className="flex flex-wrap items-center justify-between gap-4 border-b pb-5">
+      <div className="flex items-center gap-3">
+        <div className="flex size-11 items-center justify-center rounded-md bg-slate-900 text-white"><Mail className="size-5" /></div>
+        <div><h1 className="text-2xl font-semibold">Pikat për raportim M3 / GA</h1><p className="text-sm text-muted-foreground">Hapësira e raportit ditor</p></div>
+      </div>
+      <div className="flex gap-2">
+        <Button variant="outline" onClick={refresh} disabled={!!busy || loading || dirty || savingAnswers}><RefreshCw className={busy === "refresh" ? "animate-spin" : ""} />Rifresko</Button>
+        <Button onClick={generate} disabled={!!busy || loading || dirty || savingAnswers || sent || day !== today()}><RefreshCw className={busy === "generate" ? "animate-spin" : ""} />Gjenero raportin</Button>
+      </div>
     </header>
-    <div className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-4">
-      <div className="space-y-2"><Label htmlFor="report-day">Data e raportit</Label><Input id="report-day" type="date" value={day} max={today()} disabled={!!busy}
-        onChange={(event) => { if (dirty) toast.error("Ruaj përgjigjet përpara ndryshimit të datës."); else if (event.target.value) setDay(event.target.value) }} /></div>
-      <Button variant="outline" onClick={generate} disabled={!!busy || loading || dirty || sent || day !== today()}><RefreshCw className={`mr-2 h-4 w-4 ${busy === "generate" ? "animate-spin" : ""}`} />{report ? "Përditëso pikat" : "Gjenero raportin"}</Button>
-      <Button onClick={save} disabled={!report || !!busy || !dirty || sent}><Save className="mr-2 h-4 w-4" />Ruaj përgjigjet</Button>
-      <Button variant="outline" onClick={preview} disabled={!report || !!busy || dirty}><Eye className="mr-2 h-4 w-4" />Pamja e email-it</Button>
-      <Button onClick={() => setSendOpen(true)} disabled={!report || !report.generated_at || !report.realization_captured_at || !!busy || dirty || sent || !recipients?.to.length}><Send className="mr-2 h-4 w-4" />{sent ? "I dërguar" : "Dërgo"}</Button>
-      {report ? <Badge variant={sent ? "default" : "secondary"}>{report.status}</Badge> : null}
-    </div>
-    {dirty ? <p role="status" className="text-sm text-amber-700">Ke përgjigje të paruajtura. Ruaji përpara përditësimit ose dërgimit.</p> : null}
     {error ? <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</p> : null}
     {report?.last_error ? <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">Dërgimi i fundit dështoi. Kontrollo konfigurimin e email-it dhe provo përsëri.</p> : null}
+    <Tabs value={tab} onValueChange={(value) => { setTab(value); if (value === "history") void loadHistory() }} className="gap-5">
+      <div className="flex flex-wrap items-center gap-2"><TabsList className="h-10 rounded-md"><TabsTrigger value="report"><Pencil />Raporti</TabsTrigger><TabsTrigger value="history"><History />Historiku</TabsTrigger></TabsList>{tab === "report" ? <Button variant={gaOnly ? "default" : "outline"} className={gaOnly ? "border-violet-700 bg-violet-700 text-white hover:bg-violet-800" : "border-violet-300 bg-violet-100 text-violet-900 hover:bg-violet-200"} aria-pressed={gaOnly} onClick={() => setGaOnly((value) => !value)}>GA</Button> : null}</div>
+      <TabsContent value="report" className="space-y-5">
+        <div className="grid gap-4 border-y bg-slate-50/70 px-4 py-4 lg:grid-cols-[190px_minmax(320px,1fr)_auto]">
+          <div><Label htmlFor="report-day">Data e raportit</Label><input className="mt-1 h-9 w-full rounded-md border border-input bg-white px-3 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" id="report-day" type="date" value={day} max={today()} disabled={!!busy || savingAnswers}
+            onChange={(event) => { if (dirty) toast.error("Prit ruajtjen e përgjigjeve përpara ndryshimit të datës."); else if (event.target.value) setDay(event.target.value) }} /></div>
+          <div><Label htmlFor="report-subject">Titulli i email-it</Label><input id="report-subject" readOnly value={report?.subject || ""} placeholder="Gjenero raportin" className="mt-1 h-9 w-full rounded-md border border-input bg-white px-3 text-sm shadow-xs" /></div>
+          <div className="flex flex-wrap items-end gap-2">
+            {canManage ? <Button variant="outline" onClick={save} disabled={!report || !!busy || savingAnswers || !dirty || sent}><Save />Ruaj përgjigjet</Button> : null}
+            <Button variant="outline" onClick={preview} disabled={!report || !!busy || savingAnswers || dirty}><Eye />Pamja e email-it</Button>
+            {canManage ? <Button onClick={() => setSendOpen(true)} disabled={!report || !report.generated_at || !report.realization_captured_at || !!busy || savingAnswers || dirty || sent || !recipients?.to.length}><Send />{sent ? "I dërguar" : "Dërgo"}</Button> : null}
+          </div>
+        </div>
+        {report ? <div className="grid border md:grid-cols-4">
+          {[
+            [CalendarDays, "Data e raportit", reportDate(report.report_date)],
+            [Clock3, "Realizimi 16:15", report.realization_captured_at ? reportTime(report.realization_captured_at) : "Në pritje"],
+            [CheckCircle2, "Statusi", report.status],
+            [Clock3, "Përditësimi i fundit", report.generated_at ? `${reportDate(report.generated_at)}, ${reportTime(report.generated_at)}` : "—"],
+          ].map(([Icon, label, value], index) => {
+            const MetaIcon = Icon as typeof CalendarDays
+            return <div key={String(label)} className={index < 3 ? "border-b p-4 md:border-b-0 md:border-r" : "p-4"}>
+              <div className="flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground"><MetaIcon className="size-4" />{String(label)}</div>
+              <div className="mt-1.5 text-sm font-semibold">{String(value)}</div>
+            </div>
+          })}
+        </div> : null}
+        {canManage && report && !sent ? <p role="status" className={`text-xs ${saveError ? "text-red-700" : "text-muted-foreground"}`}>
+          {saveError ? `Ruajtja automatike dështoi: ${saveError} Provo Ruaj përgjigjet.` : savingAnswers || dirty ? "Duke ruajtur përgjigjet…" : "Përgjigjet ruhen automatikisht për datën e këtij raporti."}
+        </p> : null}
     {loading ? <p className="py-10 text-center text-muted-foreground">Duke ngarkuar raportin…</p> : report ? <>
-      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground"><span>Pikat u përditësuan në {reportTime(report.generated_at)}</span><span>Realizimi: {report.realization_captured_at ? `i ruajtur në ${reportTime(report.realization_captured_at)}` : "pret marrjen në 16:15"}</span>{report.sent_at ? <span>Dërguar në {reportTime(report.sent_at)}</span> : null}</div>
-      <M3ReportingPointsView report={report} answers={answers} disabled={!!busy || sent} onAnswerChange={(key, value) => setAnswers((previous) => ({ ...previous, [key]: value }))} />
+      <M3ReportingPointsView report={report} answers={answers} disabled={!canManage || !!busy || sent} onAnswerChange={changeAnswer} gaOnly={gaOnly} />
       {!report.realization_captured_at ? <p className="text-sm text-muted-foreground">Dërgimi aktivizohet pasi të ruhet realizimi i orës 16:15.</p> : null}
     </> : <div className="rounded-xl border border-dashed p-12 text-center"><h2 className="font-semibold">Nuk ka raport të ruajtur për {reportDate(day)}.</h2><p className="mt-2 text-sm text-muted-foreground">{day === today() ? "Gjenero raportin për të plotësuar përgjigjet dhe për të parë pikat automatike." : "Zgjidh një datë nga historiku për të parë të dhënat e ruajtura."}</p></div>}
+      </TabsContent>
+      <TabsContent value="history" className="space-y-3">
+        <h2 className="font-semibold">Historiku i raporteve</h2>
+        {busy === "history" ? <p className="text-sm text-muted-foreground">Duke ngarkuar historikun…</p> : history?.length ? history.map((row) => <button key={row.id} type="button" className="flex w-full items-center justify-between rounded-md border p-3 text-left hover:bg-muted" onClick={() => {
+          if (dirty || savingAnswers) { toast.error("Prit ruajtjen e përgjigjeve përpara hapjes së një date tjetër."); return }
+          setDay(row.report_date); setTab("report")
+        }}><span>{reportDate(row.report_date)}<span className="ml-3 text-xs text-muted-foreground">{row.sent_at ? reportTime(row.sent_at) : "Pa dërguar"}</span></span><Badge variant="secondary">{row.status}</Badge></button>) : <p className="text-sm text-muted-foreground">Nuk ka ende raporte në historik.</p>}
+      </TabsContent>
+    </Tabs>
 
     <Dialog open={previewHtml !== null} onOpenChange={(open) => { if (!open) setPreviewHtml(null) }}><DialogContent className="max-w-[95vw] sm:max-w-[95vw]"><DialogHeader><DialogTitle>Pamja e raportit në email</DialogTitle></DialogHeader><iframe title="Pikat për raportim M3 / GA" sandbox="" srcDoc={previewHtml || ""} className="h-[75vh] w-full rounded border bg-white" /></DialogContent></Dialog>
-    <Dialog open={history !== null} onOpenChange={(open) => { if (!open) setHistory(null) }}><DialogContent><DialogHeader><DialogTitle>Historiku i raporteve</DialogTitle></DialogHeader><div className="max-h-[60vh] space-y-2 overflow-y-auto">{history?.length ? history.map((row) => <button key={row.id} type="button" className="flex w-full items-center justify-between rounded-lg border p-3 text-left hover:bg-muted" onClick={() => {
-      if (dirty) { toast.error("Ruaj përgjigjet përpara hapjes së një date tjetër."); return }
-      setDay(row.report_date); setHistory(null)
-    }}><span>{reportDate(row.report_date)}<span className="ml-3 text-xs text-muted-foreground">{row.sent_at ? reportTime(row.sent_at) : "Pa dërguar"}</span></span><Badge variant="secondary">{row.status}</Badge></button>) : <p className="py-6 text-sm text-muted-foreground">Nuk ka ende raporte në historik.</p>}</div></DialogContent></Dialog>
     <Dialog open={sendOpen} onOpenChange={(open) => { if (!busy) setSendOpen(open) }}><DialogContent><DialogHeader><DialogTitle>Dërgo raportin M3 / GA</DialogTitle></DialogHeader><p className="text-sm">Raporti i datës {reportDate(day)} dërgohet te marrësit aktualë të M3. Pikat automatike përditësohen në momentin e dërgimit; përgjigjet dhe realizimi i 16:15 ruhen.</p><div className="space-y-2 rounded-lg bg-muted p-3 text-sm">{recipients ? (Object.entries(recipients) as [string, string[]][]).filter(([, values]) => values.length).map(([key, values]) => <p key={key}><strong>{key.toUpperCase()}:</strong> {values.join(", ")}</p>) : null}</div><Button onClick={send} disabled={!!busy}><Send className="mr-2 h-4 w-4" />{busy === "send" ? "Duke dërguar…" : "Dërgo raportin"}</Button></DialogContent></Dialog>
   </div>
 }

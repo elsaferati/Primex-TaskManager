@@ -4,10 +4,11 @@ import uuid
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user
 from app.api.routers.primeflow_1h_reports import require_report_manager
 from app.db import get_db
 from app.models.m3_reporting_points import M3ReportingPointsReport
@@ -24,6 +25,7 @@ router = APIRouter()
 
 
 class ManualAnswersPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     manual_answers: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("manual_answers")
@@ -54,7 +56,7 @@ async def recipients(db: AsyncSession = Depends(get_db), _: User = Depends(requi
 
 @router.get("/history")
 async def history(limit: int = Query(50, ge=1, le=200), db: AsyncSession = Depends(get_db),
-                  _: User = Depends(require_report_manager)) -> list[dict]:
+                  _: User = Depends(get_current_user)) -> list[dict]:
     rows = (await db.execute(select(M3ReportingPointsReport)
                             .order_by(M3ReportingPointsReport.report_date.desc()).limit(limit))).scalars().all()
     return [{key: report_payload(row)[key] for key in (
@@ -64,7 +66,7 @@ async def history(limit: int = Query(50, ge=1, le=200), db: AsyncSession = Depen
 
 @router.get("")
 async def get_report(report_date: date, db: AsyncSession = Depends(get_db),
-                     _: User = Depends(require_report_manager)) -> dict:
+                     _: User = Depends(get_current_user)) -> dict:
     row = (await db.execute(select(M3ReportingPointsReport).where(
         M3ReportingPointsReport.report_date == report_date,
     ))).scalar_one_or_none()
@@ -75,7 +77,7 @@ async def get_report(report_date: date, db: AsyncSession = Depends(get_db),
 
 @router.post("/generate")
 async def generate(report_date: date, db: AsyncSession = Depends(get_db),
-                   user: User = Depends(require_report_manager)) -> dict:
+                   user: User = Depends(get_current_user)) -> dict:
     today = datetime.now(report_timezone()).date()
     if report_date != today:
         return await get_report(report_date, db, user)
@@ -109,7 +111,7 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
 
 @router.get("/{report_id}/preview")
 async def preview(report_id: uuid.UUID, db: AsyncSession = Depends(get_db),
-                  _: User = Depends(require_report_manager)) -> dict:
+                  _: User = Depends(get_current_user)) -> dict:
     report = report_payload(await _by_id(db, report_id))
     return {"html": render_html(report), "plain_text": render_plain_text(report)}
 
@@ -133,7 +135,7 @@ async def send(report_id: uuid.UUID, db: AsyncSession = Depends(get_db),
             if row.report_date == datetime.now(report_timezone()).date():
                 await refresh_report(db, row)
             add_audit_log(db=db, actor_user_id=user.id, entity_type="m3_reporting_points", entity_id=row.id,
-                          action="MANUAL_SEND", after={"report_date": row.report_date.isoformat()})
+                          action="MANUAL_SEND", after={"report_date": row.report_date.isoformat(), "recipients": recipients})
         await send_report(db, row, recipients)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc

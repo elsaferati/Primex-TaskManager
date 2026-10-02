@@ -142,6 +142,7 @@ __all__ = [
     "MeetingSchedulingStandard",
     "MeetingsReportDraft",
     "MeetingsReportSettings",
+    "M3ReportingPointsReport",
     "AfterBreakReportDraft",
     "AfterBreakReportSettings",
     "EndWeekBzReportDraft",
