@@ -21,9 +21,10 @@ const AuthContext = React.createContext<AuthContextValue | null>(null)
 
 const ACCESS_TOKEN_KEY = "primex_access_token"
 const LOGOUT_AT_KEY = "primex_logout_at"
-const SESSION_DURATION_MS = 9 * 60 * 60 * 1000
+const SESSION_DURATION_MS = 24 * 60 * 60 * 1000
 const SESSION_TIMEOUT_EXEMPT_USERNAMES = new Set(["gane.arifaj"])
-const FETCH_TIMEOUT_MS = 8000
+// Auth calls must outlast a busy server; a timeout here must never end the session.
+const FETCH_TIMEOUT_MS = 20000
 // Refresh token when it has less than 3 minutes remaining (15 min total - 3 min buffer = 12 min)
 const TOKEN_REFRESH_BUFFER_MS = 3 * 60 * 1000 // 3 minutes in milliseconds
 let refreshPromise: Promise<string | null> | null = null
@@ -184,7 +185,12 @@ async function fetchMe(token: string): Promise<User> {
   return res.json()
 }
 
+// Set when the server explicitly rejected the refresh cookie (401/403). A timeout
+// or network error leaves it false, so a slow server never logs the user out.
+let lastRefreshRejected = false
+
 async function refreshAccessToken(): Promise<string | null> {
+  lastRefreshRejected = false
   let res: Response
   try {
     res = await fetchWithTimeout(`${API_HTTP_URL}/auth/refresh`, {
@@ -194,7 +200,10 @@ async function refreshAccessToken(): Promise<string | null> {
   } catch {
     return null
   }
-  if (!res.ok) return null
+  if (!res.ok) {
+    lastRefreshRejected = res.status === 401 || res.status === 403
+    return null
+  }
   const data = (await res.json()) as { access_token: string }
   return data.access_token
 }
@@ -212,11 +221,21 @@ async function refreshAccessTokenShared(): Promise<string | null> {
 }
 
 async function restoreSessionFromRefreshCookie() {
-  const refreshed = await refreshAccessTokenShared()
-  if (!refreshed) return null
-
-  const me = await fetchMe(refreshed)
-  return { token: refreshed, user: me }
+  // Retry while the server is merely slow; stop at once when it rejects the cookie.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const refreshed = await refreshAccessTokenShared()
+    if (!refreshed) {
+      if (lastRefreshRejected) return null
+      continue
+    }
+    try {
+      const me = await fetchMe(refreshed)
+      return { token: refreshed, user: me }
+    } catch {
+      // try again
+    }
+  }
+  return null
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -230,6 +249,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   } | null>(null)
   const logoutInProgressRef = React.useRef(false)
   const tokenRef = React.useRef<string | null>(null)
+
+  const userId = user?.id ?? null
 
   React.useEffect(() => {
     tokenRef.current = token
@@ -311,20 +332,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Proactive token refresh - refresh token before it expires
   React.useEffect(() => {
-    if (!token || !user) return
+    if (!token || !userId) return
 
     const checkAndRefresh = async () => {
       if (isTokenExpiringSoon(token)) {
         const refreshed = await refreshAccessTokenShared()
         if (refreshed) {
-          try {
-            const me = await fetchMe(refreshed)
-            setStoredToken(refreshed)
-            setToken(refreshed)
-            setUser(me)
-          } catch {
-            // If refresh fails, token will be refreshed on next API call
-          }
+          setStoredToken(refreshed)
+          setToken(refreshed)
         }
       }
     }
@@ -338,10 +353,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, 60 * 1000) // Check every minute
 
     return () => clearInterval(interval)
-  }, [token, user])
+  }, [token, userId])
 
   React.useEffect(() => {
-    if (!token || !user) return
+    if (!token || !userId) return
 
     let stopped = false
     let ws: WebSocket | null = null
@@ -429,7 +444,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
       ws?.close()
     }
-  }, [stopActiveMeetingAlarm, token, user])
+  }, [stopActiveMeetingAlarm, token, userId])
 
   const logout = React.useCallback(async () => {
     stopMeetingReminderAlarm()
@@ -525,27 +540,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const refreshed = await refreshAccessTokenShared()
         if (!refreshed) {
-          clearSessionCaches()
-          setStoredToken(null)
-          setStoredLogoutAt(null)
-          setToken(null)
-          setUser(null)
+          // Only a definite rejection ends the session; a slow or unreachable
+          // server keeps the user where they are and the next call retries.
+          if (lastRefreshRejected) {
+            clearSessionCaches()
+            setStoredToken(null)
+            setStoredLogoutAt(null)
+            setToken(null)
+            setUser(null)
+          }
           return res
         }
 
+        tokenRef.current = refreshed
         setStoredToken(refreshed)
         setToken(refreshed)
-        try {
-          const me = await fetchMe(refreshed)
-          setUser(me)
-        } catch {
-          clearSessionCaches()
-          setStoredToken(null)
-          setStoredLogoutAt(null)
-          setToken(null)
-          setUser(null)
-          return res
-        }
 
         const retryRes = await doFetch(refreshed)
         if (retryRes.status === 401) {
