@@ -4506,7 +4506,10 @@ export default function AdminTasksPage() {
   // time table. The sections above it load late and push it down, so the
   // scroll is repeated while the page settles.
   React.useEffect(() => {
-    if (window.location.hash !== "#ga-time-table") return
+    // Phones and tablets always get this view, link or not: the address loses
+    // its "#ga-time-table" after a login redirect or when opened from the menu.
+    const isTouchDevice = window.matchMedia("(pointer: coarse)").matches
+    if (window.location.hash !== "#ga-time-table" && !isTouchDevice) return
     // Only the GA time table starts open; the others stay one tap away on "+".
     setCollapsedAdminSections({ "all-tasks": true, common: true, "one-h-print": true, "ga-time": false })
     setGaTimeTableFirst(true)
