@@ -6,7 +6,8 @@
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:speech": "node --test tests/speech.test.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

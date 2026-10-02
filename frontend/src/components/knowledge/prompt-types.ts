@@ -1,4 +1,5 @@
 export type PromptStatus = "PENDING_TEST" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED"
+export type PromptFilter = PromptStatus | "ALL" | "WAITING_FOR_ME"
 
 export interface KnowledgeUserRef {
   id: string
@@ -85,12 +86,26 @@ export const TASK_STATUS_META: Record<string, { label: string; className: string
 export type PromptNoteStage = "NO_TASK" | "TASK_OPEN" | "READY" | "IN_REVIEW" | "DONE" | "CLOSED"
 
 export function promptNoteStage(note: PromptNote): PromptNoteStage {
-  if (note.prompts.some((p) => p.status === "APPROVED")) return "DONE"
   if (note.prompts.some((p) => p.status !== "APPROVED")) return "IN_REVIEW"
+  if (note.prompts.some((p) => p.status === "APPROVED")) {
+    return note.tasks.some((t) => t.status !== "DONE") ? "TASK_OPEN" : "DONE"
+  }
   if (note.status === "CLOSED") return "CLOSED"
   if (note.tasks.length === 0) return "NO_TASK"
   if (note.tasks.every((t) => t.status === "DONE")) return "READY"
   return "TASK_OPEN"
+}
+
+export type PromptNoteFilter = PromptNoteStage | "ALL" | "ACTIVE" | "PENDING_TEST" | "PENDING_APPROVAL" | "REJECTED"
+
+export function promptNoteMatchesFilter(note: PromptNote, filter: PromptNoteFilter): boolean {
+  const stage = promptNoteStage(note)
+  if (filter === "ALL") return true
+  if (filter === "ACTIVE") return stage !== "DONE" && stage !== "CLOSED"
+  if (filter === "PENDING_TEST" || filter === "PENDING_APPROVAL" || filter === "REJECTED") {
+    return note.prompts.some((p) => p.status === filter)
+  }
+  return stage === filter
 }
 
 export const NOTE_STAGE_META: Record<PromptNoteStage, { label: string; className: string }> = {
@@ -113,6 +128,12 @@ export function promptWaitsFor(p: KnowledgePrompt, userId?: string | null, isMan
     return isManager && p.created_by?.id !== userId && p.tested_by?.id !== userId
   }
   return false
+}
+
+export function promptMatchesFilter(p: KnowledgePrompt, filter: PromptFilter, userId?: string | null, isManager = false): boolean {
+  if (filter === "ALL") return true
+  if (filter === "WAITING_FOR_ME") return promptWaitsFor(p, userId, isManager)
+  return p.status === filter
 }
 
 export function formatDate(value?: string | null) {

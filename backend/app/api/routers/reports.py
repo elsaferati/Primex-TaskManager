@@ -605,7 +605,8 @@ async def daily_report(
                 is_overdue=is_from_overdue,
                 late_days=late_days,
                 rlz_daily_state=_daily_rlz_state_out(
-                    system_daily_rlz_map.get(task.id), day, system_comment_map.get(task.id)
+                    system_daily_rlz_map.get(task.id), day, system_comment_map.get(task.id),
+                    system_task=task,
                 ),
             )
         )
@@ -633,7 +634,8 @@ async def daily_report(
                 is_overdue=True,
                 late_days=late_days,
                 rlz_daily_state=_daily_rlz_state_out(
-                    system_daily_rlz_map.get(task.id), day, system_comment_map.get(task.id)
+                    system_daily_rlz_map.get(task.id), day, system_comment_map.get(task.id),
+                    system_task=task,
                 ),
             )
         )
@@ -643,7 +645,9 @@ async def daily_report(
 
     compliance = await build_daily_rlz_compliance(db, user_id=user_id, day=day)
     requirement_by_task = {item["task_id"]: item for item in compliance.get("tasks", [])}
-    for collection in (tasks_today, tasks_overdue, system_today, system_overdue):
+    # System-task inputs follow their occurrence's TODO status directly, including
+    # occurrences excluded from Realization or carried over from a previous day.
+    for collection in (tasks_today, tasks_overdue):
         for item in collection:
             state = item.rlz_daily_state
             requirement = requirement_by_task.get(str(item.task.id))
@@ -665,8 +669,14 @@ async def daily_report(
 
 
 def _daily_rlz_state_out(
-    row: TaskDailyRlzState | None, day: date, fallback_comment: str | None = None
+    row: TaskDailyRlzState | None, day: date, fallback_comment: str | None = None,
+    *, system_task: Task | None = None,
 ) -> DailyRlzTaskStateOut:
+    explanation_required = bool(
+        system_task is not None
+        and not system_task.completed_at
+        and system_task.status == TaskStatus.TODO
+    )
     return DailyRlzTaskStateOut(
         reason_code=row.reason_code if row else None,
         reason_label=REASON_LABELS.get(row.reason_code) if row else None,
@@ -674,6 +684,11 @@ def _daily_rlz_state_out(
         updated_at=row.updated_at if row else None,
         is_editable=is_editable_day(day),
         editable_until=editable_until(day),
+        requires_explanation=explanation_required,
+        reason_required=explanation_required,
+        comment_required=explanation_required,
+        reason_missing=explanation_required and not (row and row.reason_code),
+        comment_missing=explanation_required and not (row and (row.comment or "").strip()),
     )
 
 
@@ -725,7 +740,10 @@ async def upsert_daily_rlz_state(
         )
     await db.commit()
     await db.refresh(row)
-    return _daily_rlz_state_out(row, payload.day)
+    return _daily_rlz_state_out(
+        row, payload.day,
+        system_task=task if task.system_template_origin_id or task.system_task_slot_id else None,
+    )
 
 
 @router.put("/daily-rlz-state/{task_id}/correction", response_model=DailyRlzTaskStateOut)
@@ -769,7 +787,10 @@ async def correct_daily_rlz_state(
                          "correction_reason": payload.correction_reason, "reopen_event_id": str(latest.id)})
     await db.commit()
     await db.refresh(row)
-    return _daily_rlz_state_out(row, payload.day)
+    return _daily_rlz_state_out(
+        row, payload.day,
+        system_task=task if task.system_template_origin_id or task.system_task_slot_id else None,
+    )
 
 
 @router.get("/daily-rlz-compliance")

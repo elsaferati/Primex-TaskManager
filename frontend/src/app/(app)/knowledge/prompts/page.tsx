@@ -28,13 +28,16 @@ import {
   PROMPT_STATUS_META,
   TASK_STATUS_META,
   formatDate,
+  promptMatchesFilter,
+  promptNoteMatchesFilter,
   promptNoteStage,
   promptWaitsFor,
   type KnowledgePrompt,
   type KnowledgeUserRef,
   type PromptNote,
+  type PromptNoteFilter,
   type PromptNoteStage,
-  type PromptStatus,
+  type PromptFilter,
 } from "@/components/knowledge/prompt-types"
 import { useAuth } from "@/lib/auth"
 import type { Department } from "@/lib/types"
@@ -133,15 +136,15 @@ function SearchBox({
 /* Prompt Library                                                             */
 /* ========================================================================== */
 
-type LibraryFilter = PromptStatus | "ALL"
 type SortMode = "relevance" | "recent" | "az"
 
-const LIBRARY_FILTERS: { id: LibraryFilter; label: string }[] = [
+const LIBRARY_FILTERS: { id: PromptFilter; label: string }[] = [
+  { id: "ALL", label: "Të gjitha" },
   { id: "APPROVED", label: "Libraria (aprovuar)" },
   { id: "PENDING_TEST", label: "Në testim" },
   { id: "PENDING_APPROVAL", label: "Në aprovim" },
   { id: "REJECTED", label: "Kthyer mbrapa" },
-  { id: "ALL", label: "Të gjitha" },
+  { id: "WAITING_FOR_ME", label: "Presin veprimin tim" },
 ]
 
 function PromptLibrary({
@@ -149,15 +152,17 @@ function PromptLibrary({
   loading,
   onOpen,
   onAdd,
+  initialFilter = "APPROVED",
 }: {
   prompts: KnowledgePrompt[]
   loading: boolean
   onOpen: (p: KnowledgePrompt) => void
   onAdd: () => void
+  initialFilter?: PromptFilter
 }) {
   const { user } = useAuth()
   const [query, setQuery] = React.useState("")
-  const [filter, setFilter] = React.useState<LibraryFilter>("APPROVED")
+  const [filter, setFilter] = React.useState<PromptFilter>(initialFilter)
   const [keywords, setKeywords] = React.useState<string[]>([])
   const [sort, setSort] = React.useState<SortMode>("relevance")
   const searchRef = React.useRef<HTMLInputElement | null>(null)
@@ -182,13 +187,13 @@ function PromptLibrary({
     [isManager, user?.id]
   )
   const counts = React.useMemo(() => {
-    const c: Record<LibraryFilter, number> = { APPROVED: 0, PENDING_TEST: 0, PENDING_APPROVAL: 0, REJECTED: 0, ALL: prompts.length }
+    const c: Record<PromptFilter, number> = { APPROVED: 0, PENDING_TEST: 0, PENDING_APPROVAL: 0, REJECTED: 0, ALL: prompts.length, WAITING_FOR_ME: prompts.filter(needsMe).length }
     for (const p of prompts) c[p.status] += 1
     return c
-  }, [prompts])
-  const waitingForMe = prompts.filter(needsMe).length
+  }, [prompts, needsMe])
+  const waitingForMe = counts.WAITING_FOR_ME
 
-  const scoped = React.useMemo(() => (filter === "ALL" ? prompts : prompts.filter((p) => p.status === filter)), [prompts, filter])
+  const scoped = React.useMemo(() => prompts.filter((p) => promptMatchesFilter(p, filter, user?.id, isManager)), [prompts, filter, user?.id, isManager])
   const index = React.useMemo(() => indexPrompts(scoped), [scoped])
   const rows = React.useMemo(() => {
     const hits = searchPrompts(index, deferredQuery, keywords)
@@ -196,10 +201,14 @@ function PromptLibrary({
     hits.sort((a, b) => {
       if (bySort === "relevance" && b.score !== a.score) return b.score - a.score
       if (bySort === "az") return a.prompt.title.localeCompare(b.prompt.title)
+      if (filter === "ALL" && !deferredQuery.trim() && sort === "relevance") {
+        const approvedDiff = Number(a.prompt.status === "APPROVED") - Number(b.prompt.status === "APPROVED")
+        if (approvedDiff) return approvedDiff
+      }
       return (b.prompt.approved_at || b.prompt.updated_at).localeCompare(a.prompt.approved_at || a.prompt.updated_at)
     })
     return hits.map((h) => h.prompt)
-  }, [index, deferredQuery, keywords, sort])
+  }, [index, deferredQuery, keywords, sort, filter])
 
   const toggleKeyword = (kw: string) =>
     setKeywords((prev) =>
@@ -217,7 +226,7 @@ function PromptLibrary({
           inputRef={searchRef}
           placeholder="Kërko sipas titullit, keywords, tekstit ose path…  ( / )"
         />
-        <Select value={filter} onValueChange={(v) => setFilter(v as LibraryFilter)}>
+        <Select value={filter} onValueChange={(v) => setFilter(v as PromptFilter)}>
           <SelectTrigger className="h-9 w-full bg-white md:w-56"><SelectValue /></SelectTrigger>
           <SelectContent>
             {LIBRARY_FILTERS.map((f) => (
@@ -243,7 +252,7 @@ function PromptLibrary({
           {waitingForMe > 0 ? (
             <button
               type="button"
-              onClick={() => setFilter(isManager && counts.PENDING_APPROVAL ? "PENDING_APPROVAL" : "PENDING_TEST")}
+              onClick={() => { setFilter("WAITING_FOR_ME"); setQuery(""); setKeywords([]) }}
               className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 font-medium text-amber-800 hover:bg-amber-100"
             >
               {waitingForMe} {waitingForMe === 1 ? "prompt pret" : "prompte presin"} veprimin tënd
@@ -379,13 +388,15 @@ function PromptLibrary({
 /* Prompt Notes                                                               */
 /* ========================================================================== */
 
-type StageFilter = PromptNoteStage | "ALL" | "ACTIVE"
-const STAGE_FILTERS: { id: StageFilter; label: string }[] = [
+const STAGE_FILTERS: { id: PromptNoteFilter; label: string }[] = [
   { id: "ACTIVE", label: "Aktive" },
   { id: "NO_TASK", label: "Pa detyrë" },
   { id: "TASK_OPEN", label: "Pending" },
   { id: "READY", label: "Gati për prompt" },
   { id: "IN_REVIEW", label: "Në shqyrtim" },
+  { id: "PENDING_TEST", label: "Në pritje të testimit" },
+  { id: "PENDING_APPROVAL", label: "Në pritje të konfirmimit" },
+  { id: "REJECTED", label: "Kthyer mbrapa" },
   { id: "DONE", label: "Në librari" },
   { id: "CLOSED", label: "Mbyllur" },
   { id: "ALL", label: "Të gjitha" },
@@ -427,7 +438,7 @@ function PromptNotes({
   const [priority, setPriority] = React.useState<"NORMAL" | "HIGH">("NORMAL")
   const [departmentId, setDepartmentId] = React.useState("")
   const [posting, setPosting] = React.useState(false)
-  const [filter, setFilter] = React.useState<StageFilter>("ACTIVE")
+  const [filter, setFilter] = React.useState<PromptNoteFilter>("ACTIVE")
   const [query, setQuery] = React.useState("")
 
   React.useEffect(() => {
@@ -486,17 +497,12 @@ function PromptNotes({
 
   const staged = React.useMemo(() => notes.map((n) => ({ note: n, stage: promptNoteStage(n) })), [notes])
   const counts = React.useMemo(() => {
-    const c = new Map<StageFilter, number>()
-    for (const { stage } of staged) c.set(stage, (c.get(stage) || 0) + 1)
-    c.set("ALL", staged.length)
-    c.set("ACTIVE", staged.filter((s) => s.stage !== "DONE" && s.stage !== "CLOSED").length)
-    return c
-  }, [staged])
+    return new Map(STAGE_FILTERS.map(({ id }) => [id, notes.filter((n) => promptNoteMatchesFilter(n, id)).length]))
+  }, [notes])
   const rows = React.useMemo(() => {
     const q = normalizeText(query.trim())
-    return staged.filter(({ note, stage }) => {
-      if (filter === "ACTIVE" && (stage === "DONE" || stage === "CLOSED")) return false
-      if (filter !== "ACTIVE" && filter !== "ALL" && stage !== filter) return false
+    return staged.filter(({ note }) => {
+      if (!promptNoteMatchesFilter(note, filter)) return false
       if (!q) return true
       const hay = normalizeText(
         [note.content, note.created_by?.full_name, ...note.tasks.map((t) => `${t.title} ${t.assignee?.full_name || ""}`), ...note.prompts.map((p) => p.title)].join(" ")
@@ -547,7 +553,7 @@ function PromptNotes({
 
       <Toolbar>
         <SearchBox value={query} onChange={setQuery} placeholder="Kërko te kërkesat, detyrat, personat…" />
-        <Select value={filter} onValueChange={(v) => setFilter(v as StageFilter)}>
+        <Select value={filter} onValueChange={(v) => setFilter(v as PromptNoteFilter)}>
           <SelectTrigger className="h-9 w-full bg-white md:w-56"><SelectValue /></SelectTrigger>
           <SelectContent>
             {STAGE_FILTERS.map((f) => (
@@ -583,7 +589,7 @@ function PromptNotes({
             rows.map(({ note, stage }, i) => {
               const stageMeta = NOTE_STAGE_META[stage]
               const canManage = isManager || note.created_by?.id === user?.id
-              const canAddPrompt = note.tasks.length > 0 && (stage === "READY" || stage === "TASK_OPEN")
+              const canAddPrompt = note.tasks.length > 0 && note.prompts.length === 0 && (stage === "READY" || stage === "TASK_OPEN")
               return (
                 <tr key={note.id} className="hover:bg-slate-50/60">
                   <td className={cn(TD, "text-center font-medium tabular-nums text-muted-foreground")}>{i + 1}</td>
@@ -592,7 +598,7 @@ function PromptNotes({
                     {note.priority === "HIGH" ? <span className="mt-1 inline-block rounded bg-red-600 px-1.5 text-[10px] font-bold text-white">HIGH</span> : null}
                   </td>
                   <td className={TD}>
-                    {note.tasks.length ? (
+                    {note.tasks.length || note.prompts.some((p) => p.test_task_status) ? (
                       <ul className="space-y-1">
                         {note.tasks.map((t) => (
                           <li key={t.id} className="leading-snug">
@@ -600,6 +606,15 @@ function PromptNotes({
                             {t.due_date ? <span className="block text-[11px] text-muted-foreground">Afati {formatDate(t.due_date)}</span> : null}
                           </li>
                         ))}
+                        {note.prompts.filter((p) => p.test_task_status).map((p) => {
+                          const status = TASK_STATUS_META[p.test_task_status!] ?? { label: p.test_task_status!, className: "" }
+                          return (
+                            <li key={`test-${p.id}`} className="leading-snug">
+                              PROMPT: TESTO: {p.title}
+                              <span className="mt-0.5 block"><Pill label={status.label} className={status.className} /></span>
+                            </li>
+                          )
+                        })}
                       </ul>
                     ) : <span className="text-muted-foreground">—</span>}
                   </td>
@@ -714,6 +729,8 @@ function PromptNotes({
 /* Page                                                                       */
 /* ========================================================================== */
 
+type PromptsView = "library" | "notes"
+
 function ViewSwitch({
   view,
   onChange,
@@ -721,13 +738,13 @@ function ViewSwitch({
   notesCount,
   readyCount,
 }: {
-  view: "library" | "notes"
-  onChange: (v: "library" | "notes") => void
+  view: PromptsView
+  onChange: (v: PromptsView) => void
   libraryCount: number
   notesCount: number
   readyCount: number
 }) {
-  const item = (id: "library" | "notes", label: string, Icon: typeof BookOpen, count: number, extra?: React.ReactNode) => {
+  const item = (id: PromptsView, label: string, Icon: typeof BookOpen, count?: number, extra?: React.ReactNode) => {
     const active = view === id
     return (
       <button
@@ -742,14 +759,13 @@ function ViewSwitch({
       >
         <Icon className="h-4 w-4" />
         {label}
-        <span className={cn("rounded px-1.5 text-xs tabular-nums", active ? "bg-white/20" : "bg-slate-200 text-slate-700")}>{count}</span>
+        {count !== undefined ? <span className={cn("rounded px-1.5 text-xs tabular-nums", active ? "bg-white/20" : "bg-slate-200 text-slate-700")}>{count}</span> : null}
         {extra}
       </button>
     )
   }
   return (
-    <div role="tablist" className="inline-flex gap-1 rounded-lg border bg-white p-1">
-      {item("library", "Prompt Library", BookOpen, libraryCount)}
+    <div role="tablist" className="inline-flex flex-wrap gap-1 rounded-lg border bg-white p-1">
       {item(
         "notes",
         "Notes",
@@ -759,6 +775,7 @@ function ViewSwitch({
           <span className="rounded bg-violet-600 px-1.5 text-[10px] font-bold text-white" title="Gati për prompt">{readyCount}</span>
         ) : null
       )}
+      {item("library", "Prompt Library", BookOpen, libraryCount)}
     </div>
   )
 }
@@ -768,7 +785,8 @@ function PromptsPageInner() {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const view: "library" | "notes" = searchParams.get("view") === "notes" ? "notes" : "library"
+  const requestedView = searchParams.get("view")
+  const view: PromptsView = requestedView === "library" ? "library" : "notes"
 
   const [prompts, setPrompts] = React.useState<KnowledgePrompt[]>([])
   const [notes, setNotes] = React.useState<PromptNote[]>([])
@@ -829,10 +847,10 @@ function PromptsPageInner() {
     }
   }
 
-  const setView = (next: "library" | "notes") => {
+  const setView = (next: PromptsView) => {
     const params = new URLSearchParams(searchParams.toString())
-    if (next === "notes") params.set("view", "notes")
-    else params.delete("view")
+    if (next === "notes") params.delete("view")
+    else params.set("view", "library")
     const qs = params.toString()
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
   }
@@ -844,11 +862,11 @@ function PromptsPageInner() {
   }
 
   const readyCount = notes.filter((n) => promptNoteStage(n) === "READY").length
-  const activeNotes = notes.filter((n) => {
-    const s = promptNoteStage(n)
-    return s !== "DONE" && s !== "CLOSED"
-  }).length
+  const activeNotes = notes.filter((n) => promptNoteMatchesFilter(n, "ACTIVE")).length
   const approvedCount = prompts.filter((p) => p.status === "APPROVED").length
+  // Prompts created without a request still need to be visible in the work queue.
+  const notesById = new Set(notes.map((n) => n.id))
+  const unlinkedPendingPrompts = prompts.filter((p) => p.status !== "APPROVED" && (!p.source_note_id || !notesById.has(p.source_note_id)))
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-4">
@@ -861,29 +879,51 @@ function PromptsPageInner() {
           view={view}
           onChange={setView}
           libraryCount={approvedCount}
-          notesCount={activeNotes}
+          notesCount={activeNotes + unlinkedPendingPrompts.length}
           readyCount={readyCount}
         />
       </div>
 
+      {view === "notes" ? (
+        <section className="space-y-3" aria-label="Kërkesat dhe detyrat për prompte">
+          <PromptNotes
+            key={`notes-${view}`}
+            notes={notes}
+            loading={loadingNotes}
+            departments={departments}
+            prompts={prompts}
+            reload={reloadAll}
+            onAddPrompt={(note) => { setEditing(null); setSourceNote(note); setFormOpen(true) }}
+            onOpenPrompt={setDetail}
+          />
+          {unlinkedPendingPrompts.length > 0 ? (
+            <div className="space-y-3">
+              <h2 className="text-base font-semibold">Promptet pa kërkesë · testim dhe konfirmim</h2>
+              <PromptLibrary
+                key="unlinked-prompts"
+                prompts={unlinkedPendingPrompts}
+                loading={loadingPrompts}
+                onOpen={setDetail}
+                onAdd={() => { setEditing(null); setSourceNote(null); setFormOpen(true) }}
+                initialFilter="ALL"
+              />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       {view === "library" ? (
-        <PromptLibrary
-          prompts={prompts}
-          loading={loadingPrompts}
-          onOpen={setDetail}
-          onAdd={() => { setEditing(null); setSourceNote(null); setFormOpen(true) }}
-        />
-      ) : (
-        <PromptNotes
-          notes={notes}
-          loading={loadingNotes}
-          departments={departments}
-          prompts={prompts}
-          reload={reloadAll}
-          onAddPrompt={(note) => { setEditing(null); setSourceNote(note); setFormOpen(true) }}
-          onOpenPrompt={setDetail}
-        />
-      )}
+        <section className="space-y-3" aria-label="Promptet">
+          <PromptLibrary
+            key={`prompts-${view}`}
+            prompts={prompts}
+            loading={loadingPrompts}
+            onOpen={setDetail}
+            onAdd={() => { setEditing(null); setSourceNote(null); setFormOpen(true) }}
+            initialFilter="APPROVED"
+          />
+        </section>
+      ) : null}
 
       <PromptFormDialog open={formOpen} onOpenChange={setFormOpen} prompt={editing} sourceNote={sourceNote} onSaved={onSaved} />
       <PromptDetailDialog
