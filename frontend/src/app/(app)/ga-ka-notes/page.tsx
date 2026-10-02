@@ -2756,12 +2756,12 @@ export default function GaKaNotesPage() {
     }
   }
 
-  const markNoteDiscussed = async (id: string) => {
+  const toggleNoteDiscussed = async (id: string, isDiscussed: boolean) => {
     const source = notes.find((note) => note.id === id)?.source
     const res = await apiFetch(`/${source === "PX_JAV" ? "plan-notes" : "ga-notes"}/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ is_discussed: true }),
+      body: JSON.stringify({ is_discussed: isDiscussed }),
     })
     if (res?.ok) {
       const updated = (await res.json()) as GaNote
@@ -2769,7 +2769,7 @@ export default function GaKaNotesPage() {
         prev.map((n) => (n.id === id ? { ...updated, source: n.source } : n))
       )
     } else {
-      toast.error("Failed to mark note discussed")
+      toast.error("Failed to update discussion status")
     }
   }
 
@@ -4306,21 +4306,18 @@ export default function GaKaNotesPage() {
                         </td>
                         <td className="border border-slate-600 p-1 align-middle whitespace-nowrap min-w-[50px] w-[50px] max-w-[50px]" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex justify-center">
-                            {note.is_discussed ? (
-                              <Badge className="text-[10px] px-2 py-0 bg-emerald-600 text-white border border-emerald-700 h-6 flex items-center font-semibold">
-                                YES
-                              </Badge>
-                            ) : (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-6 px-2 text-[11px] border-dashed border-slate-300 bg-white text-slate-500 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700"
-                                title="Mark as discussed"
-                                onClick={() => void markNoteDiscussed(note.id)}
-                              >
-                                YES
-                              </Button>
-                            )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className={note.is_discussed
+                                ? "h-6 px-2 text-[10px] bg-emerald-600 text-white border-emerald-700 font-semibold hover:bg-emerald-700 hover:text-white"
+                                : "h-6 px-2 text-[11px] border-dashed border-slate-300 bg-white text-slate-500 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700"}
+                              aria-pressed={Boolean(note.is_discussed)}
+                              title={note.is_discussed ? "Mark as not discussed" : "Mark as discussed"}
+                              onClick={() => void toggleNoteDiscussed(note.id, !note.is_discussed)}
+                            >
+                              YES
+                            </Button>
                           </div>
                         </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap w-[96px]" style={{ verticalAlign: 'bottom' }}>

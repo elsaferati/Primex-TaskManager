@@ -3,13 +3,18 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0135_realization_daily_comments"
-down_revision = "0134_knowledge_prompt_tester"
+revision = "0136_person_comments"
+down_revision = "0135_realization_daily_comments"
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
+    # The previous duplicate revision could already have created this table.
+    from sqlalchemy import inspect
+
+    if inspect(op.get_bind()).has_table("realization_daily_person_comments"):
+        return
     op.create_table(
         "realization_daily_person_comments",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),

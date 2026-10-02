@@ -103,7 +103,9 @@ async def run_morning_report_scheduler_once(now: datetime | None = None) -> bool
             ]
         from app.services.meeting_point_manual_sync import merge_common_view_manual_sections
 
-        sections = await merge_common_view_manual_sections(db, sections, "morning", existing_sections)
+        sections = await merge_common_view_manual_sections(
+            db, sections, "morning", existing_sections, getattr(settings, "manual_questions", [])
+        )
         if row is None:
             row = MorningReportDraft(
                 report_date=report_day,

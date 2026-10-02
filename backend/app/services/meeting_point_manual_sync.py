@@ -63,6 +63,43 @@ def removes_custom_manual_section(
     return bool(existing_keys - incoming_keys)
 
 
+def custom_manual_questions(sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    """Return the persistent identity and title, without a day's answer."""
+    return [
+        {SECTION_KEY_FIELD: str(section[SECTION_KEY_FIELD]), "title": str(section["title"])}
+        for section in sections or []
+        if str(section.get(SECTION_KEY_FIELD) or "").startswith("manual:custom:")
+        and str(section.get("title") or "").strip()
+    ]
+
+
+def reconcile_custom_manual_questions(
+    persistent: list[dict[str, Any]] | None,
+    previous: list[dict[str, Any]],
+    current: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Apply changes from one draft without erasing questions added in another draft."""
+    previous_keys = {str(item.get(SECTION_KEY_FIELD) or "") for item in previous}
+    current_by_key = {
+        str(item[SECTION_KEY_FIELD]): {
+            SECTION_KEY_FIELD: str(item[SECTION_KEY_FIELD]),
+            "title": str(item["title"]),
+        }
+        for item in current
+    }
+    deleted_keys = previous_keys - current_by_key.keys()
+    result = [
+        current_by_key.pop(str(item.get(SECTION_KEY_FIELD) or ""), {
+            SECTION_KEY_FIELD: str(item.get(SECTION_KEY_FIELD) or ""),
+            "title": str(item.get("title") or ""),
+        })
+        for item in persistent or []
+        if str(item.get(SECTION_KEY_FIELD) or "") not in deleted_keys
+    ]
+    result.extend(current_by_key.values())
+    return result
+
+
 def _compact(value: str | None) -> str:
     return re.sub(r"[^A-Z0-9]+", "", (value or "").upper())
 
@@ -282,6 +319,7 @@ async def merge_common_view_manual_sections(
     sections: list[dict[str, str]],
     kind: ReportKind,
     existing_sections: list[dict[str, Any]] | None = None,
+    persistent_questions: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     """Insert Common View pikes that are not already known report questions as manuals."""
     _, manuals, _ = _report_title_sets(kind)
@@ -303,6 +341,13 @@ async def merge_common_view_manual_sections(
                 "title": title,
                 "body": str(section.get("body") or DEFAULT_MANUAL_BODY),
             })
+    existing_keys = {section[SECTION_KEY_FIELD] for section in extras}
+    for question in persistent_questions or []:
+        key = str(question.get(SECTION_KEY_FIELD) or "")
+        title = str(question.get("title") or "").strip()
+        if key.startswith("manual:custom:") and title and key not in existing_keys:
+            extras.append({SECTION_KEY_FIELD: key, "title": title, "body": DEFAULT_MANUAL_BODY})
+            existing_keys.add(key)
     for title in await load_common_view_extra_titles(db, kind):
         extras.append(
             {

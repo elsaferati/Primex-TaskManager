@@ -24,7 +24,13 @@ from app.services.meetings_report import (
     send_meetings_report,
     subject_for,
 )
-from app.services.meeting_point_manual_sync import merge_common_view_manual_sections, removes_custom_manual_section, with_section_keys
+from app.services.meeting_point_manual_sync import (
+    custom_manual_questions,
+    merge_common_view_manual_sections,
+    reconcile_custom_manual_questions,
+    removes_custom_manual_section,
+    with_section_keys,
+)
 from app.services.report_section_merge import preserve_manual_sections
 from app.services.primeflow_report import report_timezone
 from app.services.primeflow_report_access import can_manage_reports
@@ -159,7 +165,10 @@ async def _normalize_saved_draft_sections(db: AsyncSession, row: MeetingsReportD
     from sqlalchemy.orm.attributes import flag_modified
 
     sections = with_section_keys("meetings", row.sections)
-    sections = await merge_common_view_manual_sections(db, sections, "meetings", row.sections)
+    settings = await _get_or_create_settings(db)
+    sections = await merge_common_view_manual_sections(
+        db, sections, "meetings", row.sections, settings.manual_questions
+    )
     sections = normalize_meetings_report_sections(sections)
     if sections != (row.sections or []):
         row.sections = sections
@@ -261,8 +270,10 @@ async def generate_draft(
     ).scalar_one_or_none()
     if row is not None:
         sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
+    settings = await _get_or_create_settings(db)
     sections = await merge_common_view_manual_sections(
-        db, sections, "meetings", row.sections if row is not None else None
+        db, sections, "meetings", row.sections if row is not None else None,
+        settings.manual_questions,
     )
     if row is None:
         row = MeetingsReportDraft(
@@ -317,7 +328,7 @@ async def update_draft(
         ):
             raise HTTPException(status_code=403, detail="Only admin can delete manually added report points")
         # Keep user-edited question titles as saved (do not remap via normalize).
-        row.sections = with_section_keys("meetings", [
+        saved = with_section_keys("meetings", [
             {
                 "section_key": section.section_key,
                 "title": (section.title or "").strip() or "Untitled",
@@ -325,6 +336,14 @@ async def update_draft(
             }
             for section in payload.sections
         ])
+        previous_questions = custom_manual_questions(row.sections)
+        current_questions = custom_manual_questions(saved)
+        if current_questions != previous_questions:
+            settings = await _get_or_create_settings(db)
+            settings.manual_questions = reconcile_custom_manual_questions(
+                settings.manual_questions, previous_questions, current_questions
+            )
+        row.sections = saved
     row.status = "DRAFT" if row.status != "SENT" else row.status
     row.updated_by_user_id = user.id
     await db.commit()

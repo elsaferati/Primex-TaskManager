@@ -15,7 +15,13 @@ from app.models.morning_report_draft import MorningReportDraft
 from app.models.morning_report_settings import MorningReportSettings
 from app.models.enums import UserRole
 from app.models.user import User
-from app.services.meeting_point_manual_sync import merge_common_view_manual_sections, removes_custom_manual_section, with_section_keys
+from app.services.meeting_point_manual_sync import (
+    custom_manual_questions,
+    merge_common_view_manual_sections,
+    reconcile_custom_manual_questions,
+    removes_custom_manual_section,
+    with_section_keys,
+)
 from app.services.morning_report import (
     MANUAL_SECTION_TITLES,
     SECTION_TITLES,
@@ -228,7 +234,10 @@ async def get_draft(
     # remain visible in a previously generated or sent report indefinitely.
     sections = normalize_morning_report_sections(row.sections)
     sections = await apply_ga_hv_dv_tasks_table(db, sections, row.report_date)
-    sections = await merge_common_view_manual_sections(db, sections, "morning", row.sections)
+    settings = await _get_or_create_settings(db)
+    sections = await merge_common_view_manual_sections(
+        db, sections, "morning", row.sections, settings.manual_questions
+    )
     if sections != row.sections:
         row.sections = sections
         await db.commit()
@@ -271,7 +280,10 @@ async def generate_draft(
             }
             for section in sections
         ]
-    sections = await merge_common_view_manual_sections(db, sections, "morning", existing_sections)
+    settings = await _get_or_create_settings(db)
+    sections = await merge_common_view_manual_sections(
+        db, sections, "morning", existing_sections, settings.manual_questions
+    )
     sections = normalize_morning_report_sections(sections)
     if row is None:
         row = MorningReportDraft(
@@ -319,14 +331,22 @@ async def update_draft(
         ):
             raise HTTPException(status_code=403, detail="Only admin can delete manually added report points")
         # Keep user-edited question titles as saved (do not remap via normalize).
-        row.sections = normalize_morning_report_sections(with_section_keys("morning", [
+        saved = with_section_keys("morning", [
             {
                 "section_key": section.section_key,
                 "title": (section.title or "").strip() or "Untitled",
                 "body": section.body or "",
             }
             for section in payload.sections
-        ]))
+        ])
+        previous_questions = custom_manual_questions(row.sections)
+        current_questions = custom_manual_questions(saved)
+        if current_questions != previous_questions:
+            settings = await _get_or_create_settings(db)
+            settings.manual_questions = reconcile_custom_manual_questions(
+                settings.manual_questions, previous_questions, current_questions
+            )
+        row.sections = normalize_morning_report_sections(saved)
     row.status = "DRAFT" if row.status != "SENT" else row.status
     row.updated_by_user_id = user.id
     await db.commit()

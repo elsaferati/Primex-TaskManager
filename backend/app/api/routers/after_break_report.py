@@ -27,7 +27,13 @@ from app.services.after_break_report import (
     send_after_break_report,
     subject_for,
 )
-from app.services.meeting_point_manual_sync import merge_common_view_manual_sections, removes_custom_manual_section, with_section_keys
+from app.services.meeting_point_manual_sync import (
+    custom_manual_questions,
+    merge_common_view_manual_sections,
+    reconcile_custom_manual_questions,
+    removes_custom_manual_section,
+    with_section_keys,
+)
 from app.services.report_section_merge import preserve_manual_sections
 from app.services.meetings_report_scheduler import DEFAULT_RECIPIENTS, normalize_recipients
 from app.services.primeflow_report import report_timezone
@@ -157,7 +163,10 @@ async def _draft_with_questions(db: AsyncSession, row: AfterBreakReportDraft) ->
     sections = await apply_1h_confirmation_questions(db, sections)
     sections = await apply_unfinished_priority_task_table(db, sections, row.report_date)
     sections = await apply_waiting_client_task_table(db, sections, row.report_date)
-    sections = await merge_common_view_manual_sections(db, sections, "after_break", row.sections)
+    settings = await _get_or_create_settings(db)
+    sections = await merge_common_view_manual_sections(
+        db, sections, "after_break", row.sections, settings.manual_questions
+    )
     return _draft(row, sections)
 
 
@@ -236,7 +245,10 @@ async def get_draft(
         raise HTTPException(status_code=404, detail="Draft not found")
     sections = with_section_keys("after_break", row.sections)
     sections = await apply_1h_confirmation_questions(db, sections)
-    sections = await merge_common_view_manual_sections(db, sections, "after_break", row.sections)
+    settings = await _get_or_create_settings(db)
+    sections = await merge_common_view_manual_sections(
+        db, sections, "after_break", row.sections, settings.manual_questions
+    )
     if sections != row.sections:
         row.sections = sections
         await db.commit()
@@ -261,7 +273,10 @@ async def generate_draft(
     existing_sections = row.sections if row is not None else None
     if row is not None:
         sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
-    sections = await merge_common_view_manual_sections(db, sections, "after_break", existing_sections)
+    settings = await _get_or_create_settings(db)
+    sections = await merge_common_view_manual_sections(
+        db, sections, "after_break", existing_sections, settings.manual_questions
+    )
     if row is None:
         row = AfterBreakReportDraft(
             report_date=report_date,
@@ -315,6 +330,13 @@ async def update_draft(
             }
             for section in payload.sections
         ])
+        previous_questions = custom_manual_questions(row.sections)
+        current_questions = custom_manual_questions(saved)
+        if current_questions != previous_questions:
+            settings = await _get_or_create_settings(db)
+            settings.manual_questions = reconcile_custom_manual_questions(
+                settings.manual_questions, previous_questions, current_questions
+            )
         row.sections = await apply_1h_confirmation_questions(db, saved)
     row.status = "DRAFT" if row.status != "SENT" else row.status
     row.updated_by_user_id = user.id
