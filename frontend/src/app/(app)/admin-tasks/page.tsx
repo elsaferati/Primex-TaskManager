@@ -4449,6 +4449,20 @@ export default function AdminTasksPage() {
     }
   }
 
+  // Direct link for phones: /admin-tasks#ga-time-table opens the page at the GA
+  // time table. The sections above it load late and push it down, so the
+  // scroll is repeated while the page settles.
+  React.useEffect(() => {
+    if (window.location.hash !== "#ga-time-table") return
+    setCollapsedAdminSections((current) => (current["ga-time"] ? { ...current, "ga-time": false } : current))
+    const timers = [0, 400, 1000, 2000, 3500].map((delay) =>
+      window.setTimeout(() => {
+        document.getElementById("ga-time-table")?.scrollIntoView({ block: "start" })
+      }, delay)
+    )
+    return () => timers.forEach((timer) => window.clearTimeout(timer))
+  }, [])
+
   const sectionCardClass = "rounded-xl border border-slate-200 bg-white shadow-sm"
   const sectionHeaderClass = "flex flex-wrap items-center justify-center gap-3"
 
@@ -7309,7 +7323,7 @@ export default function AdminTasksPage() {
               </div>
             </div>
           </div>
-          <div className="print:hidden">
+          <div id="ga-time-table" className="scroll-mt-4 print:hidden">
           <AdminTasksSection
             sectionId="ga-time"
             title={`GA TIME TABLE${weekTitleRange ? ` (${weekTitleRange})` : ""}`}
