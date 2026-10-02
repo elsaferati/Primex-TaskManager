@@ -35,6 +35,13 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         return
       }
 
+      // A phone held sideways is wide enough to count as desktop. The GA time
+      // table link is used that way, and the table needs the full width.
+      if (window.location.pathname.startsWith("/admin-tasks") && window.location.hash === "#ga-time-table") {
+        setIsOpen(false)
+        return
+      }
+
       const savedPreference = window.localStorage.getItem(SIDEBAR_STORAGE_KEY)
       setIsOpen(savedPreference == null ? true : savedPreference === "true")
     }
