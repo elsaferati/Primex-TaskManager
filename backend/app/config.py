@@ -107,6 +107,7 @@ class Settings(BaseSettings):
     SKILLS_AI_MODEL: str = "gpt-5.4-nano"
     SKILLS_AI_TIMEOUT_SECONDS: int = 20
     SPEECH_TRANSCRIBE_MODEL: str = "whisper-1"
+    SPEECH_ALBANIAN_TRANSCRIBE_MODEL: str = "gpt-4o-transcribe"
     SPEECH_MAX_FILE_MB: int = 20
     SPEECH_ALLOWED_MIME: str | None = None
     REALIZATION_TIMEZONE: str = "Europe/Tirane"
