@@ -39,57 +39,43 @@ jobs:
         id: changes
         shell: powershell
         run: |
-          $before = "${{ github.event.before }}"
+          # Each surface records the commit it last deployed successfully. A
+          # surface is redeployed only when its own files differ from that
+          # commit, so a backend push no longer rebuilds and restarts the
+          # frontend, and a failed deploy is retried by the next push because
+          # its marker was never advanced.
+          $stateDir = Join-Path $env:PM2_HOME "primeflow-deploy"
+          New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
           $after = "${{ github.sha }}"
-          if ([string]::IsNullOrWhiteSpace($before) -or $before -eq "0000000000000000000000000000000000000000") {
-            try {
-              $before = (git rev-parse "$after^").Trim()
-            } catch {
-              $before = $after
+
+          function Test-SurfaceChanged {
+            param([string]$Name, [string]$PathPrefix)
+
+            $marker = Join-Path $stateDir "$Name.sha"
+            if (-not (Test-Path $marker)) {
+              Write-Host "${Name}: no deploy marker yet; deploying."
+              return $true
             }
-          }
- 
-          $changedFiles = @(git diff --name-only $before $after | Where-Object { $_ -and $_.Trim() -ne "" })
-          Write-Host "Comparing commits: $before -> $after"
-          Write-Host "Changed files:"
-          if ($changedFiles.Count -eq 0) {
-            Write-Host " - <none>"
-          } else {
-            $changedFiles | ForEach-Object { Write-Host " - $_" }
-          }
- 
-          $backendChanged = $false
-          $frontendChanged = $false
-          $migrationChanged = $false
- 
-          foreach ($file in $changedFiles) {
-            if ($file -like "backend/*") {
-              $backendChanged = $true
+            $deployed = (Get-Content $marker -Raw).Trim()
+            git rev-parse --verify --quiet "$($deployed)^{commit}" | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "${Name}: marker commit '$deployed' is unknown; deploying."
+              return $true
             }
-            if ($file -like "frontend/*") {
-              $frontendChanged = $true
-            }
-            if ($file -eq ".github/workflows/deploy.yml") {
-              $backendChanged = $true
-              $frontendChanged = $true
-            }
-            if ($file -like "backend/alembic/versions/*") {
-              $migrationChanged = $true
-            }
+            $files = @(git diff --name-only $deployed $after | Where-Object { $_ -and $_.Trim() -ne "" })
+            $relevant = @($files | Where-Object { $_ -like "$PathPrefix/*" -or $_ -eq ".github/workflows/deploy.yml" })
+            Write-Host "${Name}: last deployed $deployed, $($relevant.Count) relevant changed file(s)."
+            $relevant | ForEach-Object { Write-Host " - $_" }
+            return ($relevant.Count -gt 0)
           }
 
-          # A backend or migration failure stops this workflow before the frontend
-          # deployment step. The next corrective commit may touch only backend
-          # files, while the server is still running an older frontend build.
-          # Deploying the frontend with backend changes keeps both production
-          # surfaces on the same checked-out commit after recovery.
-          if ($backendChanged) {
-            $frontendChanged = $true
-          }
- 
+          $backendChanged = Test-SurfaceChanged -Name "backend" -PathPrefix "backend"
+          $frontendChanged = Test-SurfaceChanged -Name "frontend" -PathPrefix "frontend"
+
           "backend_changed=$($backendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "frontend_changed=$($frontendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "migration_changed=$($migrationChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          # A failed marker lookup above must not fail the step.
+          exit 0
  
       - name: Create Env Files
         shell: cmd
@@ -504,6 +490,9 @@ jobs:
             Write-Error "Public API /health not serving deployed build $expected (last seen: $lastBuild). A stale process may be holding port $port."
             exit 1
           }
+
+          $stateDir = Join-Path $env:PM2_HOME "primeflow-deploy"
+          Set-Content -Path (Join-Path $stateDir "backend.sha") -Value $expected -Encoding ascii
  
       - name: Update Frontend
         if: ${{ steps.changes.outputs.frontend_changed == 'true' }}
@@ -673,6 +662,8 @@ jobs:
             exit 1
           }
           Write-Host "Frontend readiness check: OK ($expectedDeploymentId)"
+          $stateDir = Join-Path $env:PM2_HOME "primeflow-deploy"
+          Set-Content -Path (Join-Path $stateDir "frontend.sha") -Value $expectedDeploymentId -Encoding ascii
  
       - name: Save PM2 Process List
         if: ${{ steps.changes.outputs.backend_changed == 'true' || steps.changes.outputs.frontend_changed == 'true' }}

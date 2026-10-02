@@ -27,6 +27,11 @@ const SESSION_TIMEOUT_EXEMPT_USERNAMES = new Set(["gane.arifaj"])
 const FETCH_TIMEOUT_MS = 20000
 // Refresh token when it has less than 3 minutes remaining (15 min total - 3 min buffer = 12 min)
 const TOKEN_REFRESH_BUFFER_MS = 3 * 60 * 1000 // 3 minutes in milliseconds
+// A deploy restarts the API for some seconds. GET requests wait through that
+// window (about 25s in total) before reporting a network error.
+const RESTART_RETRY_DELAYS_MS = [1000, 2000, 3000, 4000, 5000, 5000, 5000]
+// Gateway answers meaning "the API process is not listening", not app errors.
+const ORIGIN_DOWN_STATUSES = new Set([502, 521, 523, 530])
 let refreshPromise: Promise<string | null> | null = null
 const inFlightGetRequests = new Map<string, Promise<Response>>()
 const referenceResponseCache = new Map<string, { response: Response; expiresAt: number }>()
@@ -498,10 +503,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const headers = new Headers(init.headers)
       if (currentToken) headers.set("Authorization", `Bearer ${currentToken}`)
 
-      const doFetch = (overrideToken?: string | null, overrideUrl?: string) => {
+      const isReadRequest = (init.method || "GET").toUpperCase() === "GET"
+      const doFetch = async (overrideToken?: string | null, overrideUrl?: string) => {
         const h = new Headers(headers)
         if (overrideToken) h.set("Authorization", `Bearer ${overrideToken}`)
-        return fetch(overrideUrl || url, { ...init, headers: h, credentials: "include" })
+        const fetchOnce = () => fetch(overrideUrl || url, { ...init, headers: h, credentials: "include" })
+        // Writes are never repeated: a lost response does not prove the server
+        // did not apply the change.
+        if (!isReadRequest) return fetchOnce()
+
+        // Reads ride out a backend restart (deploy) instead of failing at once.
+        for (let attempt = 0; ; attempt += 1) {
+          const lastAttempt = attempt >= RESTART_RETRY_DELAYS_MS.length
+          try {
+            const res = await fetchOnce()
+            if (lastAttempt || !ORIGIN_DOWN_STATUSES.has(res.status)) return res
+          } catch (err) {
+            const aborted = init.signal?.aborted || (err as { name?: string } | null)?.name === "AbortError"
+            if (lastAttempt || aborted) throw err
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, RESTART_RETRY_DELAYS_MS[attempt]))
+        }
       }
 
       const executeRequest = async (): Promise<Response> => {
