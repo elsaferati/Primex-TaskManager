@@ -27,7 +27,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       setIsDesktop(nextIsDesktop)
 
       if (!nextIsDesktop) {
-        setIsOpen(true)
+        // Admin Tasks is opened on phones straight at the GA time table; the
+        // menu must not cover it. It still opens from the top bar button.
+        setIsOpen(!window.location.pathname.startsWith("/admin-tasks"))
         return
       }
 

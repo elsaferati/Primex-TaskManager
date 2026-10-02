@@ -4455,12 +4455,23 @@ export default function AdminTasksPage() {
   React.useEffect(() => {
     if (window.location.hash !== "#ga-time-table") return
     setCollapsedAdminSections((current) => (current["ga-time"] ? { ...current, "ga-time": false } : current))
-    const timers = [0, 400, 1000, 2000, 3500].map((delay) =>
-      window.setTimeout(() => {
-        document.getElementById("ga-time-table")?.scrollIntoView({ block: "start" })
-      }, delay)
-    )
-    return () => timers.forEach((timer) => window.clearTimeout(timer))
+    const startedAt = Date.now()
+    let timer = 0
+    const stop = () => {
+      window.clearInterval(timer)
+      userEvents.forEach((name) => window.removeEventListener(name, stop))
+    }
+    // Hand control back the moment the user scrolls or taps.
+    const userEvents = ["touchstart", "wheel", "keydown", "mousedown"] as const
+    userEvents.forEach((name) => window.addEventListener(name, stop, { passive: true }))
+    timer = window.setInterval(() => {
+      if (Date.now() - startedAt > 15000) return stop()
+      const table = document.getElementById("ga-time-table")
+      if (table && Math.abs(table.getBoundingClientRect().top) > 24) {
+        table.scrollIntoView({ block: "start" })
+      }
+    }, 250)
+    return stop
   }, [])
 
   const sectionCardClass = "rounded-xl border border-slate-200 bg-white shadow-sm"
