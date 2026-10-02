@@ -1607,7 +1607,17 @@ export default function DepartmentKanban() {
           allUsers = (await usersRes.json()) as UserLookup[]
         }
 
+        // Publish the department as soon as it is known so the daily report
+        // and other per-department requests start alongside the heavy
+        // bootstrap below instead of waiting for it to finish.
+        bootstrapSystemTasksKeyRef.current = `${dep.id}|${systemDateKey}`
+        setDepartments(deps)
+        setDepartment(dep)
+        setUsers(allUsers)
+
         if (!silent) setLoadingExtras(true)
+        // Show the page now; lists fill in when the bootstrap below arrives.
+        if (!silent) setLoading(false)
         const [projRes, sysRes, allSysRes, tasksRes, internalRes, meetingsRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}${showTemplates ? "&include_templates=true" : ""}`),
           apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${systemDateKey}&include_overdue=true`),

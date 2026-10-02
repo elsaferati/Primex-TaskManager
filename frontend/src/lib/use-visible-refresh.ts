@@ -4,15 +4,17 @@ import { useEffect, useRef } from "react"
 
 // Refresh server-owned symbols when returning from another view/browser.
 // Poll only visible pages; never overlap requests or replace an open editor.
-export function useVisibleRefresh(refresh: () => void | Promise<void>, enabled = true, intervalMs = 30000) {
+export function useVisibleRefresh(refresh: () => void | Promise<void>, enabled = true, intervalMs = 120000) {
   const latest = useRef(refresh)
   useEffect(() => { latest.current = refresh }, [refresh])
   useEffect(() => {
     if (!enabled) return
     let running = false
-    let lastRefresh = 0
+    // The page has just loaded its own data; switching tabs or windows should
+    // not trigger another full reload more than once a minute.
+    let lastRefresh = Date.now()
     const run = async () => {
-      if (document.visibilityState !== "visible" || running || Date.now() - lastRefresh < 1000) return
+      if (document.visibilityState !== "visible" || running || Date.now() - lastRefresh < 60000) return
       running = true
       lastRefresh = Date.now()
       try { await latest.current() } catch { /* Keep the last successful data on network errors. */ }

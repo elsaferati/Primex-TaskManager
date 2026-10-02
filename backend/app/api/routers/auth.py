@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from sqlalchemy import select
@@ -102,18 +102,25 @@ async def refresh(
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive user")
 
-    token_row.revoked_at = now
-
-    new_jti = uuid.uuid4().hex
-    new_refresh_token, new_expires_at = create_refresh_token(user_id=user.id, jti=new_jti)
-    db.add(RefreshToken(user_id=user.id, jti=new_jti, expires_at=new_expires_at))
-    await db.commit()
-
-    response.set_cookie(
-        REFRESH_COOKIE_NAME,
-        new_refresh_token,
-        **_refresh_cookie_options(max_age=int((new_expires_at - now).total_seconds())),
-    )
+    # The refresh token is deliberately not rotated here. Rotation logged users
+    # out whenever two tabs refreshed together, or when a slow response was
+    # dropped by the browser after the old token had already been revoked.
+    # It stays valid until logout or its own expiry.
+    #
+    # A session that is still in use must not hit that expiry, so once less
+    # than half the lifetime remains a fresh token is issued alongside it. The
+    # old one is left to expire on its own, which keeps a second tab or a
+    # dropped response from ending the session.
+    if token_row.expires_at - now < timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS / 2):
+        new_jti = uuid.uuid4().hex
+        new_refresh_token, new_expires_at = create_refresh_token(user_id=user.id, jti=new_jti)
+        db.add(RefreshToken(user_id=user.id, jti=new_jti, expires_at=new_expires_at))
+        await db.commit()
+        response.set_cookie(
+            REFRESH_COOKIE_NAME,
+            new_refresh_token,
+            **_refresh_cookie_options(max_age=int((new_expires_at - now).total_seconds())),
+        )
 
     access_token = create_access_token(user_id=user.id, role=user.role.value, department_id=user.department_id)
     return TokenResponse(access_token=access_token)
