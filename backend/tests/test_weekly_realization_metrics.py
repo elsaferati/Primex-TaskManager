@@ -1,3 +1,5 @@
+import pytest
+
 from app.services.realization_calculator import build_live_questions
 from app.services.realization_weekly_metrics import (
     build_weekly_question_metrics,
@@ -33,6 +35,46 @@ def test_extra_work_is_capped_at_full_realization():
         task("A", "planned_owner", "completed_on_time"),
         task("B", "additional_owner", "additional_completed"),
     ], [])
+    assert metrics["weekly_progress_percent"] == 100
+
+
+@pytest.mark.parametrize("planned,completed,extras,postponed,expected", [
+    (5, 3, 2, 2, 90),
+    (5, 4, 1, 1, 95),
+    (5, 5, 2, 0, 100),
+    (10, 6, 2, 2, 75),
+    (10, 8, 5, 2, 95),
+    (100, 23, 0, 0, 23),
+    (5, 0, 0, 5, 0),
+    (3, 2, 0, 1, 58.3),
+])
+def test_postponed_plan_penalty(planned, completed, extras, postponed, expected):
+    tasks = [
+        task(f"P{i}", "planned_owner", "completed" if i < completed else
+             "postponed_approved" if i < completed + postponed else "no_progress")
+        for i in range(planned)
+    ] + [task(f"E{i}", "additional_owner", "additional_completed") for i in range(extras)]
+    metrics = build_weekly_task_metrics(tasks, [])
+    assert metrics["weekly_planned_count"] == planned
+    assert metrics["weekly_all_completed_count"] == completed + extras
+    assert metrics["weekly_postponed_task_count"] == postponed
+    assert metrics["weekly_progress_percent"] == expected
+
+
+def test_completed_postponed_task_no_longer_has_penalty():
+    metrics = build_weekly_task_metrics([task("P", "planned_owner", "postponed_unapproved")], [
+        {"tasks": [task("P", "planned_today", "completed")]},
+    ])
+    assert metrics["weekly_postponed_task_count"] == 0
+    assert metrics["weekly_progress_percent"] == 100
+
+
+def test_extra_postponements_do_not_penalize_plan():
+    metrics = build_weekly_task_metrics([
+        task("P", "planned_owner", "completed"),
+        {**task("E", "additional_owner", "postponed_unapproved"), "progress_today": 20},
+    ], [])
+    assert metrics["weekly_additional_postponed_count"] == 1
     assert metrics["weekly_progress_percent"] == 100
 
 

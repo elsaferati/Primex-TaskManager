@@ -69,7 +69,14 @@ The weekly page displays a compact table with filtered totals followed by a row
 per employee. Managers and administrators can filter all departments or one
 department, and all employees or one employee. The realization percentage counts
 all completed work, including extras, against the baseline planned count, capped at
-100%. With no planned work, extras form the denominator. Extras that remain
+100% before subtracting a postponement penalty. Each unfinished postponed planned
+task deducts `25 / planned_count` percentage points (approved and unapproved alike).
+The final percentage is `max(0, min(100, completed_total / planned_count * 100)
+- postponed_planned_count / planned_count * 25)`, rounded to one decimal.
+For example, five planned tasks, three completed planned tasks, two completed
+extras, and two postponed planned tasks yield 90%, not 100%. Completed tasks no
+longer carry this penalty, even if they were postponed earlier in the week.
+With no planned work, extras form the denominator and there is no plan penalty. Extras that remain
 open do not add completion credit. Snapshot task facts and daily timeline entries
 are deduplicated by task identity. Totals sum employee obligations, so shared
 assignments contribute once per employee; they are not unique department tasks.
