@@ -21,6 +21,7 @@ const AuthContext = React.createContext<AuthContextValue | null>(null)
 
 const ACCESS_TOKEN_KEY = "primex_access_token"
 const LOGOUT_AT_KEY = "primex_logout_at"
+const USER_KEY = "primex_user"
 const SESSION_DURATION_MS = 24 * 60 * 60 * 1000
 const SESSION_TIMEOUT_EXEMPT_USERNAMES = new Set(["gane.arifaj"])
 // Auth calls must outlast a busy server; a timeout here must never end the session.
@@ -111,8 +112,33 @@ function getStoredToken(): string | null {
 
 function setStoredToken(token: string | null) {
   if (typeof window === "undefined") return
-  if (!token) window.localStorage.removeItem(ACCESS_TOKEN_KEY)
-  else window.localStorage.setItem(ACCESS_TOKEN_KEY, token)
+  if (!token) {
+    window.localStorage.removeItem(ACCESS_TOKEN_KEY)
+    // The remembered profile is only valid together with a session.
+    window.localStorage.removeItem(USER_KEY)
+  } else window.localStorage.setItem(ACCESS_TOKEN_KEY, token)
+}
+
+// The last known profile lets a returning user see the page immediately while
+// /auth/me is confirmed in the background. The API still authorizes every call.
+function getStoredUser(): User | null {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = window.localStorage.getItem(USER_KEY)
+    const parsed = raw ? (JSON.parse(raw) as User) : null
+    return parsed && typeof parsed === "object" && parsed.id ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function setStoredUser(user: User) {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(USER_KEY, JSON.stringify(user))
+  } catch {
+    // Storage full or blocked: the next load simply waits for /auth/me.
+  }
 }
 
 function getStoredLogoutAt(): number | null {
@@ -282,9 +308,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const existing = getStoredToken()
 
       try {
+        const rememberedUser = getStoredUser()
+        if (existing && rememberedUser && !isTokenExpiringSoon(existing)) {
+          tokenRef.current = existing
+          setToken(existing)
+          setUser(rememberedUser)
+          initializeStoredLogoutAt(rememberedUser)
+          setLoading(false)
+          // Confirm the profile without holding the page back. If the session
+          // is no longer valid, the first API call gets a 401 and apiFetch
+          // refreshes or signs out as usual.
+          void fetchMe(existing)
+            .then((me) => {
+              setStoredUser(me)
+              if (JSON.stringify(me) !== JSON.stringify(rememberedUser)) setUser(me)
+            })
+            .catch(() => undefined)
+          return
+        }
+
         if (existing) {
           try {
             const me = await fetchMe(existing)
+            tokenRef.current = existing
+            setStoredUser(me)
             setToken(existing)
             setUser(me)
             initializeStoredLogoutAt(me)
@@ -300,7 +347,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               return
             }
 
+            tokenRef.current = restored.token
             setStoredToken(restored.token)
+            setStoredUser(restored.user)
             setToken(restored.token)
             setUser(restored.user)
             initializeStoredLogoutAt(restored.user)
@@ -318,7 +367,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return
         }
 
+        tokenRef.current = restored.token
         setStoredToken(restored.token)
+        setStoredUser(restored.user)
         setToken(restored.token)
         setUser(restored.user)
         initializeStoredLogoutAt(restored.user)
@@ -677,7 +728,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!res.ok) throw new Error("login_failed")
     const data = (await res.json()) as { access_token: string }
     const me = await fetchMe(data.access_token)
+    // Pages mount and fetch before the token effect runs, so the ref is set first.
+    tokenRef.current = data.access_token
     setStoredToken(data.access_token)
+    setStoredUser(me)
     setToken(data.access_token)
     setUser(me)
     initializeStoredLogoutAt(me, true)
