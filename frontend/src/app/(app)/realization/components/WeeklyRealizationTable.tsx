@@ -8,6 +8,7 @@ import { RealizationDeadlineTasksPopover, criticalDeadlineCounts, criticalDeadli
 import type { RealizationDeadlineTask, RealizationPersonResult, RealizationWeeklyResponse } from "@/lib/types"
 import { compareRealizationDepartments, realizationDepartmentTag } from "@/lib/department-name"
 import { cn } from "@/lib/utils"
+import { weeklyRealizationPercent } from "@/lib/weekly-realization-percent"
 import { compareWeeklyPlannerUsers, type WeeklyPlannerSortOrder } from "@/lib/weekly-planner-user-order"
 
 export function weeklyMetrics(person: RealizationPersonResult) {
@@ -36,12 +37,11 @@ export function weeklyMetrics(person: RealizationPersonResult) {
   const criticalDeadlines = facts.weekly_critical_deadline_count ?? 0
   const criticalDeadlinesCompleted = facts.weekly_critical_deadline_completed_count ?? 0
   const deadlineTasks = facts.weekly_deadline_tasks ?? []
-  const base = planned || extra
   return {
     planned, completed, extra, extraCompleted, extraProgress, extraPostponed, extraTodo, extraDeferred,
     progress, postponed, noProgress, quantityTasks, quantityPlanned, quantityCompleted, quantityDelta,
     deadlines, deadlinesCompleted, deadlinesPostponed, deadlinesInProgress, deadlinesNoProgress, criticalDeadlines, criticalDeadlinesCompleted, deadlineTasks,
-    percent: base ? Math.min(100, Math.round(completed * 1000 / base) / 10) : 0,
+    percent: weeklyRealizationPercent(planned, completed, extra, postponed),
   }
 }
 
@@ -90,7 +90,7 @@ export function WeeklyRealizationTable({ reports, personId, onSelect, loading, o
     return sum
   }, { planned: 0, completed: 0, extra: 0, extraCompleted: 0, extraProgress: 0, extraPostponed: 0, extraTodo: 0, extraDeferred: 0, progress: 0, postponed: 0, noProgress: 0, quantityTasks: 0, quantityPlanned: 0, quantityCompleted: 0, quantityDelta: 0, deadlines: 0, deadlinesCompleted: 0, deadlinesPostponed: 0, deadlinesInProgress: 0, deadlinesNoProgress: 0, criticalDeadlines: 0, criticalDeadlinesCompleted: 0, deadlineTasks: [] as RealizationDeadlineTask[] })
   total.deadlineTasks = sortDeadlineTasks(total.deadlineTasks)
-  const totalPercent = (total.planned || total.extra) ? Math.min(100, Math.round(total.completed * 1000 / (total.planned || total.extra)) / 10) : 0
+  const totalPercent = weeklyRealizationPercent(total.planned, total.completed, total.extra, total.postponed)
 
   const planCell = (value: ReturnType<typeof weeklyMetrics> | typeof total) => <>
     <p className={cn(metricHeadline, "font-semibold text-slate-900")}><span className="tabular-nums">Plan {value.planned}</span> <span className="text-slate-400">+</span> <span className="tabular-nums text-blue-800">Ekstra {value.extra}</span> <span className="text-slate-400">=</span> <span className="text-base font-bold tabular-nums">{value.planned + value.extra} total</span></p>

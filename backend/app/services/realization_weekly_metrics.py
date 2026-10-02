@@ -231,10 +231,10 @@ def build_weekly_task_metrics(
         "weekly_critical_deadline_completed_count": critical_deadlines_completed,
     }
     realization_base = len(planned_keys) or len(additional_keys)
-    metrics["weekly_progress_percent"] = (
-        min(100.0, round(len(completed_keys) * 100.0 / realization_base, 1))
-        if realization_base else 0.0
-    )
+    base_percent = min(100.0, len(planned_completed | additional_completed) * 100.0 / realization_base) if realization_base else 0.0
+    # Cap extra completion credit before subtracting the pending-plan penalty.
+    postponement_penalty = len(planned_postponed) * 25.0 / len(planned_keys) if planned_keys else 0.0
+    metrics["weekly_progress_percent"] = round(max(0.0, base_percent - postponement_penalty), 1)
     return metrics
 
 

@@ -42,14 +42,14 @@ class TestSpeechTranscribe(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("language", client.post.call_args.kwargs["data"])
         self.assertTrue(upload.file.closed)
 
-    async def test_language_hints_preserve_english_and_autodetect_albanian_for_whisper(self) -> None:
+    async def test_albanian_uses_prompt_guidance_and_english_keeps_language_hint(self) -> None:
         for model, language, expected in [
             ("whisper-1", "sq", None),
             ("whisper-1", "sq-AL", None),
             ("whisper-1", "SQ_al", None),
             ("whisper-1", "en", "en"),
             ("whisper-1", None, None),
-            ("gpt-4o-transcribe", "sq", "sq"),
+            ("gpt-4o-transcribe", "sq", None),
         ]:
             with self.subTest(model=model, language=language):
                 upload = UploadFile(filename="dictation.mp4", file=BytesIO(b"audio"))
@@ -58,6 +58,7 @@ class TestSpeechTranscribe(unittest.IsolatedAsyncioTestCase):
                 with (
                     patch.object(settings, "OPENAI_API_KEY", "test-key"),
                     patch.object(settings, "SPEECH_TRANSCRIBE_MODEL", model),
+                    patch.object(settings, "SPEECH_ALBANIAN_TRANSCRIBE_MODEL", "gpt-4o-transcribe"),
                     patch.object(settings, "SPEECH_ALLOWED_MIME", None),
                     patch("app.api.routers.speech.httpx.AsyncClient") as client_class,
                 ):
@@ -65,12 +66,38 @@ class TestSpeechTranscribe(unittest.IsolatedAsyncioTestCase):
                     result = await transcribe_audio(upload, language=language, prompt="Context", user=object())
                 payload = client.post.call_args.kwargs["data"]
                 self.assertEqual(result, {"text": "Test transcript"})
-                self.assertEqual(payload["model"], model)
-                self.assertEqual(payload["prompt"], "Context")
+                if language and language.lower().startswith("sq"):
+                    self.assertEqual(payload["model"], "gpt-4o-transcribe")
+                    self.assertIn("gjuhën shqipe", payload["prompt"])
+                    self.assertIn("Kosovës", payload["prompt"])
+                    self.assertIn("Mos e përkthe", payload["prompt"])
+                    self.assertTrue(payload["prompt"].endswith("\nContext"))
+                else:
+                    self.assertEqual(payload["model"], model)
+                    self.assertEqual(payload["prompt"], "Context")
                 if expected is None:
                     self.assertNotIn("language", payload)
                 else:
                     self.assertEqual(payload["language"], expected)
+
+    async def test_albanian_has_language_guidance_without_a_user_prompt(self) -> None:
+        upload = UploadFile(filename="dictation.mp4", file=BytesIO(b"audio"))
+        client = AsyncMock()
+        client.post.return_value = httpx.Response(200, json={"text": "Përshëndetje, si jeni?"})
+        with (
+            patch.object(settings, "OPENAI_API_KEY", "test-key"),
+            patch.object(settings, "SPEECH_ALLOWED_MIME", None),
+            patch.object(settings, "SPEECH_ALBANIAN_TRANSCRIBE_MODEL", "gpt-4o-transcribe"),
+            patch("app.api.routers.speech.httpx.AsyncClient") as client_class,
+        ):
+            client_class.return_value.__aenter__.return_value = client
+            result = await transcribe_audio(upload, language="sq", prompt=None, user=object())
+        payload = client.post.call_args.kwargs["data"]
+        self.assertNotIn("language", payload)
+        self.assertEqual(payload["model"], "gpt-4o-transcribe")
+        self.assertIn("gjuhën shqipe", payload["prompt"])
+        self.assertIn("tekst bosh", payload["prompt"])
+        self.assertEqual(result["text"], "Përshëndetje, si jeni?")
 
     async def test_unconfigured_speech_service_returns_explicit_error(self) -> None:
         with patch.object(settings, "OPENAI_API_KEY", None):

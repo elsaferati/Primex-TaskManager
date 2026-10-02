@@ -13,6 +13,12 @@ from app.config import settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+ALBANIAN_TRANSCRIPTION_PROMPT = (
+    "Audioja është në gjuhën shqipe, përfshirë të folmen e Kosovës. "
+    "Transkripto vetëm fjalët që dëgjohen, në shqip me alfabet latin. "
+    "Mos e përkthe në gjuhë të tjera dhe mos shto fjalë që nuk dëgjohen. "
+    "Nëse nuk ka të folur të kuptueshëm, kthe tekst bosh."
+)
 
 
 def _safe_error_detail(value: object) -> str:
@@ -75,13 +81,19 @@ async def transcribe_audio(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty audio file")
 
     filename = file.filename or "audio"
-    payload: dict[str, str] = {"model": settings.SPEECH_TRANSCRIBE_MODEL}
-    # The hosted whisper-1 API rejects an explicit Albanian language hint.
-    # Omit that optional hint and let it detect the spoken language instead.
     is_albanian = (language or "").strip().lower().replace("_", "-").split("-", 1)[0] == "sq"
-    if language and not (settings.SPEECH_TRANSCRIBE_MODEL == "whisper-1" and is_albanian):
+    model = settings.SPEECH_ALBANIAN_TRANSCRIBE_MODEL if is_albanian else settings.SPEECH_TRANSCRIBE_MODEL
+    payload: dict[str, str] = {"model": model}
+    if is_albanian:
+        # Both hosted Whisper and GPT-4o reject language="sq". GPT-4o's
+        # response recommends putting the language name in the prompt.
+        # Explicitly guide transcription: unguided detection misidentifies it.
+        payload["prompt"] = ALBANIAN_TRANSCRIPTION_PROMPT
+        if prompt:
+            payload["prompt"] += "\n" + prompt
+    elif language:
         payload["language"] = language
-    if prompt:
+    if prompt and not is_albanian:
         payload["prompt"] = prompt
 
     headers = {"Authorization": f"Bearer {settings.OPENAI_API_KEY}"}
@@ -97,7 +109,7 @@ async def transcribe_audio(
     except httpx.RequestError as exc:
         logger.warning(
             "speech_transcription_connection_failed error=%s model=%r mime=%r bytes=%d",
-            type(exc).__name__, settings.SPEECH_TRANSCRIBE_MODEL, content_type, len(data),
+            type(exc).__name__, model, content_type, len(data),
         )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Transcription service unreachable")
 
@@ -111,7 +123,7 @@ async def transcribe_audio(
         logger.warning(
             "speech_transcription_rejected status=%d request_id=%r model=%r mime=%r bytes=%d detail=%r",
             response.status_code, response.headers.get("x-request-id"),
-            settings.SPEECH_TRANSCRIBE_MODEL, content_type, len(data), _safe_error_detail(detail),
+            model, content_type, len(data), _safe_error_detail(detail),
         )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
 

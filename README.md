@@ -29,6 +29,7 @@ Edit `backend/.env`:
 - Set `JWT_SECRET`
 - Set `APP_TIMEZONE` (default `Europe/Budapest`)
 - Optional for cloud dictation: `OPENAI_API_KEY`, `SPEECH_MAX_FILE_MB` (default 20)
+- Albanian cloud dictation uses `SPEECH_ALBANIAN_TRANSCRIBE_MODEL` (default `gpt-4o-transcribe`) with an Albanian transcription prompt, including Kosovo speech. The hosted API rejects `language=sq`, so the language is specified in the prompt. Other languages use `SPEECH_TRANSCRIBE_MODEL` (default `whisper-1`). See [OpenAI transcription prompting](https://developers.openai.com/api/docs/guides/speech-to-text#prompting).
 - For scheduled email reports, set `EMAIL_USER=130primex.eu@gmail.com` and `EMAIL_PASSWORD` in `backend/.env` (or the backend process environment). `EMAIL_PASSWORD` must be that account's Google app password. Restart the backend after changing either value. The production deploy requires both GitHub Actions secrets.
 
 Install deps:
