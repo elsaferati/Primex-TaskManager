@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { createPortal } from "react-dom"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -1315,6 +1316,56 @@ const gaTimeEntryStyle = (entry: Partial<GaTimeEntryFormat>): React.CSSPropertie
   fontStyle: entry.is_italic ? "italic" : "normal",
 })
 
+// On a phone the table cell is far too narrow for the editor, and the keyboard
+// covers whatever is below it. Touch devices therefore get the same editor in a
+// full-width panel pinned to the top of the visible screen, with finger-sized
+// controls; desktop keeps the inline editor inside the cell.
+function GaTimeEditorShell({ className, children }: { className: string; children: React.ReactNode }) {
+  const [isTouch] = React.useState(
+    () => typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches
+  )
+  const [viewport, setViewport] = React.useState<{ top: number; height: number } | null>(null)
+
+  React.useEffect(() => {
+    if (!isTouch) return
+    const visual = window.visualViewport
+    // The visual viewport shrinks when the keyboard opens and shifts when iOS
+    // scrolls the page under it; follow both so the panel stays in view.
+    const sync = () =>
+      setViewport({ top: visual?.offsetTop ?? 0, height: visual?.height ?? window.innerHeight })
+    sync()
+    visual?.addEventListener("resize", sync)
+    visual?.addEventListener("scroll", sync)
+    return () => {
+      visual?.removeEventListener("resize", sync)
+      visual?.removeEventListener("scroll", sync)
+    }
+  }, [isTouch])
+
+  if (!isTouch) return <div className={className}>{children}</div>
+
+  return createPortal(
+    <div className="fixed inset-0 z-[300] bg-black/40 print:hidden">
+      <div
+        style={{ top: (viewport?.top ?? 0) + 8, maxHeight: Math.max((viewport?.height ?? 320) - 16, 160) }}
+        className={[
+          "absolute inset-x-2 flex flex-col gap-3 overflow-y-auto rounded-xl border border-blue-200 bg-white p-3 shadow-2xl",
+          // 16px text stops iOS from zooming the page when the field is focused.
+          "[&_[role=textbox]]:min-h-12 [&_[role=textbox]]:px-3 [&_[role=textbox]]:py-2 [&_[role=textbox]]:text-base",
+          "[&_span]:text-xs [&_.flex]:gap-2.5",
+          "[&_button.rounded-full]:h-8 [&_button.rounded-full]:w-8",
+          "[&_button:not(.rounded-full)]:h-10 [&_button:not(.rounded-full)]:min-w-10 [&_button:not(.rounded-full)]:px-4 [&_button:not(.rounded-full)]:text-sm",
+          // Cancel / Save stay reachable even when the panel has to scroll.
+          "[&>div:last-child]:sticky [&>div:last-child]:bottom-0 [&>div:last-child]:bg-white [&>div:last-child]:pt-1",
+        ].join(" ")}
+      >
+        {children}
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 function GaTimeEntryEditor({
   initialContent = "",
   initialFormat,
@@ -1345,7 +1396,7 @@ function GaTimeEntryEditor({
   }, [onCancel, save])
 
   return (
-    <div className="w-full space-y-2 rounded-md border border-blue-200 bg-white p-2">
+    <GaTimeEditorShell className="w-full space-y-2 rounded-md border border-blue-200 bg-white p-2">
       <GaTimeRichTextEditor
         value={content}
         onChange={setContent}
@@ -1386,7 +1437,7 @@ function GaTimeEntryEditor({
           </Button>
         </div>
       </div>
-    </div>
+    </GaTimeEditorShell>
   )
 }
 
@@ -1420,9 +1471,7 @@ function GaTimeRowCommentEditor({
   }, [onCancel, save])
 
   return (
-    <div
-      className="flex min-w-[158px] flex-col gap-2 rounded-md border border-blue-200 bg-white p-2"
-    >
+    <GaTimeEditorShell className="flex min-w-[158px] flex-col gap-2 rounded-md border border-blue-200 bg-white p-2">
       <GaTimeRichTextEditor
         value={comment}
         onChange={setComment}
@@ -1464,7 +1513,7 @@ function GaTimeRowCommentEditor({
           </Button>
         </div>
       </div>
-    </div>
+    </GaTimeEditorShell>
   )
 }
 
