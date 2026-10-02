@@ -1395,7 +1395,10 @@ function GaTimeEntryEditor({
   const isSaving = saving || status === "saving"
 
   const saveAndClose = React.useCallback(async () => {
-    if (await save()) onCancel()
+    if (await save()) {
+      onCancel()
+      toast.success("U ruajt me sukses.")
+    }
   }, [onCancel, save])
 
   return (
@@ -1470,7 +1473,10 @@ function GaTimeRowCommentEditor({
   const isSaving = saving || status === "saving"
 
   const saveAndClose = React.useCallback(async () => {
-    if (await save()) onCancel()
+    if (await save()) {
+      onCancel()
+      toast.success("U ruajt me sukses.")
+    }
   }, [onCancel, save])
 
   return (
@@ -7859,12 +7865,9 @@ export default function AdminTasksPage() {
                                       content,
                                       format
                                     )
-                                    if (created) {
-                                      setGaTimeAddingCell((current) => {
-                                        if (current === cellKey) setGaTimeEditingId(created.id)
-                                        return current === cellKey ? null : current
-                                      })
-                                    }
+                                    // The editor closes itself after a successful save.
+                                    // Reopening it on the new entry left a box on
+                                    // screen with a disabled Save button.
                                     return Boolean(created)
                                   }}
                                   onCancel={() => setGaTimeAddingCell(null)}
