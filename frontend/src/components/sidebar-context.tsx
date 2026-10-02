@@ -22,14 +22,16 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     const mediaQuery = window.matchMedia("(min-width: 768px)")
 
-    const syncSidebarForViewport = () => {
+    const syncSidebarForViewport = (event?: MediaQueryListEvent) => {
       const nextIsDesktop = mediaQuery.matches
       setIsDesktop(nextIsDesktop)
 
       if (!nextIsDesktop) {
-        // Admin Tasks is opened on phones straight at the GA time table; the
-        // menu must not cover it. It still opens from the top bar button.
-        setIsOpen(!window.location.pathname.startsWith("/admin-tasks"))
+        // Rotating a phone back to portrait must not throw the menu over the
+        // page the user is reading; it opens only on a fresh load.
+        // Admin Tasks is opened on phones straight at the GA time table, so
+        // there the menu stays closed even then. The top bar button opens it.
+        setIsOpen(!event && !window.location.pathname.startsWith("/admin-tasks"))
         return
       }
 
