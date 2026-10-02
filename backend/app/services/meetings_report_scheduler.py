@@ -103,7 +103,9 @@ async def run_meetings_report_scheduler_once(now: datetime | None = None) -> boo
             sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
         from app.services.meeting_point_manual_sync import merge_common_view_manual_sections
 
-        sections = await merge_common_view_manual_sections(db, sections, "meetings", existing_sections)
+        sections = await merge_common_view_manual_sections(
+            db, sections, "meetings", existing_sections, getattr(settings, "manual_questions", [])
+        )
         if row is None:
             row = MeetingsReportDraft(
                 report_date=report_day,

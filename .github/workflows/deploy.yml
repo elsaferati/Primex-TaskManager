@@ -197,14 +197,15 @@ jobs:
           $expectedHead = ("$($headLines[0])" -split '\s+')[0]
           Write-Host "Alembic repository head: $expectedHead"
 
-          # Validate the migration graph before stopping a running service.
-          # Prevent the legacy scheduler from reloading rows while migrations run.
-          cmd /c "pm2 stop primeflow-report-scheduler || ver > NUL" | Out-Host
-
+          # Validate both the repository graph and the deployed database stamp
+          # before stopping a running report scheduler.
           & $python -m alembic current
           if ($LASTEXITCODE -ne 0) {
             throw "Unable to read the current database revision."
           }
+
+          # Prevent the legacy scheduler from reloading rows while migrations run.
+          cmd /c "pm2 stop primeflow-report-scheduler || ver > NUL" | Out-Host
 
           & $python -m alembic upgrade head
           if ($LASTEXITCODE -ne 0) {

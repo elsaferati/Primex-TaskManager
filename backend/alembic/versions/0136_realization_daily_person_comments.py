@@ -1,5 +1,6 @@
-"""Add independent per-person comments after the deployed 0135 marker.
+"""Add independent per-person comments for daily Realization periods.
 
+This migration follows the deployed 0135 marker.
 The earlier version of this migration reused the deployed marker's ID. Some
 databases may therefore already have the table; preserve those rows on upgrade.
 """
@@ -7,7 +8,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0136_daily_person_comments"
+revision = "0136_person_comments"
 down_revision = "0135_realization_daily_comments"
 branch_labels = None
 depends_on = None

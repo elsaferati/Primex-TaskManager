@@ -21,6 +21,7 @@ class MorningReportSettings(Base):
         ARRAY(Integer), nullable=False, default=lambda: [0, 1, 2, 3, 4]
     )
     recipients: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    manual_questions: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     last_run_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
