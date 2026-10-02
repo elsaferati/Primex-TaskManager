@@ -525,10 +525,28 @@ jobs:
           $CurrentPath = (Get-Location).Path
           $env:RUNNER_TRACKING_ID = ""
 
+          # `Start-Process -Wait` also waits for every descendant process. When the
+          # PM2 command leaves a child behind, the step hangs forever after PM2
+          # has already printed "Done" and blocks all later deploys. Wait only
+          # for the command itself, with a limit.
+          function Invoke-Pm2Command {
+            param([string]$Command, [int]$TimeoutSeconds = 90)
+
+            $process = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $Command -NoNewWindow -PassThru
+            $null = $process.Handle
+            if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+              Write-Host "PM2 command did not return within $TimeoutSeconds s; continuing. Command: $Command"
+              return $null
+            }
+            return $process.ExitCode
+          }
+
           function Start-PrimeFlowFrontend {
-            $result = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" --interpreter node -- start --port 3000" -NoNewWindow -Wait -PassThru
-            if ($result.ExitCode -ne 0) {
-              throw "PM2 frontend start failed with exit code $($result.ExitCode)."
+            $exitCode = Invoke-Pm2Command "pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" --interpreter node -- start --port 3000"
+            # A timeout is not treated as failure: the readiness check that
+            # follows decides whether the new frontend is really serving.
+            if ($null -ne $exitCode -and $exitCode -ne 0) {
+              throw "PM2 frontend start failed with exit code $exitCode."
             }
           }
 
@@ -587,10 +605,10 @@ jobs:
           }
 
           Write-Host "3. Replacing Existing Frontend Process..."
-          $pm2Describe = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 describe frontend > NUL 2>&1" -NoNewWindow -Wait -PassThru
-          if ($pm2Describe.ExitCode -eq 0) {
-            $pm2Delete = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 delete frontend" -NoNewWindow -Wait -PassThru
-            if ($pm2Delete.ExitCode -ne 0) { Write-Error "PM2 frontend delete failed"; exit 1 }
+          $pm2DescribeExit = Invoke-Pm2Command "pm2 describe frontend > NUL 2>&1"
+          if ($pm2DescribeExit -eq 0) {
+            $pm2DeleteExit = Invoke-Pm2Command "pm2 delete frontend"
+            if ($null -ne $pm2DeleteExit -and $pm2DeleteExit -ne 0) { Write-Error "PM2 frontend delete failed"; exit 1 }
           } else {
             Write-Host "PM2 frontend process did not exist yet. Continuing with clean start."
           }

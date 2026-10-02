@@ -45,6 +45,31 @@ const FINISH_PERIOD_NONE_LABEL = "None (all day)"
 const TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] as const
 const SYSTEM_STATUS_OPTIONS = ["OPEN", "DONE"] as const
 type AdminTasksSectionId = "all-tasks" | "common" | "ga-time" | "one-h-print"
+
+// Last loaded GA time table data, kept on the device so the table paints at
+// once on the next visit while fresh data is fetched behind it.
+const GA_VIEW_CACHE_PREFIX = "primeflow-ga-view:"
+function readGaViewCache<T>(key: string): T | null {
+  try {
+    const raw = window.localStorage.getItem(GA_VIEW_CACHE_PREFIX + key)
+    return raw ? (JSON.parse(raw) as T) : null
+  } catch {
+    return null
+  }
+}
+function writeGaViewCache(key: string, value: unknown) {
+  try {
+    // One entry per kind: older weeks are dropped so storage cannot fill up.
+    const kind = key.split("|")[0]
+    for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+      const existing = window.localStorage.key(index)
+      if (existing?.startsWith(`${GA_VIEW_CACHE_PREFIX}${kind}|`)) window.localStorage.removeItem(existing)
+    }
+    window.localStorage.setItem(GA_VIEW_CACHE_PREFIX + key, JSON.stringify(value))
+  } catch {
+    // Storage full or blocked: the table simply loads from the network.
+  }
+}
 const NO_PROJECT_TYPES = [
   { id: "normal", label: "Normal", description: "General tasks without a project." },
   { id: "personal", label: "Personal", description: "Personal tasks tracked only in this view." },
@@ -2115,6 +2140,9 @@ export default function AdminTasksPage() {
   const gaTimeNewRowStartRef = React.useRef<HTMLInputElement | null>(null)
   const gaTimeNewRowEndRef = React.useRef<HTMLInputElement | null>(null)
   const [secondarySectionsReady, setSecondarySectionsReady] = React.useState(false)
+  // The GA time table does not depend on the heavy task lists, so the direct
+  // link loads it at once instead of queueing it behind them.
+  const gaSectionsReady = secondarySectionsReady || gaTimeTableFirst
   const confirmerCandidates = React.useMemo(
     () => getConfirmerCandidates(users as UserLookup[]),
     [users]
@@ -2230,13 +2258,21 @@ export default function AdminTasksPage() {
   )
 
   React.useEffect(() => {
-    if (!secondarySectionsReady) return
+    if (!gaSectionsReady) return
     let mounted = true
     async function loadCommonWeek() {
-      setCommonLoading(true)
+      const weekStartIso = toISODate(commonWeekStart)
+      const cacheKey = `common|${user?.id || ""}|${weekStartIso}`
+      const cached = readGaViewCache<{ users: any; departments: any; data: any }>(cacheKey)
+      if (cached?.data) {
+        setCommonUsers(cached.users || [])
+        setCommonDepartments(cached.departments || [])
+        setCommonData(cached.data)
+      } else {
+        setCommonLoading(true)
+      }
       setCommonError(null)
       try {
-        const weekStartIso = toISODate(commonWeekStart)
         const include = "users,departments,entries,meetings,system_tasks,tasks"
         const res = await apiFetch(
           `/common-view?week_start=${encodeURIComponent(weekStartIso)}&include=${encodeURIComponent(include)}&include_all_departments=true`
@@ -2296,9 +2332,7 @@ export default function AdminTasksPage() {
           userId: item.userId || item.user_id || undefined,
         }))
         if (!mounted) return
-        setCommonUsers(payload.users || [])
-        setCommonDepartments(payload.departments || [])
-        setCommonData({
+        const nextCommonData = {
           late: payload.items.late,
           absent: normalizedAbsent,
           leave: payload.items.leave,
@@ -2312,10 +2346,18 @@ export default function AdminTasksPage() {
           feedback: normalizedFeedback,
           priority: payload.items.priority,
           bz: payload.items.bz,
+        }
+        setCommonUsers(payload.users || [])
+        setCommonDepartments(payload.departments || [])
+        setCommonData(nextCommonData)
+        writeGaViewCache(cacheKey, {
+          users: payload.users || [],
+          departments: payload.departments || [],
+          data: nextCommonData,
         })
       } catch (err) {
         console.error("Failed to load common view data", err)
-        if (mounted) setCommonError("Failed to load common week table.")
+        if (mounted && !cached?.data) setCommonError("Failed to load common week table.")
       } finally {
         if (mounted) setCommonLoading(false)
       }
@@ -2324,7 +2366,7 @@ export default function AdminTasksPage() {
     return () => {
       mounted = false
     }
-  }, [apiFetch, commonWeekStart, secondarySectionsReady])
+  }, [apiFetch, commonWeekStart, gaSectionsReady, user?.id])
 
   const isAdmin = String(user?.role || "").trim().toUpperCase() === "ADMIN"
   const ganeUser = React.useMemo(
@@ -2492,13 +2534,20 @@ export default function AdminTasksPage() {
   }, [])
 
   React.useEffect(() => {
-    if (!secondarySectionsReady) return
+    if (!gaSectionsReady) return
     let mounted = true
     async function loadGaTimeSlots() {
-      setGaTimeLoading(true)
+      const weekStartIso = toISODate(commonWeekStart)
+      const cacheKey = `slots|${user?.id || ""}|${weekStartIso}`
+      const cached = readGaViewCache<{ rows: GaTimeRow[]; entries: GaTimeSlotEntry[] }>(cacheKey)
+      if (cached?.rows && cached.entries) {
+        setGaTimeRows(cached.rows)
+        setGaTimeEntries(cached.entries)
+      } else {
+        setGaTimeLoading(true)
+      }
       setGaTimeError(null)
       try {
-        const weekStartIso = toISODate(commonWeekStart)
         const [rowsRes, entriesRes] = await Promise.all([
           apiFetch("/ga-time-slots/rows"),
           apiFetch(`/ga-time-slots?week_start=${encodeURIComponent(weekStartIso)}`),
@@ -2512,11 +2561,13 @@ export default function AdminTasksPage() {
         const rows = normalizeGaTimeRows((await rowsRes.json()) as GaTimeTableRowResponse[])
         const data = (await entriesRes.json()) as GaTimeSlotEntry[]
         if (!mounted) return
-        setGaTimeRows(rows.length ? rows : [...DEFAULT_GA_TIME_ROWS])
+        const nextRows = rows.length ? rows : [...DEFAULT_GA_TIME_ROWS]
+        setGaTimeRows(nextRows)
         setGaTimeEntries(data)
+        writeGaViewCache(cacheKey, { rows: nextRows, entries: data })
       } catch (err) {
         console.error("Failed to load GA time slots", err)
-        if (mounted) setGaTimeError("Failed to load GA time slots.")
+        if (mounted && !cached) setGaTimeError("Failed to load GA time slots.")
       } finally {
         if (mounted) setGaTimeLoading(false)
       }
@@ -2525,7 +2576,7 @@ export default function AdminTasksPage() {
     return () => {
       mounted = false
     }
-  }, [apiFetch, commonWeekStart, secondarySectionsReady])
+  }, [apiFetch, commonWeekStart, gaSectionsReady, user?.id])
 
   React.useEffect(() => {
     if (!secondarySectionsReady) return
