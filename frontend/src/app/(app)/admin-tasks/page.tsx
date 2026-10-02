@@ -1966,6 +1966,8 @@ export default function AdminTasksPage() {
   const [pendingCompletionCommentSaving, setPendingCompletionCommentSaving] = React.useState(false)
 
   const [printTarget, setPrintTarget] = React.useState<AdminTasksSectionId | null>(null)
+  // True when the page was opened through /admin-tasks#ga-time-table.
+  const [gaTimeTableFirst, setGaTimeTableFirst] = React.useState(false)
   const [printTotalPages, setPrintTotalPages] = React.useState(1)
   const [collapsedAdminSections, setCollapsedAdminSections] = React.useState<Record<AdminTasksSectionId, boolean>>({
     "all-tasks": false,
@@ -4454,7 +4456,9 @@ export default function AdminTasksPage() {
   // scroll is repeated while the page settles.
   React.useEffect(() => {
     if (window.location.hash !== "#ga-time-table") return
-    setCollapsedAdminSections((current) => (current["ga-time"] ? { ...current, "ga-time": false } : current))
+    // Only the GA time table starts open; the others stay one tap away on "+".
+    setCollapsedAdminSections({ "all-tasks": true, common: true, "one-h-print": true, "ga-time": false })
+    setGaTimeTableFirst(true)
     const startedAt = Date.now()
     let timer = 0
     const stop = () => {
@@ -7183,7 +7187,7 @@ export default function AdminTasksPage() {
             </AdminTasksSection>
           </div>
         </div>
-        <div className="print-section order-2" data-print-section="ga-time">
+        <div className={cn("print-section", gaTimeTableFirst ? "order-first" : "order-2")} data-print-section="ga-time">
           <div className="print-only">
             <div className="print-page">
               <div className="print-header">
