@@ -111,6 +111,7 @@ const gaReportItems: NavItem[] = [
   { href: "/morning-report", label: "M1 Start of Day", icon: MailCheck },
   { href: "/after-break-report", label: "M2 Post-Break Summary", icon: MailCheck },
   { href: "/meetings-report", label: "M3 End of Day", icon: MailCheck },
+  { href: "/m3-reporting-points", label: "Pikat për raportim M3 / GA", icon: ClipboardCheck },
 ]
 
 const gaReportHrefs = new Set(gaReportItems.map((item) => item.href))
@@ -239,6 +240,7 @@ const navGroups: NavGroup[] = [
           { href: "/morning-report", label: "M1 Start of Day", icon: MailCheck },
           { href: "/after-break-report", label: "M2 Post-Break Summary", icon: MailCheck },
           { href: "/meetings-report", label: "M3 End of Day", icon: MailCheck },
+          { href: "/m3-reporting-points", label: "Pikat për raportim M3 / GA", icon: ClipboardCheck },
         ],
       },
     ],
