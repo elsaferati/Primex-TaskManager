@@ -1,16 +1,25 @@
-"""Capture staff Realization at 16:15. This loop never sends email."""
+"""Capture staff Realization at 16:15. This loop never sends email.
+
+Generating or sending the report after 16:15 captures it again, so the
+report always carries the latest realization of the day.
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, time
+from datetime import datetime
 
 from app.db import SessionLocal
-from app.services.m3_reporting_points import build_realization_capture, locked_report, refresh_report
+from app.services.m3_reporting_points import (
+    REALIZATION_CAPTURE_TIME,
+    build_realization_capture,
+    locked_report,
+    refresh_report,
+)
 from app.services.primeflow_report import report_timezone
 
 logger = logging.getLogger(__name__)
-CAPTURE_TIME = time(16, 15)
+CAPTURE_TIME = REALIZATION_CAPTURE_TIME
 
 
 def is_capture_minute(now: datetime) -> bool:
@@ -27,11 +36,12 @@ async def run_m3_reporting_points_scheduler_once(now: datetime | None = None) ->
         row = await locked_report(db, day, wait=False)
         if row is None or row.realization_captured_at is not None or row.status == "SENT":
             return False
-        row.realization = await build_realization_capture(db, day)
-        row.realization_captured_at = now
-        # Manual answers survive capture; the realization is never overwritten.
-        if not row.generated_at:
-            await refresh_report(db, row)
+        # Manual answers survive capture.
+        if row.generated_at:
+            row.realization = await build_realization_capture(db, day)
+            row.realization_captured_at = now
+        else:
+            await refresh_report(db, row, now)
         await db.commit()
         logger.info("m3_reporting_points_realization_captured day=%s at=%s", day, now.isoformat())
         return True

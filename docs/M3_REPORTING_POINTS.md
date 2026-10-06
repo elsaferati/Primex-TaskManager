@@ -9,7 +9,7 @@ The sidebar lists it under Reports > Meetings and in GA's report shortcuts.
 Email is manual only and reads the recipients from the current M3 settings at send
 time. It never sends an email from a background scheduler. Sending is available
 after that day's 16:15 Realization capture exists. The send operation refreshes
-today's task tables, retains the manual answers and capture, and records the sent
+today's task tables and realization, retains the manual answers, and records the sent
 copy. A repeat click returns the same sent copy rather than sending it twice.
 Emails include the complete HTML report as an attachment, preserving all TODO
 rows even when an email client clips a long inline body.
@@ -94,11 +94,14 @@ existing Daily Realization metric across all active STAFF, using the same
 completed/planned denominator rather than averaging individual percentages.
 Missing baselines produce an explicit unavailable result, never a fabricated 0%.
 
-The capture is immutable. Regeneration only updates the task tables. Starting
-the service after the 16:15 capture minute does not manufacture a retrospective
-value; the report shows the missing capture and cannot be sent as a complete
-16:15 report. Historical reports read their saved data; they cannot be rebuilt
-using today's TODO statuses.
+Generating or sending today's report also recomputes the realization. Before
+16:15 the value is a live preview: it is shown as LIVE, is not stored as the
+capture, and the report cannot be sent yet. From 16:15 on, every generation or
+send stores the latest realization as the day's capture, replacing the earlier
+one, so a report generated after 16:15 always carries the current percentage.
+If the service was down at 16:15, generating the report afterwards captures it.
+Historical reports read their saved data; they cannot be rebuilt using today's
+TODO statuses.
 Each capture now also stores a separate weighted percentage and +/-50% comment
 for each staff department, ordered DEV, GD, PCM then other departments. Missing
 department baselines remain unavailable; they are never shown as zero. Older

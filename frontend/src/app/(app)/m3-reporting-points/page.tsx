@@ -206,7 +206,7 @@ export default function M3ReportingPointsPage() {
         {report ? <div className="grid border md:grid-cols-4">
           {[
             [CalendarDays, "Data e raportit", reportDate(report.report_date)],
-            [Clock3, "Realizimi 16:15", report.realization_captured_at ? reportTime(report.realization_captured_at) : "Në pritje"],
+            [Clock3, "Realizimi 16:15", report.realization_captured_at ? reportTime(report.realization_captured_at) : report.realization ? "Live · ruhet pas 16:15" : "Në pritje"],
             [CheckCircle2, "Statusi", report.status],
             [Clock3, "Përditësimi i fundit", report.generated_at ? `${reportDate(report.generated_at)}, ${reportTime(report.generated_at)}` : "—"],
           ].map(([Icon, label, value], index) => {
@@ -222,7 +222,7 @@ export default function M3ReportingPointsPage() {
         </p> : null}
     {loading ? <p className="py-10 text-center text-muted-foreground">Duke ngarkuar raportin…</p> : report ? <>
       <M3ReportingPointsView report={report} answers={answers} disabled={!canManage || !!busy || sent} onAnswerChange={changeAnswer} gaOnly={gaOnly} />
-      {!report.realization_captured_at ? <p className="text-sm text-muted-foreground">Dërgimi aktivizohet pasi të ruhet realizimi i orës 16:15.</p> : null}
+      {!report.realization_captured_at ? <p className="text-sm text-muted-foreground">Dërgimi aktivizohet pasi të ruhet realizimi i orës 16:15. Pas 16:15, "Gjenero raportin" merr realizimin e fundit.</p> : null}
     </> : <div className="rounded-xl border border-dashed p-12 text-center"><h2 className="font-semibold">Nuk ka raport të ruajtur për {reportDate(day)}.</h2><p className="mt-2 text-sm text-muted-foreground">{day === today() ? "Gjenero raportin për të plotësuar përgjigjet dhe për të parë pikat automatike." : "Zgjidh një datë nga historiku për të parë të dhënat e ruajtura."}</p></div>}
       </TabsContent>
       <TabsContent value="history" className="space-y-3">
@@ -235,6 +235,6 @@ export default function M3ReportingPointsPage() {
     </Tabs>
 
     <Dialog open={previewHtml !== null} onOpenChange={(open) => { if (!open) setPreviewHtml(null) }}><DialogContent className="max-w-[95vw] sm:max-w-[95vw]"><DialogHeader><DialogTitle>Pamja e raportit në email</DialogTitle></DialogHeader><iframe title="Pikat për raportim M3 / GA" sandbox="" srcDoc={previewHtml || ""} className="h-[75vh] w-full rounded border bg-white" /></DialogContent></Dialog>
-    <Dialog open={sendOpen} onOpenChange={(open) => { if (!busy) setSendOpen(open) }}><DialogContent><DialogHeader><DialogTitle>Dërgo raportin M3 / GA</DialogTitle></DialogHeader><p className="text-sm">Raporti i datës {reportDate(day)} dërgohet te marrësit aktualë të M3. Pikat automatike përditësohen në momentin e dërgimit; përgjigjet dhe realizimi i 16:15 ruhen.</p><div className="space-y-2 rounded-lg bg-muted p-3 text-sm">{recipients ? (Object.entries(recipients) as [string, string[]][]).filter(([, values]) => values.length).map(([key, values]) => <p key={key}><strong>{key.toUpperCase()}:</strong> {values.join(", ")}</p>) : null}</div><Button onClick={send} disabled={!!busy}><Send className="mr-2 h-4 w-4" />{busy === "send" ? "Duke dërguar…" : "Dërgo raportin"}</Button></DialogContent></Dialog>
+    <Dialog open={sendOpen} onOpenChange={(open) => { if (!busy) setSendOpen(open) }}><DialogContent><DialogHeader><DialogTitle>Dërgo raportin M3 / GA</DialogTitle></DialogHeader><p className="text-sm">Raporti i datës {reportDate(day)} dërgohet te marrësit aktualë të M3. Pikat automatike dhe realizimi përditësohen në momentin e dërgimit; përgjigjet ruhen.</p><div className="space-y-2 rounded-lg bg-muted p-3 text-sm">{recipients ? (Object.entries(recipients) as [string, string[]][]).filter(([, values]) => values.length).map(([key, values]) => <p key={key}><strong>{key.toUpperCase()}:</strong> {values.join(", ")}</p>) : null}</div><Button onClick={send} disabled={!!busy}><Send className="mr-2 h-4 w-4" />{busy === "send" ? "Duke dërguar…" : "Dërgo raportin"}</Button></DialogContent></Dialog>
   </div>
 }

@@ -424,15 +424,27 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(capture["percent"])
         self.assertEqual([item["employees"] for item in capture["departments"]], [1, 1, 1])
 
-    async def test_regeneration_preserves_answers_and_realization(self):
-        row = SimpleNamespace(report_date=datetime.now(service.report_timezone()).date(),
+    async def test_regeneration_after_1615_replaces_realization_and_preserves_answers(self):
+        now = datetime.fromisoformat("2026-10-05T17:02:00+02:00")
+        row = SimpleNamespace(report_date=now.date(),
                               manual_answers={"ga_reorganization": "Jo"}, realization={"percent": 62},
-                              realization_captured_at="16:15", data={}, generated_at=None)
-        with patch.object(service, "build_task_data", new=AsyncMock(return_value={"untouched": [{"title": "TODO"}]})):
-            await service.refresh_report(AsyncMock(), row)
+                              realization_captured_at=datetime.fromisoformat("2026-10-05T16:15:00+02:00"), data={}, generated_at=None)
+        with (patch.object(service, "build_task_data", new=AsyncMock(return_value={"untouched": [{"title": "TODO"}]})),
+              patch.object(service, "build_realization_capture", new=AsyncMock(return_value={"percent": 71}))):
+            await service.refresh_report(AsyncMock(), row, now)
         self.assertEqual(row.manual_answers, {"ga_reorganization": "Jo"})
-        self.assertEqual(row.realization, {"percent": 62})
-        self.assertEqual(row.realization_captured_at, "16:15")
+        self.assertEqual(row.realization, {"percent": 71})
+        self.assertEqual(row.realization_captured_at, now)
+
+    async def test_regeneration_before_1615_shows_live_realization_without_capturing(self):
+        now = datetime.fromisoformat("2026-10-05T11:50:00+02:00")
+        row = SimpleNamespace(report_date=now.date(), manual_answers={}, realization=None,
+                              realization_captured_at=None, data={}, generated_at=None)
+        with (patch.object(service, "build_task_data", new=AsyncMock(return_value={})),
+              patch.object(service, "build_realization_capture", new=AsyncMock(return_value={"percent": 25.6}))):
+            await service.refresh_report(AsyncMock(), row, now)
+        self.assertEqual(row.realization, {"percent": 25.6})
+        self.assertIsNone(row.realization_captured_at)
 
     async def test_historical_regeneration_never_reads_current_task_status(self):
         row = SimpleNamespace(report_date=date(2026, 1, 1))

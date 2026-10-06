@@ -54,6 +54,9 @@ AUTO_TITLES = {
 DATE_ACTIONS = {"task.due_date_changed": "due_date", "task.start_date_changed": "start_date"}
 
 
+REALIZATION_CAPTURE_TIME = time(16, 15)
+
+
 def subject_for(day: date) -> str:
     return f"{M3_TITLE} / PER GA - {day:%d.%m.%Y}"
 
@@ -281,11 +284,21 @@ async def locked_report(db: AsyncSession, day: date, *, wait: bool = True) -> M3
     return row
 
 
-async def refresh_report(db: AsyncSession, row: M3ReportingPointsReport) -> None:
-    if row.report_date != datetime.now(report_timezone()).date():
+async def refresh_report(db: AsyncSession, row: M3ReportingPointsReport, now: datetime | None = None) -> None:
+    """Rebuild today's report, including the latest staff realization.
+
+    From 16:15 on the realization is stored as the day's final value, replacing
+    any earlier capture. Before that it is only a live preview and the report
+    cannot be sent yet.
+    """
+    now = (now or datetime.now(report_timezone())).astimezone(report_timezone())
+    if row.report_date != now.date():
         raise ValueError("Raportet historike perdorin te dhenat e ruajtura te asaj dite.")
     row.data = await build_task_data(db, row.report_date)
-    row.generated_at = datetime.now(report_timezone())
+    row.realization = await build_realization_capture(db, row.report_date)
+    if now.time().replace(tzinfo=None) >= REALIZATION_CAPTURE_TIME:
+        row.realization_captured_at = now
+    row.generated_at = now
 
 
 def report_payload(row: M3ReportingPointsReport) -> dict:
