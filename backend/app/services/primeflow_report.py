@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from pydantic import BaseModel, Field
 
+from app.services.compact_report_questions import question_parts, questions_html, layout_question_parts
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -200,7 +201,7 @@ def _day_specific_question_label(report_day: date | None) -> str:
     if report_day is not None and report_day.weekday() == 3:
         return "E ENJTE- PYETJET E TE ENJTES"
     if report_day is not None and report_day.weekday() == 4:
-        return "E PREMTE - PYETJET E TE PREMTES"
+        return "E PREMTE"
     return "PYETJET SHTESE: 0"
 
 
@@ -210,6 +211,9 @@ THURSDAY_QUESTION_REPORT_CODES = {
     "Planifikimi javor short": "M1",
 }
 FRIDAY_QUESTION_REPORT_CODES = {
+    "BZ PERSONALISHT ME GA: KOMENTET TEK OPEN TASKS EXCEL": "M1",
+    "BZ PERSONALISHT ME GA: DET GA TEK PER/NGA STAFI PER GA TEAMS": "M1",
+
     "Barazimi i planifikimit javor - next week": "M1",
     "Barazimi i realizimit javor - this week": "M1",
     "Emails per missing info, per me vazhdu javen tjeter": "M1",
@@ -226,6 +230,15 @@ def _reminder_question_number(
     )
     report_code = report_codes.get(question.text)
     return f"{report_code} - {index}." if report_code else f"{index}."
+
+
+def _extra_question_parts(document):
+    return question_parts(_day_specific_question_label(document.report_date), [
+        [f"{_reminder_question_number(index, question, document.report_date)} {question.text}"
+         + (f" ({question.guidance})" if question.guidance else "")
+         for index, question in _partition_reminder_questions(questions)[0]]
+        for questions in (document.reminders, document.board_reminders)
+    ])
 
 
 class ReportDocument(BaseModel):
@@ -654,19 +667,7 @@ def render_plain_text(document: ReportDocument) -> str:
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
         (REMINDER_SECTION_TITLE, document.reminders),
     )
-    has_extra_questions = any(question.is_extra for _, questions in reminder_groups for question in questions)
-    blocks.append(_day_specific_question_label(document.report_date))
-    if has_extra_questions:
-        for reminder_title, questions in reminder_groups:
-            extra_questions, _ = _partition_reminder_questions(questions)
-            if not extra_questions:
-                continue
-            reminder_lines = [reminder_title]
-            for index, question in extra_questions:
-                reminder_lines.append(f"{_reminder_question_number(index, question, document.report_date)} {question.text}")
-                if question.guidance:
-                    reminder_lines.append(f"   {question.guidance}")
-            blocks.append("\n".join(reminder_lines))
+    blocks.append("".join(text for text, _ in _extra_question_parts(document)))
     for reminder_title, questions in reminder_groups:
         if not questions:
             continue
@@ -967,31 +968,12 @@ def render_html(
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
     )
 
-    has_extra_questions = any(
-        question.is_extra
-        for _, questions in reminder_groups
-        for question in questions
-    )
     body_chunks.append(
-        '<div data-day-specific-question-label="true" '
-        'style="font-family:Arial,sans-serif;font-size:13px;font-weight:800;'
-        'color:#b91c1c;margin:0 0 7px;padding:6px 10px;background:#fff7f7;'
-        'border-left:6px solid #dc2626;">'
-        f'{html.escape(_day_specific_question_label(document.report_date))}</div>'
+        '<div data-day-specific-question-label="true" style="font-family:Arial,sans-serif;'
+        'font-size:13px;line-height:1.45;color:#b91c1c;margin:0 0 10px;padding:6px 10px;'
+        'background:#fff7f7;border:1px solid #dc2626;border-left:6px solid #dc2626;">'
+        + questions_html(_extra_question_parts(document)) + '</div>'
     )
-    if has_extra_questions:
-        body_chunks.append(
-            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
-            'data-day-specific-reminder-columns="true" style="width:100%;border-collapse:collapse;">'
-            '<tr>'
-            '<td width="50%" valign="top" style="width:50%;padding:0 6px 0 0;vertical-align:top;">'
-            f'{reminder_column("", document.reminders, show_title=False, show_regular=False)}'
-            '</td>'
-            '<td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
-            f'{reminder_column("", document.board_reminders, show_title=False, show_regular=False)}'
-            '</td>'
-            '</tr></table>'
-        )
 
     if document.board_reminders and document.reminders:
         body_chunks.append(
@@ -1200,22 +1182,15 @@ def render_docx(document: ReportDocument) -> bytes:
                 )
         doc.add_paragraph().paragraph_format.space_after = Pt(0)
 
-    has_extra_questions = any(
-        question.is_extra
-        for questions in (document.board_reminders, document.reminders)
-        for question in questions
-    )
-    day_label = doc.add_paragraph()
-    day_label_run = day_label.add_run(
-        _day_specific_question_label(document.report_date)
-    )
-    day_label_run.bold = True
-    day_label_run.font.size = Pt(10)
-    day_label_run.font.color.rgb = RGBColor.from_string("B91C1C")
-    if has_extra_questions:
-        for _, questions in reminder_groups:
-            extra_questions, _ = _partition_reminder_questions(questions)
-            add_reminder_card(extra_questions, extra=True)
+    day_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+    shade(day_cell, "#fff7f7")
+    border(day_cell, "#dc2626")
+    paragraph = day_cell.paragraphs[0]
+    for text, role in _extra_question_parts(document):
+        run = paragraph.add_run(text)
+        run.bold = role != "question"
+        run.font.size = Pt(14 if role == "separator" else 12 if role == "label" else 10)
+        run.font.color.rgb = RGBColor.from_string("B91C1C")
     for reminder_title, questions in reminder_groups:
         if not questions:
             continue
@@ -1435,23 +1410,19 @@ def render_png(document: ReportDocument) -> bytes:
             line_y += 28
         y += card_height + 12
 
-    has_extra_questions = any(
-        question.is_extra
-        for _, questions in reminder_groups
-        for question in questions
+    from PIL import ImageFont
+    try:
+        separator_font = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 30)
+    except OSError:
+        separator_font = bold
+    placements, compact_height = layout_question_parts(
+        _extra_question_parts(document),
+        {"label": bold, "question": font, "separator": separator_font}, width - 2 * margin - 40,
     )
-    draw.text(
-        (margin + 5, y),
-        _day_specific_question_label(document.report_date),
-        fill="#b91c1c",
-        font=bold,
-    )
-    y += 38
-    if has_extra_questions:
-        for _, questions in reminder_groups:
-            extra_questions, _ = _partition_reminder_questions(questions)
-            draw_reminder_card(extra_questions, extra=True)
-        y += 14
+    draw.rectangle((margin, y, width - margin, y + compact_height + 20), fill="#fff7f7", outline="#dc2626")
+    for part_x, part_y, text, part_font in placements:
+        draw.text((margin + 20 + part_x, y + 8 + part_y), text, fill="#b91c1c", font=part_font)
+    y += compact_height + 34
     for reminder_title, questions in reminder_groups:
         if not questions:
             continue

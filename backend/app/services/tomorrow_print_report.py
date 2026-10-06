@@ -23,6 +23,7 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.compact_report_questions import question_parts, layout_question_parts
 from app.config import settings
 from app.services.meeting_palette import meeting_report_color
 from app.services.meetings_report import common_view_item_sort_key, next_working_day
@@ -95,6 +96,9 @@ THURSDAY_ONE_H_QUESTION_REPORT_CODES = {
     "Planifikimi javor short": "M1",
 }
 FRIDAY_ONE_H_QUESTION_REPORT_CODES = {
+    "BZ PERSONALISHT ME GA: KOMENTET TEK OPEN TASKS EXCEL": "M1",
+    "BZ PERSONALISHT ME GA: DET GA TEK PER/NGA STAFI PER GA TEAMS": "M1",
+
     "Barazimi i planifikimit javor - next week": "M1",
     "Barazimi i realizimit javor - this week": "M1",
     "Emails per missing info, per me vazhdu javen tjeter": "M1",
@@ -129,7 +133,7 @@ def _day_specific_question_label(report_day: date | None) -> str:
     if report_day is not None and report_day.weekday() == 3:
         return "E ENJTE- PYETJET E TE ENJTES"
     if report_day is not None and report_day.weekday() == 4:
-        return "E PREMTE - PYETJET E TE PREMTES"
+        return "E PREMTE"
     return "PYETJET SHTESE: 0"
 
 # Gmail can remove style blocks from message bodies. Keep the styles that form
@@ -1140,13 +1144,23 @@ def _is_non_routine_meeting(item: dict[str, Any]) -> bool:
     return recurrence not in {"daily", "weekly"}
 
 
+def _extra_question_parts(checklist_date):
+    board, staff = _one_h_checklists_for_day(checklist_date)
+    return question_parts(_day_specific_question_label(checklist_date), [
+        [f"{_checklist_question_number(checklist_date, index, question)} {question}"
+         + (f" ({description})" if description else "")
+         for index, (question, description) in enumerate(questions, 1)]
+        for questions in (staff[len(ONE_H_STAFF_CHECKLIST):], board[len(ONE_H_BOARD_CHECKLIST):])
+    ])
+
+
 def _one_h_checklists_html(report_day: date | None = None) -> str:
     """The two preparation checklists shown above every 1H Shtypi task grid."""
     board_questions, staff_questions = _one_h_checklists_for_day(report_day)
 
     def question_text(questions: tuple[tuple[str, str], ...], *, extra: bool) -> str:
         if extra:
-            return ' <span style="font-weight:900;"> / </span> '.join(
+            return ' <strong style="font-size:20px;font-weight:900;line-height:1;vertical-align:-2px;padding:0 5px;"> / </strong> '.join(
                 '<span data-extra-checklist-question="true" style="display:inline;">'
                 f'<strong>{html.escape(_checklist_question_number(report_day, index, question))} {html.escape(question)}</strong>'
                 + (f' <span style="color:#dc2626;font-weight:400;">({html.escape(description)})</span>' if description else "")
@@ -1190,14 +1204,14 @@ def _one_h_checklists_html(report_day: date | None = None) -> str:
     staff_extra = staff_questions[len(ONE_H_STAFF_CHECKLIST):]
     board_extra = board_questions[len(ONE_H_BOARD_CHECKLIST):]
     extra_groups = [questions for questions in (staff_extra, board_extra) if questions]
-    extra_content = ' <span style="font-weight:900;"> / </span> '.join(
+    extra_content = ' <strong style="font-size:20px;font-weight:900;line-height:1;vertical-align:-2px;padding:0 5px;"> / </strong> '.join(
         question_text(questions, extra=True) for questions in extra_groups
     )
     weekday_block = (
         '<div data-day-specific-question-label="true" style="font-family:Arial,sans-serif;'
         'font-size:13px;line-height:1.45;color:#b91c1c;margin:0 0 10px;padding:6px 10px;'
         'background:#fff7f7;border-left:6px solid #dc2626;">'
-        f'<strong style="margin-right:12px;">{html.escape(day_label)}</strong>'
+        f'<strong style="margin-right:12px;font-size:15px;font-weight:900;">{html.escape(day_label)}</strong>'
         + (f'<span data-day-specific-checklist-columns="true">{extra_content}</span>' if extra_content else "")
         + '</div>'
     )
@@ -1866,35 +1880,16 @@ def _excel_table_attachment(
         day_label = _day_specific_question_label(checklist_date)
         if staff_extra or board_extra:
             sheet.merge_cells(start_row=row_number, start_column=1, end_row=row_number, end_column=8)
-            label_cell = sheet.cell(row_number, 1, day_label)
-            label_cell.fill = weekday_fill
-            label_cell.font = Font(color="B91C1C", bold=True, size=10)
-            label_cell.alignment = Alignment(vertical="center")
-            label_cell.border = border
-            row_number += 1
-            for start_column, end_column, questions in (
-                (1, 4, staff_extra),
-                (5, 8, board_extra),
-            ):
-                sheet.merge_cells(
-                    start_row=row_number,
-                    start_column=start_column,
-                    end_row=row_number,
-                    end_column=end_column,
-                )
-                extra_cell = sheet.cell(
-                    row_number,
-                    start_column,
-                    "\n".join(
-                        f"{_checklist_question_number(checklist_date, index, question)} {question}" + (f" ({description})" if description else "")
-                        for index, (question, description) in enumerate(questions, 1)
-                    ),
-                )
-                extra_cell.fill = weekday_fill
-                extra_cell.font = Font(color="B91C1C", bold=True, size=10)
-                extra_cell.alignment = Alignment(vertical="center", wrap_text=True)
-                extra_cell.border = border
-            sheet.row_dimensions[row_number].height = 48
+            extra_cell = sheet.cell(row_number, 1)
+            extra_cell.value = CellRichText([
+                TextBlock(InlineFont(rFont="Arial", b=role != "question", sz=14 if role == "separator" else 12 if role == "label" else 10, color="B91C1C"), text)
+                for text, role in _extra_question_parts(checklist_date)
+            ])
+            extra_cell.fill = weekday_fill
+            extra_cell.font = Font(color="B91C1C", size=10)
+            extra_cell.alignment = Alignment(vertical="center", wrap_text=True)
+            extra_cell.border = border
+            sheet.row_dimensions[row_number].height = 18 * max(1, (len(str(extra_cell.value)) + 179) // 180)
             row_number += 1
         else:
             sheet.merge_cells(start_row=2, start_column=1, end_row=2, end_column=8)
@@ -2443,27 +2438,12 @@ def _docx_table_attachment(
     board_extra = board_questions[len(ONE_H_BOARD_CHECKLIST):]
     extra_status_cell = document.add_table(rows=1, cols=1).cell(0, 0)
     shade(extra_status_cell, "FFF7F7")
-    set_cell(
-        extra_status_cell,
-        _day_specific_question_label(checklist_date),
-        bold=True,
-        color="B91C1C",
-    )
-    if staff_extra or board_extra:
-        extra_table = document.add_table(rows=1, cols=2)
-        extra_table.style = "Table Grid"
-        set_widths(extra_table, [5.05, 5.05])
-        for cell, questions in zip(extra_table.rows[0].cells, (staff_extra, board_extra)):
-            shade(cell, "FFF7F7")
-            set_cell(
-                cell,
-                "\n".join(
-                    f"{index}. {question}" + (f" ({description})" if description else "")
-                    for index, (question, description) in enumerate(questions, 1)
-                ),
-                bold=True,
-                color="B91C1C",
-            )
+    paragraph = extra_status_cell.paragraphs[0]
+    for text, role in _extra_question_parts(checklist_date):
+        run = paragraph.add_run(text)
+        run.bold = role != "question"
+        run.font.size = Pt(14 if role == "separator" else 12 if role == "label" else 10)
+        run.font.color.rgb = RGBColor.from_string("B91C1C")
 
     for closing_section in closing_sections or []:
         heading(closing_section.title, size=11)
@@ -2675,12 +2655,11 @@ def _core_png_table_attachment(
     board_questions, staff_questions = _one_h_checklists_for_day(checklist_date)
     staff_extra = staff_questions[len(ONE_H_STAFF_CHECKLIST):]
     board_extra = board_questions[len(ONE_H_BOARD_CHECKLIST):]
-    extra_lines = [
-        f"{_checklist_question_number(checklist_date, index, question)} {question}" + (f" ({description})" if description else "")
-        for questions in (staff_extra, board_extra)
-        for index, (question, description) in enumerate(questions, 1)
-    ]
-    extra_status_height = 34 + (len(extra_lines) * 22 if extra_lines else 0)
+    placements, compact_height = layout_question_parts(
+        _extra_question_parts(checklist_date),
+        {"label": bold, "question": regular, "separator": heading}, width - 2 * margin - 20,
+    )
+    extra_status_height = compact_height + 16
     header_top, header_height = 92 + extra_status_height, 40
     comment_columns = comment_initials or list(COMMENT_FIXED_INITIALS)
     comment_lines = _comment_write_in_lines(comment_columns)
@@ -2760,14 +2739,8 @@ def _core_png_table_attachment(
         fill="#FFF7F7",
         outline="#DC2626",
     )
-    draw.text(
-        (margin + 10, status_top + 6),
-        _day_specific_question_label(checklist_date),
-        fill="#B91C1C",
-        font=bold,
-    )
-    for index, line in enumerate(extra_lines):
-        draw.text((margin + 10, status_top + 32 + index * 22), line, fill="#B91C1C", font=small_bold)
+    for part_x, part_y, text, part_font in placements:
+        draw.text((margin + 10 + part_x, status_top + 6 + part_y), text, fill="#B91C1C", font=part_font)
 
     y, x = header_top, margin
     task_table_top = y
@@ -3323,9 +3296,7 @@ async def _build_print_report(
         "",
         *(
             [
-                day_label,
-                *plain_checklist_lines(staff_extra, day_specific=True),
-                *plain_checklist_lines(board_extra, day_specific=True),
+                "".join(text for text, _ in _extra_question_parts(checklist_date)),
                 "",
             ]
             if day_label else []

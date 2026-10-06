@@ -580,20 +580,14 @@ def test_thursday_checklists_add_week_closing_questions_in_html_and_excel() -> N
 
     _, content, _ = _excel_table_attachment([], [], date(2026, 9, 4), checklist_date=thursday)
     sheet = load_workbook(BytesIO(content)).active
-    assert sheet["A3"].value == "E ENJTE- PYETJET E TE ENJTES"
-    assert "Planifikimi javor short" in sheet["E4"].value
-    assert "Emails per missing info, per me vazhdu javen tjeter" in sheet["A4"].value
-    assert "Shikohen det qe mbesin vetem per neser (te premten)" in sheet["A4"].value
-    assert sheet["E4"].value.startswith("M1 - 1.")
-    assert sheet["A4"].value.startswith("M1 - 1.")
-    assert "M3 - 2." in sheet["A4"].value
-    assert sheet["A5"].value == "STAFF - HAPAT PER 1H"
-    assert sheet["E5"].value == "PYETJET PER 1H - BORD"
-    assert sheet["A6"].value.startswith("1. Hap doc dhe det")
-    assert sheet["E6"].value == "1. Notes te reja? Data? AM/PM? Kujt / 2. Done? / Strikes? / 3. BZ Det nga Stafi per GA (Komunikimi GA teams Det nga Stafi/ KA email) / 4. BZ Notes (Secili i lexon vet para BZ me GA)"
-    assert sheet["E7"].value.startswith("1. Slotin paraprak/aktual")
+    compact = str(sheet["A3"].value)
+    assert compact.startswith("E ENJTE- PYETJET E TE ENJTES  M1 - 1.")
+    assert "M3 - 2. Shikohen det qe mbesin" in compact
+    assert "M1 - 1. Planifikimi javor short" in compact
+    assert sheet["A4"].value == "STAFF - HAPAT PER 1H"
+    assert sheet["A5"].value.startswith("1. Hap doc dhe det")
     assert sheet["A3"].font.color.rgb == "00B91C1C"
-    assert sheet["A4"].fill.fgColor.rgb == "00FFF7F7"
+    assert sheet["A3"].fill.fgColor.rgb == "00FFF7F7"
 
 
 def test_tomorrow_report_uses_target_day_for_thursday_questions() -> None:
@@ -619,7 +613,7 @@ def test_tomorrow_report_uses_target_day_for_thursday_questions() -> None:
     thursday_excel_values = [
         str(cell.value or "") for row in thursday_excel.iter_rows() for cell in row
     ]
-    assert "E ENJTE- PYETJET E TE ENJTES" in thursday_excel_values
+    assert any(value.startswith("E ENJTE- PYETJET E TE ENJTES") for value in thursday_excel_values)
     assert any("Planifikimi javor short" in value for value in thursday_excel_values)
     assert any("Shikohen det qe mbesin vetem per neser" in value for value in thursday_excel_values)
 
@@ -633,28 +627,27 @@ def test_friday_checklists_add_staff_questions_and_keep_board_unchanged() -> Non
     assert "Barazimi i realizimit javor - this week" in checklists_html
     assert "Emails per missing info, per me vazhdu javen tjeter" in checklists_html
     assert "Planifikimi javor short" not in checklists_html
-    assert checklists_html.count("E PREMTE - PYETJET E TE PREMTES") == 1
+    assert checklists_html.count("E PREMTE") == 1
     weekday_row = re.search(r'<div data-day-specific-question-label="true".*?</div>', checklists_html).group()
     assert "BZ PERSONALISHT ME GA: KOMENTET TEK OPEN TASKS EXCEL" in weekday_row
     assert "Emails per missing info" in weekday_row
     assert '<span data-extra-checklist-question="true" style="display:inline;"><strong>M1 - 3. Barazimi i planifikimit javor - next week</strong></span>' in checklists_html
     assert '<span data-extra-checklist-question="true" style="display:inline;"><strong>M1 - 4. Barazimi i realizimit javor - this week</strong></span>' in checklists_html
     assert '<span data-extra-checklist-question="true" style="display:inline;"><strong>M1 - 5. Emails per missing info, per me vazhdu javen tjeter</strong></span>' in checklists_html
-    assert checklists_html.index("E PREMTE - PYETJET E TE PREMTES") < checklists_html.index("Barazimi i planifikimit")
+    assert checklists_html.index("E PREMTE") < checklists_html.index("Barazimi i planifikimit")
     assert checklists_html.index("Emails per missing info") < checklists_html.index("STAFF - HAPAT PER 1H")
 
     _, content, _ = _excel_table_attachment([], [], date(2026, 9, 7), checklist_date=friday)
     sheet = load_workbook(BytesIO(content)).active
-    assert sheet["A3"].value == "E PREMTE - PYETJET E TE PREMTES"
-    assert "Barazimi i planifikimit javor - next week" in sheet["A4"].value
-    assert "Barazimi i realizimit javor - this week" in sheet["A4"].value
-    assert sheet["A4"].value.startswith("1. BZ PERSONALISHT ME GA: KOMENTET TEK OPEN TASKS EXCEL")
-    assert "2. BZ PERSONALISHT ME GA: DET GA TEK PER/NGA STAFI PER GA TEAMS" in sheet["A4"].value
-    assert "M1 - 4." in sheet["A4"].value
-    assert "M1 - 5." in sheet["A4"].value
-    assert sheet["E4"].value is None
-    assert sheet["A5"].value == "STAFF - HAPAT PER 1H"
-    assert sheet["A6"].value.startswith("1. Hap doc dhe det")
+    compact = str(sheet["A3"].value)
+    assert compact.startswith("E PREMTE  M1 - 1. BZ PERSONALISHT ME GA: KOMENTET TEK OPEN TASKS EXCEL")
+    assert "M1 - 2. BZ PERSONALISHT ME GA: DET GA TEK PER/NGA STAFI PER GA TEAMS" in compact
+    assert "M1 - 3. Barazimi i planifikimit" in compact
+    assert "M1 - 4. Barazimi i realizimit" in compact
+    assert "M1 - 5. Emails per missing info" in compact
+    assert sheet["A4"].value == "STAFF - HAPAT PER 1H"
+    assert sheet["A5"].value.startswith("1. Hap doc dhe det")
+
 
 
 def test_tomorrow_report_uses_target_day_for_friday_questions() -> None:
@@ -666,7 +659,7 @@ def test_tomorrow_report_uses_target_day_for_friday_questions() -> None:
         )
     )
 
-    assert report["plain_text"].count("E PREMTE - PYETJET E TE PREMTES") == 1
+    assert report["plain_text"].count("E PREMTE") == 1
 
     assert report["target_date"] == "2026-09-04"
     assert "Barazimi i planifikimit javor - next week" in report["html"]
@@ -675,7 +668,7 @@ def test_tomorrow_report_uses_target_day_for_friday_questions() -> None:
     friday_excel_values = [
         str(cell.value or "") for row in friday_excel.iter_rows() for cell in row
     ]
-    assert "E PREMTE - PYETJET E TE PREMTES" in friday_excel_values
+    assert any(value.startswith("E PREMTE") for value in friday_excel_values)
     assert any("Barazimi i planifikimit javor - next week" in value for value in friday_excel_values)
     assert any("Barazimi i realizimit javor - this week" in value for value in friday_excel_values)
 
@@ -686,7 +679,7 @@ def test_tomorrow_report_sent_friday_does_not_use_friday_questions_for_monday() 
     )
 
     assert report["target_date"] == "2026-09-07"
-    assert "E PREMTE - PYETJET E TE PREMTES" not in report["html"]
+    assert "E PREMTE" not in report["html"]
     assert "Barazimi i planifikimit javor - next week" not in report["html"]
     assert report["html"].count("PYETJET SHTESE: 0") == 1
     assert report["plain_text"].count("PYETJET SHTESE: 0") == 1
@@ -1543,6 +1536,32 @@ def test_unavailable_meeting_users_are_red_only_when_the_status_covers_meeting_t
     assert 'color:#DC2626;font-weight:800">AB</span>' in report_html
     assert 'color:#DC2626;font-weight:800">DV</span>' not in report_html
     assert report_html.count(">LH</span>") == 1
+
+
+@pytest.mark.parametrize("day", [date(2026, 10, 8), date(2026, 10, 9)])
+def test_day_specific_export_questions_share_the_title_row(day) -> None:
+    from docx import Document
+
+    _, content, _ = _docx_table_attachment([], day, checklist_date=day)
+    document = Document(BytesIO(content))
+    paragraph = next(
+        p for table in document.tables for row in table.rows for cell in row.cells
+        for p in cell.paragraphs if p.text.startswith("E PREMTE" if day.weekday() == 4 else "E ENJTE")
+    )
+    assert "M1 - 1." in paragraph.text
+    assert " / " in paragraph.text
+    assert paragraph.runs[0].bold
+    assert all(run.bold and run.font.size.pt == 14 for run in paragraph.runs if run.text == " / ")
+    if day.weekday() == 4:
+        assert "M1 - 2. BZ PERSONALISHT ME GA" in paragraph.text
+
+    _, content, _ = _excel_table_attachment([], [], day, checklist_date=day)
+    sheet = load_workbook(BytesIO(content), rich_text=True).active
+    parts = sheet["A3"].value
+    assert str(parts) == paragraph.text
+    assert parts[0].font.b
+    assert all(part.font.b and part.font.sz == 14 for part in parts if part.text == " / ")
+    assert sheet["A3"].alignment.wrap_text
 
 
 def test_word_export_preserves_task_markers_and_unavailable_meeting_users() -> None:

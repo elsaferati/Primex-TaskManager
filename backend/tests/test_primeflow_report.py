@@ -38,6 +38,31 @@ from app.services.primeflow_report_delivery import (
 
 
 class PrimeFlowReportTests(unittest.TestCase):
+    def test_extra_questions_share_title_in_html_word_and_text(self) -> None:
+        from docx import Document
+
+        for day in (date(2026, 10, 8), date(2026, 10, 9)):
+            with self.subTest(day=day):
+                document = build_report_document(
+                    {"items": {}}, day, "10:00",
+                    reminders=asyncio.run(load_1h_reminder_questions("10:00", day)),
+                )
+                output = render_html(document)
+                row = output.split('data-day-specific-question-label="true"', 1)[1].split('</div>', 1)[0]
+                self.assertIn("M1 - 1.", row)
+                self.assertIn("font-size:20px", row)
+                word = Document(io.BytesIO(render_docx(document)))
+                paragraph = next(
+                    p for table in word.tables for row in table.rows for cell in row.cells
+                    for p in cell.paragraphs if p.text.startswith("E PREMTE" if day.weekday() == 4 else "E ENJTE")
+                )
+                self.assertIn("M1 - 1.", paragraph.text)
+                self.assertIn(paragraph.text, render_plain_text(document))
+                self.assertTrue(paragraph.runs[0].bold)
+                separators = [run for run in paragraph.runs if run.text == " / "]
+                self.assertTrue(separators)
+                self.assertTrue(all(run.bold and run.font.size.pt == 14 for run in separators))
+
     def test_combined_m2_m3_marker_renders_in_reports(self) -> None:
         self.assertEqual(one_h_marker_symbol("M2_M3"), "M2/3")
 
@@ -300,13 +325,13 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertTrue(all(question.is_extra for question in document.reminders[-2:]))
 
         rendered_html = render_html(document)
-        self.assertEqual(rendered_html.count('data-extra-reminder-card="true"'), 2)
+        self.assertEqual(rendered_html.count('data-day-specific-question-label="true"'), 1)
         self.assertIn("border:1px solid #dc2626", rendered_html)
         self.assertIn("color:#b91c1c", rendered_html)
         self.assertEqual(rendered_html.count("E ENJTE- PYETJET E TE ENJTES"), 1)
-        self.assertIn('<div style="display:block;white-space:normal;"><strong>M1 - 1.</strong> Planifikimi javor short</div>', rendered_html)
-        self.assertIn('<div style="display:block;white-space:normal;"><strong>M1 - 1.</strong> Emails per missing info, per me vazhdu javen tjeter</div>', rendered_html)
-        self.assertIn('<div style="display:block;white-space:normal;"><strong>M3 - 2.</strong> Shikohen det qe mbesin vetem per neser (te premten)</div>', rendered_html)
+        self.assertIn('M1 - 1. Planifikimi javor short', rendered_html)
+        self.assertIn('M1 - 1. Emails per missing info, per me vazhdu javen tjeter', rendered_html)
+        self.assertIn('M3 - 2. Shikohen det qe mbesin vetem per neser (te premten)', rendered_html)
         self.assertLess(
             rendered_html.index("Emails per missing info, per me vazhdu javen tjeter"),
             rendered_html.index("Hap doc dhe det"),
@@ -323,7 +348,7 @@ class PrimeFlowReportTests(unittest.TestCase):
             rendered_html.index("Planifikimi javor short"),
             rendered_html.index(BOARD_REMINDER_SECTION_TITLE),
         )
-        self.assertIn('data-day-specific-reminder-columns="true"', rendered_html)
+        self.assertIn('font-size:20px', rendered_html)
 
         word_xml = zipfile.ZipFile(io.BytesIO(render_docx(document))).read(
             "word/document.xml"
@@ -337,7 +362,7 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn("M1 - 1. Emails per missing info, per me vazhdu javen tjeter", word_xml)
         self.assertIn("M3 - 2. Shikohen det qe mbesin vetem per neser (te premten)", word_xml)
         plain = render_plain_text(document)
-        self.assertIn("M1 - 1. Emails per missing info, per me vazhdu javen tjeter\nM3 - 2. Shikohen det qe mbesin vetem per neser (te premten)", plain)
+        self.assertIn("M1 - 1. Emails per missing info, per me vazhdu javen tjeter / M3 - 2. Shikohen det qe mbesin vetem per neser (te premten)", plain)
         self.assertGreater(len(render_png(document)), 1000)
 
     def test_friday_reports_add_week_balancing_staff_questions(self) -> None:
@@ -366,11 +391,11 @@ class PrimeFlowReportTests(unittest.TestCase):
             [question.text for question in document.board_reminders],
         )
         rendered_html = render_html(document)
-        self.assertEqual(rendered_html.count('data-extra-reminder-card="true"'), 1)
-        self.assertIn("E PREMTE - PYETJET E TE PREMTES", rendered_html)
-        self.assertIn('<div style="display:block;white-space:normal;"><strong>M1 - 3.</strong> Barazimi i planifikimit javor - next week</div>', rendered_html)
-        self.assertIn('<div style="display:block;white-space:normal;"><strong>M1 - 4.</strong> Barazimi i realizimit javor - this week</div>', rendered_html)
-        self.assertIn('<div style="display:block;white-space:normal;"><strong>M1 - 5.</strong> Emails per missing info, per me vazhdu javen tjeter</div>', rendered_html)
+        self.assertEqual(rendered_html.count('data-day-specific-question-label="true"'), 1)
+        self.assertIn("E PREMTE", rendered_html)
+        self.assertIn('M1 - 3. Barazimi i planifikimit javor - next week', rendered_html)
+        self.assertIn('M1 - 4. Barazimi i realizimit javor - this week', rendered_html)
+        self.assertIn('M1 - 5. Emails per missing info, per me vazhdu javen tjeter', rendered_html)
         self.assertLess(rendered_html.index("BZ PERSONALISHT ME GA: KOMENTET TEK OPEN TASKS EXCEL"), rendered_html.index("BZ PERSONALISHT ME GA: DET GA TEK PER/NGA STAFI PER GA TEAMS"))
         self.assertLess(rendered_html.index("BZ PERSONALISHT ME GA: DET GA TEK PER/NGA STAFI PER GA TEAMS"), rendered_html.index("Barazimi i planifikimit"))
         plain = render_plain_text(document)
@@ -668,8 +693,8 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn('data-board-reminder-columns="true"', html)
         self.assertIn(BOARD_REMINDER_SECTION_TITLE, html)
         self.assertIn('data-reminder-columns="true"', html)
-        self.assertEqual(html.count('data-compact-reminder-row="true"'), 4)
-        self.assertEqual(html.count('data-extra-reminder-card="true"'), 1)
+        self.assertEqual(html.count('data-compact-reminder-row="true"'), 3)
+        self.assertEqual(html.count('data-extra-reminder-card="true"'), 0)
         self.assertIn('width="50%" valign="top"', html)
         self.assertIn('<strong>1.</strong> Hap doc dhe det', html)
         self.assertIn('<strong>2.</strong> Share screen side by side DET/REZULTATIN', html)
