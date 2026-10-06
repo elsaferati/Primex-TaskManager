@@ -72,6 +72,41 @@ function writeGaViewCache(key: string, value: unknown) {
   }
 }
 
+function findGaneUser<T extends { username?: string | null }>(users: T[]): T | null {
+  return (
+    users.find((person) => {
+      const username = person.username?.toLowerCase()
+      const email =
+        "email" in person && typeof person.email === "string" ? person.email.toLowerCase() : null
+      return username === "gane.arifaj" || email === "ga@primexeu.com"
+    }) ?? null
+  )
+}
+function findGaDepartmentId(departments: Department[]): string | null {
+  const byCode = departments.find((dept) => dept.code?.toUpperCase() === "GA")
+  if (byCode) return byCode.id
+  const byName = departments.find((dept) => dept.name?.toUpperCase().includes("GA"))
+  return byName?.id ?? null
+}
+// Ids of Gane and the GA department from the last visit, so the small GA task
+// list can be requested at once instead of waiting for users/departments.
+const GA_IDS_STORAGE_KEY = "primeflow-admin-tasks:ga-ids"
+function readGaIds(): { userId: string; departmentId: string | null } | null {
+  try {
+    const raw = window.localStorage.getItem(GA_IDS_STORAGE_KEY)
+    return raw ? (JSON.parse(raw) as { userId: string; departmentId: string | null }) : null
+  } catch {
+    return null
+  }
+}
+function writeGaIds(value: { userId: string; departmentId: string | null }) {
+  try {
+    window.localStorage.setItem(GA_IDS_STORAGE_KEY, JSON.stringify(value))
+  } catch {
+    // Storage blocked: the ids are looked up again next time.
+  }
+}
+
 // The main task lists are too large for localStorage, so the last loaded copy
 // lives in IndexedDB. The page paints from it at once and refreshes behind it.
 const ADMIN_TASKS_IDB_NAME = "primeflow-admin-tasks"
@@ -2478,16 +2513,7 @@ export default function AdminTasksPage() {
   }, [apiFetch, commonWeekStart, gaSectionsReady, user?.id])
 
   const isAdmin = String(user?.role || "").trim().toUpperCase() === "ADMIN"
-  const ganeUser = React.useMemo(
-    () =>
-      users.find((person) => {
-        const username = person.username?.toLowerCase()
-        const email =
-          "email" in person && typeof person.email === "string" ? person.email.toLowerCase() : null
-        return username === "gane.arifaj" || email === "ga@primexeu.com"
-      }) ?? null,
-    [users]
-  )
+  const ganeUser = React.useMemo(() => findGaneUser(users), [users])
   const ganeUserId = ganeUser?.id ?? null
 
   const mainCacheKey = `main|${user?.id || ""}|${user?.role || ""}`
@@ -2528,13 +2554,53 @@ export default function AdminTasksPage() {
       }
       const readJson = async <T,>(res: Response): Promise<T | null> => (res.ok ? ((await res.json()) as T) : null)
       // All four lookups are independent, so they run side by side.
+      const tasksPromise = apiFetch("/tasks?include_done=true").then((res) => readJson<Task[]>(res))
+      const departmentsPromise = apiFetch("/departments").then((res) => readJson<Department[]>(res))
+      const systemTasksPromise = apiFetch("/system-tasks?only_active=false").then((res) =>
+        readJson<SystemTaskOut[]>(res)
+      )
+      const usersPromise = loadUsers()
+
+      // The full company task list is slow; the page only builds rows from
+      // GA's tasks. Paint those first from a small request, then swap in the
+      // full list once it arrives so everything else stays as before.
+      let fullTasksApplied = false
+      const loadGaTasksFirst = async () => {
+        let ids = readGaIds()
+        if (!ids) {
+          const [usersList, departmentsList] = await Promise.all([usersPromise, departmentsPromise])
+          const gane = findGaneUser(usersList || [])
+          if (!gane) return
+          ids = { userId: gane.id, departmentId: findGaDepartmentId(departmentsList || []) }
+        }
+        const qs = new URLSearchParams({ include_done: "true", related_user_id: ids.userId })
+        if (ids.departmentId) qs.set("related_department_id", ids.departmentId)
+        const [gaTasks, departmentsList, systemTasksList, usersList] = await Promise.all([
+          apiFetch(`/tasks?${qs.toString()}`).then((res) => readJson<Task[]>(res)),
+          departmentsPromise,
+          systemTasksPromise,
+          usersPromise,
+        ])
+        if (fullTasksApplied || !gaTasks) return
+        mainNetworkLoadedRef.current = true
+        setTasks(gaTasks)
+        if (departmentsList) setDepartments(departmentsList)
+        if (systemTasksList) setSystemTasks(systemTasksList)
+        if (usersList) setUsers(usersList)
+        setLoadingTasks(false)
+      }
+      void loadGaTasksFirst().catch((error) => console.error("Failed to load GA tasks first", error))
+
       const [nextTasks, nextDepartments, nextSystemTasks, nextUsers] = await Promise.all([
-        apiFetch("/tasks?include_done=true").then((res) => readJson<Task[]>(res)),
-        apiFetch("/departments").then((res) => readJson<Department[]>(res)),
-        apiFetch("/system-tasks?only_active=false").then((res) => readJson<SystemTaskOut[]>(res)),
-        loadUsers(),
+        tasksPromise,
+        departmentsPromise,
+        systemTasksPromise,
+        usersPromise,
       ])
+      fullTasksApplied = true
       mainNetworkLoadedRef.current = true
+      const gane = findGaneUser(nextUsers || [])
+      if (gane) writeGaIds({ userId: gane.id, departmentId: findGaDepartmentId(nextDepartments || []) })
       if (nextTasks) setTasks(nextTasks)
       if (nextDepartments) setDepartments(nextDepartments)
       if (nextSystemTasks) setSystemTasks(nextSystemTasks)
@@ -2552,12 +2618,7 @@ export default function AdminTasksPage() {
     }
   }, [apiFetch, mainCacheKey, user?.id, user?.role])
 
-  const adminDepartmentId = React.useMemo(() => {
-    const byCode = departments.find((dept) => dept.code?.toUpperCase() === "GA")
-    if (byCode) return byCode.id
-    const byName = departments.find((dept) => dept.name?.toUpperCase().includes("GA"))
-    return byName?.id ?? null
-  }, [departments])
+  const adminDepartmentId = React.useMemo(() => findGaDepartmentId(departments), [departments])
 
   const fastTaskAssigneeLabel = React.useMemo(() => {
     if (fastTaskAssignees.length === 0) return "Unassigned"

@@ -13,7 +13,7 @@ except ImportError:
 from fastapi import APIRouter, Depends, HTTPException, Response, status, Query
 from sqlalchemy import delete, exists, func, insert, literal, null, or_, select, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import load_only
+from sqlalchemy.orm import aliased, load_only
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin, ensure_task_editor
 from app.api.deps import get_current_user
@@ -35,6 +35,7 @@ from app.models.task_planner_exclusion import TaskPlannerExclusion
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.services.one_h_slots import effective_slot_date
+from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.user import User
 from app.schemas.task import (
@@ -1460,6 +1461,8 @@ async def list_tasks(
     include_inactive: bool = False,
     system_only: bool = False,
     include_all_departments: bool = False,
+    related_user_id: uuid.UUID | None = None,
+    related_department_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[TaskOut]:
@@ -1518,6 +1521,36 @@ async def list_tasks(
         )
     if created_by:
         stmt = stmt.where(Task.created_by == created_by)
+    if related_user_id:
+        # Everything a single-user view (e.g. Admin Tasks for GA) builds rows
+        # from: the user's own tasks, the department's tasks, and every
+        # instance of system templates the user works on or is aligned with,
+        # so merged system-task assignees stay complete.
+        def _related_task(entity):
+            conditions = [
+                entity.assigned_to == related_user_id,
+                entity.confirmation_assignee_id == related_user_id,
+                entity.id.in_(select(TaskAssignee.task_id).where(TaskAssignee.user_id == related_user_id)),
+                entity.id.in_(select(TaskAlignmentUser.task_id).where(TaskAlignmentUser.user_id == related_user_id)),
+            ]
+            if related_department_id:
+                conditions.append(entity.department_id == related_department_id)
+            return or_(*conditions)
+
+        related_instance = aliased(Task)
+        related_template_ids = union_all(
+            select(SystemTaskTemplateAlignmentUser.template_id).where(
+                SystemTaskTemplateAlignmentUser.user_id == related_user_id
+            ),
+            select(related_instance.system_template_origin_id).where(
+                related_instance.system_template_origin_id.is_not(None),
+                related_instance.is_active.is_(True),
+                _related_task(related_instance),
+            ),
+        )
+        stmt = stmt.where(
+            or_(_related_task(Task), Task.system_template_origin_id.in_(related_template_ids))
+        )
     if ga_note_origin_ids:
         stmt = stmt.where(Task.ga_note_origin_id.in_(ga_note_origin_ids))
     if plan_note_origin_ids:
