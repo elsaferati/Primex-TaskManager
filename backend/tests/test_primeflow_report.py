@@ -351,14 +351,16 @@ class PrimeFlowReportTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [question.text for question in document.reminders[-3:]],
+            [question.text for question in document.reminders[-5:]],
             [
+                "BZ PERSONALISHT ME GA: KOMENTET TEK OPEN TASKS EXCEL",
+                "BZ PERSONALISHT ME GA: DET GA TEK PER/NGA STAFI PER GA TEAMS",
                 "Barazimi i planifikimit javor - next week",
                 "Barazimi i realizimit javor - this week",
                 "Emails per missing info, per me vazhdu javen tjeter",
             ],
         )
-        self.assertTrue(all(question.is_extra for question in document.reminders[-3:]))
+        self.assertTrue(all(question.is_extra for question in document.reminders[-5:]))
         self.assertNotIn(
             "Planifikimi javor short",
             [question.text for question in document.board_reminders],
@@ -366,13 +368,15 @@ class PrimeFlowReportTests(unittest.TestCase):
         rendered_html = render_html(document)
         self.assertEqual(rendered_html.count('data-extra-reminder-card="true"'), 1)
         self.assertIn("E PREMTE - PYETJET E TE PREMTES", rendered_html)
-        self.assertIn('<div style="display:block;white-space:normal;"><strong>M1 - 1.</strong> Barazimi i planifikimit javor - next week</div>', rendered_html)
-        self.assertIn('<div style="display:block;white-space:normal;"><strong>M1 - 2.</strong> Barazimi i realizimit javor - this week</div>', rendered_html)
-        self.assertIn('<div style="display:block;white-space:normal;"><strong>M1 - 3.</strong> Emails per missing info, per me vazhdu javen tjeter</div>', rendered_html)
+        self.assertIn('<div style="display:block;white-space:normal;"><strong>M1 - 3.</strong> Barazimi i planifikimit javor - next week</div>', rendered_html)
+        self.assertIn('<div style="display:block;white-space:normal;"><strong>M1 - 4.</strong> Barazimi i realizimit javor - this week</div>', rendered_html)
+        self.assertIn('<div style="display:block;white-space:normal;"><strong>M1 - 5.</strong> Emails per missing info, per me vazhdu javen tjeter</div>', rendered_html)
+        self.assertLess(rendered_html.index("BZ PERSONALISHT ME GA: KOMENTET TEK OPEN TASKS EXCEL"), rendered_html.index("BZ PERSONALISHT ME GA: DET GA TEK PER/NGA STAFI PER GA TEAMS"))
+        self.assertLess(rendered_html.index("BZ PERSONALISHT ME GA: DET GA TEK PER/NGA STAFI PER GA TEAMS"), rendered_html.index("Barazimi i planifikimit"))
         plain = render_plain_text(document)
-        self.assertIn("M1 - 1. Barazimi i planifikimit javor - next week", plain)
-        self.assertIn("M1 - 2. Barazimi i realizimit javor - this week", plain)
-        self.assertIn("M1 - 3. Emails per missing info, per me vazhdu javen tjeter", plain)
+        self.assertIn("M1 - 3. Barazimi i planifikimit javor - next week", plain)
+        self.assertIn("M1 - 4. Barazimi i realizimit javor - this week", plain)
+        self.assertIn("M1 - 5. Emails per missing info, per me vazhdu javen tjeter", plain)
         self.assertLess(
             rendered_html.index("Barazimi i planifikimit javor - next week"),
             rendered_html.index("Hap doc dhe det"),
@@ -1060,6 +1064,30 @@ class PrimeFlowReportTests(unittest.TestCase):
             after_description="1. One\n2. Two",
         )
         self.assertEqual([(row.action, row.point_text) for row in reopened.rows], [("UNSTRUCK", "1. One")])
+
+    def test_empty_marked_checklist_item_preserves_report_title(self) -> None:
+        day = date(2026, 9, 18)
+        for employee in ("EF", "RA"):
+            for item in ("[[added]]1.[[/added]]", "[[done]][[added]]1.[[/added]][[/done]]"):
+                with self.subTest(employee=employee, item=item):
+                    heading = f"{employee}: FRG: 1/17 SHTO 1 KZH TE REJA"
+                    plain, marked = render_text_for_interval(
+                        f"[[added]]{heading}[[/added]]\n{item}", [],
+                        interval_start=datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc),
+                        interval_end=datetime(2026, 9, 18, 12, 20, tzinfo=timezone.utc),
+                        field_name="TITLE",
+                    )
+                    self.assertEqual(plain, f"{heading}\n1.")
+                    self.assertEqual(marked.count(heading), 1)
+                    task_id = str(uuid.uuid4())
+                    document = build_report_document(
+                        {"items": {"oneH": [{
+                            "task_id": task_id, "date": day.isoformat(), "slot": "14:20",
+                            "person": employee, "title": heading, "status": "TODO",
+                        }]}}, day, "14:20", title_overrides={task_id: (plain, marked)},
+                    )
+                    self.assertIn(heading, render_html(document))
+                    self.assertIn(heading, render_plain_text(document))
 
     def test_title_points_are_reported_once_with_the_heading_kept(self) -> None:
         title = "OH: 14 TT CAT VERS\n[[done]]1. Completed point[[/done]]\n2. Open point"

@@ -200,6 +200,8 @@ const THURSDAY_ONE_H_BOARD_QUESTIONS = [
 ] as const
 
 const FRIDAY_ONE_H_STAFF_QUESTIONS = [
+  { question: "BZ PERSONALISHT ME GA: KOMENTET TEK OPEN TASKS EXCEL", description: "", isExtra: true },
+  { question: "BZ PERSONALISHT ME GA: DET GA TEK PER/NGA STAFI PER GA TEAMS", description: "", isExtra: true },
   { question: "Barazimi i planifikimit javor - next week", description: "", isExtra: true },
   { question: "Barazimi i realizimit javor - this week", description: "", isExtra: true },
   { question: "Emails per missing info, per me vazhdu javen tjeter", description: "", isExtra: true },
@@ -289,11 +291,10 @@ const escapePrintHtml = (value: string) =>
 
 const oneHPrintChecklistsHtml = (reportDay: Date) =>
   `<section class="one-h-print-checklists">${oneHDaySpecificQuestionLabel(reportDay)
-    ? `<div class="one-h-print-checklist-day-label">${escapePrintHtml(oneHDaySpecificQuestionLabel(reportDay))}</div>`
+    ? `<div class="one-h-print-checklist-day-label"><strong style="margin-right:12px;">${escapePrintHtml(oneHDaySpecificQuestionLabel(reportDay))}</strong>${oneHPrintChecklistsForDate(reportDay).flatMap(({ questions }) => questions.filter(({ isExtra }) => isExtra).map(({ question, description }, index) => `<span><strong>${oneHExtraQuestionNumber(reportDay, question, index)} ${escapePrintHtml(question)}</strong>${description ? ` (${escapePrintHtml(description)})` : ""}</span>`)).join(' <span> / </span> ')}</div>`
     : ""}${oneHPrintChecklistsForDate(reportDay).map(
     ({ title, questions }) => {
       const regularQuestions = questions.filter(({ isExtra }) => !isExtra)
-      const extraQuestions = questions.filter(({ isExtra }) => isExtra)
       const regularGroups = title === "PYETJET PER 1H - BORD"
         ? [regularQuestions.slice(BOARD_PRIMARY_QUESTION_COUNT), regularQuestions.slice(0, BOARD_PRIMARY_QUESTION_COUNT)]
         : [regularQuestions]
@@ -306,15 +307,7 @@ const oneHPrintChecklistsHtml = (reportDay: Date) =>
           )
           .join('<span class="one-h-print-checklist-separator"> / </span>')}</div>`
       ).join("")
-      const extraContent = extraQuestions
-        .map(({ question, description }, index) =>
-          `<div class="one-h-print-checklist-extra-item"><strong>${oneHExtraQuestionNumber(reportDay, question, index)} ${escapePrintHtml(question)}</strong>${
-            description ? ` <span class="one-h-print-checklist-description">(${escapePrintHtml(description)})</span>` : ""
-          }</div>`
-        )
-        .join("")
-      const extraTable = extraContent ? `<div class="one-h-print-checklist-items">${extraContent}</div>` : ""
-      return `<div class="one-h-print-checklist"><div class="one-h-print-checklist-title">${escapePrintHtml(title)}</div>${extraTable}${regularContent}</div>`
+      return `<div class="one-h-print-checklist"><div class="one-h-print-checklist-title">${escapePrintHtml(title)}</div>${regularContent}</div>`
     }
   ).join("")}</section>`
 
@@ -326,20 +319,22 @@ function OneHPrintChecklists({ reportDay }: { reportDay: Date }) {
     <section className="one-h-print-checklists">
       {oneHDaySpecificQuestionLabel(reportDay) ? (
         <div className="one-h-print-checklist-day-label">
-          {oneHDaySpecificQuestionLabel(reportDay)}
+          <strong style={{ marginRight: 12 }}>{oneHDaySpecificQuestionLabel(reportDay)}</strong>
+          {oneHPrintChecklistsForDate(reportDay).flatMap(({ questions }) =>
+            questions.filter(({ isExtra }) => isExtra).map((question, index) => ({ ...question, number: index }))
+          ).map(({ question, description, number }, index) => (
+              <React.Fragment key={question}>
+                {index > 0 ? <span> / </span> : null}
+                <span><strong>{oneHExtraQuestionNumber(reportDay, question, number)} {question}</strong>
+                  {description ? <span className="one-h-print-checklist-description"> ({description})</span> : null}
+                </span>
+              </React.Fragment>
+          ))}
         </div>
       ) : null}
       {oneHPrintChecklistsForDate(reportDay).map(({ title, questions }) => (
         <div key={title} className="one-h-print-checklist">
           <div className="one-h-print-checklist-title">{title}</div>
-          {questions.some(({ isExtra }) => isExtra) ? <div className="one-h-print-checklist-items">
-            {questions.filter(({ isExtra }) => isExtra).map(({ question, description }, index) => (
-              <div key={question} className="one-h-print-checklist-extra-item">
-                <strong>{oneHExtraQuestionNumber(reportDay, question, index)} {question}</strong>
-                {description ? <span className="one-h-print-checklist-description"> ({description})</span> : null}
-              </div>
-            ))}
-          </div> : null}
           {(title === "PYETJET PER 1H - BORD"
             ? [questions.filter(({ isExtra }) => !isExtra).slice(BOARD_PRIMARY_QUESTION_COUNT), questions.filter(({ isExtra }) => !isExtra).slice(0, BOARD_PRIMARY_QUESTION_COUNT)]
             : [questions.filter(({ isExtra }) => !isExtra)]

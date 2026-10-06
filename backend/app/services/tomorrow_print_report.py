@@ -83,6 +83,8 @@ THURSDAY_ONE_H_STAFF_CHECKLIST = (
     ("Shikohen det qe mbesin vetem per neser (te premten)", ""),
 )
 FRIDAY_ONE_H_STAFF_CHECKLIST = (
+    ("BZ PERSONALISHT ME GA: KOMENTET TEK OPEN TASKS EXCEL", ""),
+    ("BZ PERSONALISHT ME GA: DET GA TEK PER/NGA STAFI PER GA TEAMS", ""),
     ("Barazimi i planifikimit javor - next week", ""),
     ("Barazimi i realizimit javor - this week", ""),
     ("Emails per missing info, per me vazhdu javen tjeter", ""),
@@ -1188,30 +1190,16 @@ def _one_h_checklists_html(report_day: date | None = None) -> str:
     staff_extra = staff_questions[len(ONE_H_STAFF_CHECKLIST):]
     board_extra = board_questions[len(ONE_H_BOARD_CHECKLIST):]
     extra_groups = [questions for questions in (staff_extra, board_extra) if questions]
-    extra_columns = (
-        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
-        'data-day-specific-checklist-columns="true" style="width:100%;border-collapse:collapse;margin:0 0 10px;">'
-        '<tr>'
-        + ''.join(
-            f'<td width="{100 // len(extra_groups)}%" valign="top" '
-            f'style="width:{100 // len(extra_groups)}%;vertical-align:top;'
-            + ('padding:0 6px 0 0;' if len(extra_groups) > 1 and index == 0 else
-               'padding:0 0 0 6px;' if index > 0 else 'padding:0;')
-            + '">'
-            '<div style="background:#fff7f7;border:1px solid #dc2626;border-left:6px solid #dc2626;'
-            'padding:9px 10px;font-family:Arial,sans-serif;font-size:13px;line-height:1.45;color:#b91c1c;">'
-            f'{question_text(questions, extra=True)}</div></td>'
-            for index, questions in enumerate(extra_groups)
-        )
-        + '</tr></table>'
-        if staff_extra or board_extra else ""
+    extra_content = ' <span style="font-weight:900;"> / </span> '.join(
+        question_text(questions, extra=True) for questions in extra_groups
     )
     weekday_block = (
         '<div data-day-specific-question-label="true" style="font-family:Arial,sans-serif;'
-        'font-size:13px;font-weight:800;color:#b91c1c;margin:0 0 7px;padding:6px 10px;'
+        'font-size:13px;line-height:1.45;color:#b91c1c;margin:0 0 10px;padding:6px 10px;'
         'background:#fff7f7;border-left:6px solid #dc2626;">'
-        f'{html.escape(day_label)}</div>'
-        + extra_columns
+        f'<strong style="margin-right:12px;">{html.escape(day_label)}</strong>'
+        + (f'<span data-day-specific-checklist-columns="true">{extra_content}</span>' if extra_content else "")
+        + '</div>'
     )
     return (
         weekday_block
