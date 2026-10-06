@@ -11,6 +11,7 @@ const groups: { kind: RealizationItemKind; label: string; className: string }[] 
   { kind: "IN_PROGRESS", label: "Në progres", className: "border-amber-200 bg-amber-50 text-amber-800" },
   { kind: "POSTPONED", label: "Të shtyra", className: "border-violet-200 bg-violet-50 text-violet-800" },
   { kind: "NO_PROGRESS", label: "Pa progres", className: "border-pink-300 bg-pink-100 text-pink-900" },
+  { kind: "EXTRA_OPEN", label: "Ekstra me deadline të humbur", className: "border-red-300 bg-red-50 text-red-800" },
   { kind: "REASSIGNED_OUT", label: "Kaluar te dikush tjetër", className: "border-slate-200 bg-slate-50 text-slate-700" },
 ]
 
@@ -22,16 +23,18 @@ function penaltyLabel(item: RealizationItem) {
   if (!item.penalty) return null
   const reason = item.kind === "POSTPONED"
     ? item.deadline ? (item.critical ? "shtyrë, deadline important" : "shtyrë, kishte deadline") : "shtyrë"
-    : item.critical ? "deadline important i humbur" : "deadline i humbur"
+    : item.deadline ? (item.critical ? "deadline important i humbur" : "deadline i humbur") : "pa progres"
   return `−${number(item.penalty)} · ${reason}`
 }
 
 function ItemRow({ item }: { item: RealizationItem }) {
-  const multiDay = item.share < 1
+  const multiDay = item.planned && item.share < 1
+  const extraWeight = !item.planned && item.share !== 1
   const penalty = penaltyLabel(item)
   return <li className={cn("flex items-start gap-2 rounded px-1 py-1", item.critical && item.penalty ? "border border-red-300 bg-red-50" : "hover:bg-slate-50")}>
     <span className="min-w-0 flex-1 text-xs leading-4 text-slate-800">{firstLineTitle(item.title)}</span>
     {multiDay ? <span className="shrink-0 whitespace-nowrap text-[10px] text-slate-500" title="Detyrë shumëditore: çdo ditë pune peshon një pjesë të detyrës">1/{Math.round(1 / item.share)} në ditë</span> : null}
+    {extraWeight ? <span className="shrink-0 whitespace-nowrap text-[10px] text-slate-500" title="Ekstra peshon sa një detyrë mesatare e planit të kësaj dite">peshë {number(item.share)}</span> : null}
     {item.credit ? <span className="shrink-0 whitespace-nowrap text-[10px] font-bold tabular-nums text-emerald-700">+{number(item.credit)}</span> : null}
     {item.approved ? <span className="shrink-0 whitespace-nowrap text-[10px] text-violet-700">aprovuar</span> : null}
     {penalty ? <span className="shrink-0 whitespace-nowrap text-[10px] font-bold text-rose-700">{penalty}</span> : null}
@@ -50,7 +53,8 @@ export function RealizationPlanRlzPopover({ metrics, title, children }: {
   const denominator = metrics.realization_plan_weight || metrics.additional_count
   const uncapped = denominator ? metrics.realization_credit * 100 / denominator : 0
   const base = Math.round(Math.min(100, uncapped) * 10) / 10
-  const penalty = metrics.original_planned_count ? Math.round(metrics.realization_penalty_points / metrics.original_planned_count * 10) / 10 : 0
+  const penaltyBase = metrics.original_planned_count || metrics.additional_count
+  const penalty = penaltyBase ? Math.round(metrics.realization_penalty_points / penaltyBase * 10) / 10 : 0
 
   return <CellPopover
     label={title}
@@ -67,7 +71,7 @@ export function RealizationPlanRlzPopover({ metrics, title, children }: {
           {uncapped > 100 ? <span className="text-slate-500"> (kufizuar në 100%)</span> : null}
         </p>
         <p>
-          <b>Penalizimi:</b> {number(metrics.realization_penalty_points)} pikë ÷ {metrics.original_planned_count} detyra = <b className={penalty ? "text-rose-700" : undefined}>−{penalty}</b>
+          <b>Penalizimi:</b> {number(metrics.realization_penalty_points)} pikë ÷ {penaltyBase} detyra = <b className={penalty ? "text-rose-700" : undefined}>−{penalty}</b>
         </p>
         <p><b>Final:</b> {base} − {penalty} = <b>{metrics.raw_plan_realization}%</b></p>
       </div>

@@ -905,7 +905,7 @@ export interface RealizationDeadlineTask {
   person?: string
 }
 
-export type RealizationItemKind = "COMPLETED" | "IN_PROGRESS" | "POSTPONED" | "NO_PROGRESS" | "REASSIGNED_OUT" | "EXTRA_COMPLETED"
+export type RealizationItemKind = "COMPLETED" | "IN_PROGRESS" | "POSTPONED" | "NO_PROGRESS" | "REASSIGNED_OUT" | "EXTRA_COMPLETED" | "EXTRA_OPEN"
 
 /** How one task moved a person's Plan RLZ for the day. */
 export interface RealizationItem {
@@ -913,7 +913,7 @@ export interface RealizationItem {
   title: string
   kind: RealizationItemKind
   planned: boolean
-  /** Weight in the plan: 1, or 1/N for a task spread over N working days. */
+  /** Plan task: 1, or 1/N for a task spread over N working days. Extra: the day's average plan task weight. */
   share: number
   credit: number
   penalty: number

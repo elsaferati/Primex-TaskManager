@@ -119,8 +119,8 @@ def test_definition_of_done_metrics_keeps_extra_out_of_raw_denominator():
     assert metrics["postponed_count"] == 1
     assert metrics["no_progress_count"] == 1
     assert metrics["additional_completed_count"] == 2
-    # 7 / 8 = 87.5% base, minus 1 / 8 * 25 postponement penalty.
-    assert metrics["raw_plan_realization"] == 84.4
+    # 7 / 8 = 87.5% base, minus (25 postponed + 25 untouched) / 8.
+    assert metrics["raw_plan_realization"] == 81.3
     assert metrics["total_completed_today_count"] == 7
 
 
@@ -154,9 +154,10 @@ def test_adjusted_metric_excludes_only_approved_scope_change():
         + [{"classification": "NO_PROGRESS", "in_original_plan": True}]
     )
     metrics = calculate_daily_metrics(rows)
-    assert metrics["raw_plan_realization"] == 65.0
+    # 70 - (2 * 25 postponed + 25 untouched) / 10; adjusted drops the approved ones: 87.5 - 25 / 8.
+    assert metrics["raw_plan_realization"] == 62.5
     assert metrics["adjusted_denominator"] == 8
-    assert metrics["adjusted_plan_realization"] == 87.5
+    assert metrics["adjusted_plan_realization"] == 84.4
 
 
 def test_daily_extra_completions_count_but_realization_never_exceeds_100():
@@ -165,13 +166,14 @@ def test_daily_extra_completions_count_but_realization_never_exceeds_100():
         {"classification": "NO_PROGRESS", "in_original_plan": True},
         {"classification": "ADDITIONAL_COMPLETED", "in_original_plan": False},
     ]
-    assert calculate_daily_metrics(rows)["raw_plan_realization"] == 100
+    # Base is capped at 100 before the untouched task deducts 25 / 2.
+    assert calculate_daily_metrics(rows)["raw_plan_realization"] == 87.5
     rows.append({"classification": "ADDITIONAL_COMPLETED", "in_original_plan": False})
     metrics = calculate_daily_metrics(rows)
     assert metrics["total_completed_today_count"] == 3
     assert metrics["additional_completed_count"] == 2
-    assert metrics["raw_plan_realization"] == 100
-    assert metrics["adjusted_plan_realization"] == 100
+    assert metrics["raw_plan_realization"] == 87.5
+    assert metrics["adjusted_plan_realization"] == 87.5
 
 
 def test_daily_realization_uses_weekly_formula():
@@ -554,12 +556,12 @@ def test_single_day_task_in_progress_earns_nothing():
     ({"classification": "POSTPONED_UNAPPROVED"}, 68.8),
     ({"classification": "POSTPONED_UNAPPROVED", "deadline_was_today": True}, 65.0),
     ({"classification": "POSTPONED_UNAPPROVED", "deadline_was_today": True, "deadline_critical": True}, 60.0),
-    ({"classification": "NO_PROGRESS"}, 75.0),
+    ({"classification": "NO_PROGRESS"}, 68.8),
     ({"classification": "NO_PROGRESS", "deadline_was_today": True}, 62.5),
     ({"classification": "IN_PROGRESS", "deadline_was_today": True, "deadline_critical": True}, 57.5),
 ])
 def test_deadlines_raise_the_penalty(row, expected):
-    # Base 3 / 4 = 75; penalty points / 4: 25 postponed, 40/60 with deadline, 50/70 missed deadline.
+    # Base 3 / 4 = 75; penalty points / 4: 25 postponed or untouched, 40/60 postponed with deadline, 50/70 missed deadline.
     rows = [{"classification": "REALIZED_AS_PLANNED", "in_original_plan": True}] * 3 + [
         {"in_original_plan": True, "task_id": "x", "title": "Detyra", **row},
     ]
@@ -633,3 +635,32 @@ def test_system_tasks_hidden_from_weekly_planner_are_not_extra(monkeypatch):
     titles = [row["title"] for row in report["people"][0]["tasks"]]
     assert titles == ["TICKETS STD"]
     assert report["people"][0]["metrics"]["additional_completed_count"] == 1
+
+
+def test_extras_weigh_as_much_as_the_average_plan_task():
+    rows = (
+        [{"classification": "IN_PROGRESS", "in_original_plan": True, "daily_share": 0.2, "multi_day_before_deadline": True}] * 2
+        + [{"classification": "ADDITIONAL_COMPLETED", "in_original_plan": False}] * 2
+    )
+    metrics = calculate_daily_metrics(rows)
+    # Plan 0.4 over 2 tasks: each extra weighs 0.2 instead of a whole task.
+    assert metrics["realization_plan_weight"] == 0.4
+    assert metrics["realization_credit"] == 0.8
+    assert metrics["raw_plan_realization"] == 100
+    metrics = calculate_daily_metrics(rows[:1] + [{"classification": "NO_PROGRESS", "in_original_plan": True, "daily_share": 0.2}] + rows[2:])
+    # 0.2 + 2 * 0.2 = 0.6 over 0.4 caps at 100, minus 25 / 2 for the untouched task.
+    assert metrics["raw_plan_realization"] == 87.5
+
+
+def test_extra_that_misses_its_deadline_is_penalised():
+    rows = [
+        {"classification": "REALIZED_AS_PLANNED", "in_original_plan": True},
+        {"classification": "REALIZED_AS_PLANNED", "in_original_plan": True},
+        {"task_id": "x", "title": "Lutz", "classification": "ADDED_DURING_DAY", "in_original_plan": False,
+         "deadline_was_today": True, "deadline_critical": True},
+    ]
+    metrics = calculate_daily_metrics(rows)
+    assert metrics["raw_plan_realization"] == 65.0
+    assert [item["kind"] for item in metrics["realization_items"] if not item["planned"]] == ["EXTRA_OPEN"]
+    rows[2] = {**rows[2], "postponed_today": True}
+    assert calculate_daily_metrics(rows)["raw_plan_realization"] == 100
