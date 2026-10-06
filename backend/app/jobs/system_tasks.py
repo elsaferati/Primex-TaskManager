@@ -5,7 +5,10 @@ from zoneinfo import ZoneInfo
 
 from app.config import settings
 from app.db import SessionLocal
-from app.services.meeting_system_tasks import reconcile_external_meeting_system_tasks
+from app.services.meeting_system_tasks import (
+    reconcile_external_meeting_system_tasks,
+    reconcile_tak_int_one_h_tasks,
+)
 from app.services.system_task_instances import (
     generate_system_task_instances,
     reconcile_system_task_assignments_in_range,
@@ -22,6 +25,7 @@ async def generate_system_tasks() -> int:
         now_utc = datetime.now(timezone.utc)
         created = await generate_system_task_instances(db=db, now_utc=now_utc)
         created += await reconcile_external_meeting_system_tasks(db=db, now_utc=now_utc)
+        created += await reconcile_tak_int_one_h_tasks(db=db, now_utc=now_utc)
         start, end = _reconciliation_range(now_utc)
         await reconcile_system_task_assignments_in_range(
             db=db,

@@ -7,7 +7,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.config import settings
 from app.db import SessionLocal
-from app.services.meeting_system_tasks import reconcile_external_meeting_system_tasks
+from app.services.meeting_system_tasks import (
+    reconcile_external_meeting_system_tasks,
+    reconcile_tak_int_one_h_tasks,
+)
 from app.services.system_task_instances import (
     generate_system_task_instances,
     reconcile_system_task_assignments_in_range,
@@ -79,6 +82,7 @@ async def run_system_task_scheduler_once(now_utc: datetime | None = None) -> int
     async with SessionLocal() as db:
         created = await generate_system_task_instances(db=db, now_utc=now_utc)
         created += await reconcile_external_meeting_system_tasks(db=db, now_utc=now_utc)
+        created += await reconcile_tak_int_one_h_tasks(db=db, now_utc=now_utc)
         start = now_utc.astimezone(scheduler_timezone()).date()
         reconciliation = await reconcile_system_task_assignments_in_range(
             db=db,

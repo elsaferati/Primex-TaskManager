@@ -2609,6 +2609,9 @@ export default function CommonViewPage() {
     [meetingOccurrenceDateIso, meetingOccurrenceStatuses, occurrenceStatusKey]
   )
 
+  // Marking a TAK INT as held closes its auto 1H tasks on the server; reload tasks afterwards.
+  const refreshCommonTasksRef = React.useRef<(() => Promise<void>) | null>(null)
+
   const updateMeetingOccurrenceStatus = React.useCallback(
     async (meeting: Meeting, status: "" | "held" | "canceled") => {
       const occurrenceDate = meetingOccurrenceDateIso(meeting)
@@ -2623,6 +2626,7 @@ export default function CommonViewPage() {
         if (!res.ok) throw new Error(await res.text())
         const row = (await res.json()) as MeetingOccurrenceStatus
         setMeetingOccurrenceStatuses((prev) => new Map(prev).set(occurrenceStatusKey(row.meeting_id, row.occurrence_date), row))
+        void refreshCommonTasksRef.current?.()
       } catch (error) {
         toast.error("Meeting status update failed", { description: String(error) })
       } finally {
@@ -4325,6 +4329,10 @@ export default function CommonViewPage() {
   useVisibleRefresh(async () => {
     await fetchCommonViewStage(toISODate(weekStart), ["tasks"])
   }, !authLoading && Boolean(userId) && !savingOneHMarkerTaskId)
+
+  refreshCommonTasksRef.current = async () => {
+    await fetchCommonViewStage(toISODate(weekStart), ["tasks"])
+  }
 
   const reloadMeetingLists = React.useCallback(async () => {
     const meetingsBase = commonDepartmentId
