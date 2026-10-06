@@ -16,6 +16,7 @@ from app.models.daily_plan_adjustment import DailyPlanAdjustment
 from app.models.daily_planner_snapshot import DailyPlannerSnapshot
 from app.models.project import Project
 from app.models.realization import RealizationDailyCloseEvent, RealizationPeriod
+from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_progress import TaskDailyProgress
@@ -360,6 +361,12 @@ async def build_live_daily_realization(
     )).scalars().all()
     tasks = {row.id: row for row in current_rows}
     task_ids.update(tasks)
+    # System tasks hidden from the Weekly Planner are routine, not extra work.
+    system_template_ids = {row.system_template_origin_id for row in current_rows if row.system_template_origin_id}
+    hidden_system_template_ids = set((await db.execute(select(SystemTaskTemplate.id).where(
+        SystemTaskTemplate.id.in_(system_template_ids),
+        SystemTaskTemplate.show_in_weekly_planner.is_not(True),
+    ))).scalars().all()) if system_template_ids else set()
     assignee_rows = (await db.execute(select(TaskAssignee).where(
         TaskAssignee.task_id.in_(task_ids)
     ))).scalars().all() if task_ids else []
@@ -540,6 +547,8 @@ async def build_live_daily_realization(
                 reassigned_out=was_assigned_out, reassigned_in=was_assigned_in,
             ))
             state = states.get((person_id, task_id))
+            if not original and task and task.system_template_origin_id in hidden_system_template_ids:
+                continue
             if not original and not additional_task_has_day_evidence(
                 task=task,
                 day=day,

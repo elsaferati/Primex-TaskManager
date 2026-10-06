@@ -581,3 +581,55 @@ def test_realization_items_explain_the_percent():
     # Base 2 / 2 = 100, penalty 40 / 2 = 20; adjusted drops the approved postponement.
     assert metrics["raw_plan_realization"] == 80.0
     assert metrics["adjusted_plan_realization"] == 100.0
+
+
+def test_system_tasks_hidden_from_weekly_planner_are_not_extra(monkeypatch):
+    import asyncio
+    from app.models.system_task_template import SystemTaskTemplate
+    from app.models.task import Task
+    from app.models.task_assignee import TaskAssignee
+    from app.models.user import User
+    from app.services import daily_realization_live as live_service
+
+    department_id, user_id = uuid.uuid4(), uuid.uuid4()
+    hidden_template, visible_template = uuid.uuid4(), uuid.uuid4()
+    person = SimpleNamespace(id=user_id, full_name="Laurent Hoxha")
+    done_today = datetime(2026, 8, 26, 10, tzinfo=timezone.utc)
+
+    def system_task(title, template_id):
+        return Task(id=uuid.uuid4(), title=title, assigned_to=user_id, department_id=department_id,
+                    status="DONE", is_active=True, system_template_origin_id=template_id,
+                    created_at=done_today, updated_at=done_today, completed_at=done_today,
+                    start_date=done_today, due_date=done_today)
+
+    hidden = system_task("KONTROLLI DITOR I SERVERIT", hidden_template)
+    visible = system_task("TICKETS STD", visible_template)
+    baseline = SimpleNamespace(id=uuid.uuid4(), captured_at=done_today, payload={"people": [
+        {"user_id": str(user_id), "tasks": []},
+    ]})
+
+    async def load_people(*args, **kwargs): return [person], {}
+    monkeypatch.setattr(live_service, "load_active_users_and_common_leave", load_people)
+
+    class Result:
+        def __init__(self, rows=(), scalar=None): self.rows, self.scalar = rows, scalar
+        def scalar_one_or_none(self): return self.scalar
+        def scalars(self): return self
+        def all(self): return self.rows
+
+    class Session:
+        async def execute(self, statement):
+            column = statement.column_descriptions[0]
+            if column["entity"] is DailyPlannerSnapshot: return Result(scalar=baseline)
+            if column["entity"] is User: return Result([person])
+            if column["entity"] is Task:
+                return Result([hidden.id, visible.id] if column["name"] == "id" else [hidden, visible])
+            if column["entity"] is TaskAssignee:
+                return Result([SimpleNamespace(task_id=item.id, user_id=user_id) for item in (hidden, visible)])
+            if column["entity"] is SystemTaskTemplate: return Result([hidden_template])
+            return Result()
+
+    report = asyncio.run(live_service.build_live_daily_realization(Session(), department_id=department_id, day=DAY))
+    titles = [row["title"] for row in report["people"][0]["tasks"]]
+    assert titles == ["TICKETS STD"]
+    assert report["people"][0]["metrics"]["additional_completed_count"] == 1
