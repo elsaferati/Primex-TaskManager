@@ -277,9 +277,12 @@ def _text_points(value: str | None, *, field_name: str) -> tuple[str, list[Strik
     """Split text into report points, keeping numbered headings out of the list."""
 
     raw = value or ""
-    cleaned = TECHNICAL_TAGS.sub("", raw).strip()
-    matches = list(CHECKLIST_ITEM.finditer(cleaned))
-    heading = cleaned[:matches[0].start()].strip() if matches else ""
+    # Use the same tag masking as _point_entries so an empty marked item
+    # (e.g. [[added]]1.[[/added]]) cannot hide the heading. Removing tags
+    # first changes whether that item matches the checklist pattern.
+    masked = TECHNICAL_TAGS.sub(lambda match: " " * len(match.group(0)), raw)
+    matches = list(CHECKLIST_ITEM.finditer(masked))
+    heading = TECHNICAL_TAGS.sub("", raw[:matches[0].start()]).strip() if matches else ""
     points = [point for point, _start, _end in _point_entries(raw, field_name=field_name)]
     current_done = set(_struck_points_by_identity(raw, field_name=field_name))
     return heading, points, current_done

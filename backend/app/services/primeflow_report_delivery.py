@@ -164,6 +164,8 @@ async def load_1h_reminder_questions(
         ])
     elif report_day is not None and report_day.weekday() == 4:
         reminders.extend([
+            ReportReminderQuestion(text="BZ PERSONALISHT ME GA: KOMENTET TEK OPEN TASKS EXCEL", is_extra=True),
+            ReportReminderQuestion(text="BZ PERSONALISHT ME GA: DET GA TEK PER/NGA STAFI PER GA TEAMS", is_extra=True),
             ReportReminderQuestion(text="Barazimi i planifikimit javor - next week", is_extra=True),
             ReportReminderQuestion(text="Barazimi i realizimit javor - this week", is_extra=True),
             ReportReminderQuestion(
