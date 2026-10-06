@@ -54,6 +54,16 @@ def sort_deadline_cards(cards: list[dict]) -> list[dict]:
     )
 
 
+def realization_percent(completed: int, planned: int, extra: int, postponed: int) -> float | None:
+    """Same rule as the weekly percent: extras earn credit up to 100, postponed plan tasks deduct up to 25."""
+    denominator = planned or extra
+    if not denominator:
+        return None
+    base = min(100.0, completed * 100.0 / denominator)
+    penalty = postponed * 25.0 / planned if planned else 0.0
+    return round(max(0.0, base - penalty), 1)
+
+
 def calculate_daily_metrics(rows: Iterable[Mapping[str, object]]) -> dict[str, object]:
     items = list(rows)
     outcomes = Counter(str(row.get("classification") or "") for row in items)
@@ -76,8 +86,11 @@ def calculate_daily_metrics(rows: Iterable[Mapping[str, object]]) -> dict[str, o
         row.get("classification") not in COMPLETED_CLASSIFICATIONS and row_has_progress(row)
         for row in extras
     )
-    raw = min(100.0, round(total_completed * 100.0 / original, 1)) if original else None
-    adjusted = min(100.0, round(total_completed * 100.0 / adjusted_denominator, 1)) if adjusted_denominator else None
+    # Postponed classifications only exist for original-plan rows, so these are plan postponements.
+    unapproved_postponed = outcomes["POSTPONED_UNAPPROVED"]
+    raw = realization_percent(total_completed, original, len(extras), approved_scope + unapproved_postponed)
+    # Approved postponements leave the denominator, so only unapproved ones are penalised.
+    adjusted = realization_percent(total_completed, adjusted_denominator, len(extras), unapproved_postponed)
     deadline_rows = [row for row in items if row.get("deadline_was_today")]
     deadline_cards = [
         deadline_task_card(row, state=deadline_state(row)) for row in deadline_rows

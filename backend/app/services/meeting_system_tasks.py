@@ -16,7 +16,9 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
+from app.services.meeting_participants import manual_participant_ids
 
 EXTERNAL_MEETING_TASK_KIND = "external_meeting_prepare"
 EXTERNAL_MEETING_TRIGGER_TYPE = "EXTERNAL_MEETING_ONCE"
@@ -47,6 +49,33 @@ PIM_IMAGE_MEETING_TASK_DESCRIPTION = (
     "Verifikohet përmbajtja, cilësia, dimensionet, emërtimi dhe përputhja me produktin.\n"
     "Rezultati i testimit dokumentohet dhe çdo problem i raportohet ekipit para fillimit të takimit."
 )
+
+# 1H tasks for every person assigned on a one-time TAK EXT: one in the 1H slot
+# before the meeting (TAK INT para) and one in the slot right after it
+# (TAK INT pas). Both close automatically when the linked TAK INT is held.
+# These are plain 1H tasks, not system tasks: no template or system slot.
+TAK_INT_PRE_ONE_H_TASK_KIND = "tak_int_pre_one_h"
+TAK_INT_POST_ONE_H_TASK_KIND = "tak_int_post_one_h"
+TAK_INT_ONE_H_TASK_KINDS = (TAK_INT_PRE_ONE_H_TASK_KIND, TAK_INT_POST_ONE_H_TASK_KIND)
+TAK_INT_PRE_ONE_H_TASK_TITLE = "TAK INT PARA TAK EXT"
+TAK_INT_POST_ONE_H_TASK_TITLE = "TAK INT PAS TAK EXT"
+TAK_INT_PRE_ONE_H_TASK_DESCRIPTION = (
+    "TAK INT para takimit ekstern. Përgatitet takimi dhe diskutohen pikat që do të "
+    "prezantohen. Detyra mbyllet automatikisht kur TAK INT shënohet si i mbajtur."
+)
+TAK_INT_POST_ONE_H_TASK_DESCRIPTION = (
+    "TAK INT pas takimit ekstern. Diskutohen rezultatet dhe hapat e ardhshëm të takimit. "
+    "Detyra mbyllet automatikisht kur TAK INT shënohet si i mbajtur."
+)
+TAK_INT_ONE_H_SLOTS: tuple[tuple[time, str], ...] = (
+    (time(10, 0), "10:00"),
+    (time(11, 0), "11:00"),
+    (time(11, 50), "11:50"),
+    (time(14, 20), "14:20"),
+    # The "1H 16:00" row is held at 15:50 (see ONE_H_SLOT_TIMES in calendar sync).
+    (time(15, 50), "16:00"),
+)
+INACTIVE_CALENDAR_SYNC_STATUSES = {"cancelled", "excluded"}
 
 
 def _app_tz() -> ZoneInfo:
@@ -464,7 +493,11 @@ async def deactivate_external_meeting_system_tasks(
         await db.execute(
             select(Task)
             .where(Task.meeting_origin_id == meeting_id)
-            .where(Task.meeting_system_task_kind.in_((EXTERNAL_MEETING_TASK_KIND, PIM_IMAGE_MEETING_TASK_KIND)))
+            .where(
+                Task.meeting_system_task_kind.in_(
+                    (EXTERNAL_MEETING_TASK_KIND, PIM_IMAGE_MEETING_TASK_KIND, *TAK_INT_ONE_H_TASK_KINDS)
+                )
+            )
         )
     ).scalars().all()
     changed = 0
@@ -516,4 +549,382 @@ async def reconcile_external_meeting_system_tasks(
             meeting,
             now_utc=now_utc,
         )
+    return changed
+
+
+def _shift_working_day(day: date, step: int) -> date:
+    day += timedelta(days=step)
+    while day.weekday() >= 5:
+        day += timedelta(days=step)
+    return day
+
+
+def _as_local(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(_app_tz())
+
+
+def tak_int_pre_one_h_slot(meeting: Meeting | object) -> tuple[date, str] | None:
+    """Return the last 1H slot strictly before the TAK EXT starts (13:00 -> 11:50)."""
+    starts_at = getattr(meeting, "starts_at", None)
+    if starts_at is None:
+        return None
+    local_start = _as_local(starts_at)
+    start_time = local_start.time().replace(tzinfo=None)
+    earlier = [label for slot_time, label in TAK_INT_ONE_H_SLOTS if slot_time < start_time]
+    if earlier:
+        return local_start.date(), earlier[-1]
+    return _shift_working_day(local_start.date(), -1), TAK_INT_ONE_H_SLOTS[-1][1]
+
+
+def tak_int_post_one_h_slot(
+    meeting: Meeting | object,
+    internal_meeting: Meeting | object | None = None,
+) -> tuple[date, str] | None:
+    """Return the 1H slot for the TAK INT held after a TAK EXT.
+
+    With a scheduled TAK INT it is the slot it falls in (TAK INT 14:30 -> 14:20);
+    otherwise the first slot once the TAK EXT has finished (ends 13:30 -> 14:20).
+    """
+    starts_at = getattr(meeting, "starts_at", None)
+    if starts_at is None:
+        return None
+    internal_starts_at = getattr(internal_meeting, "starts_at", None)
+    if internal_starts_at is not None:
+        local_internal = _as_local(internal_starts_at)
+        internal_time = local_internal.time().replace(tzinfo=None)
+        current = [label for slot_time, label in TAK_INT_ONE_H_SLOTS if slot_time <= internal_time]
+        return local_internal.date(), current[-1] if current else TAK_INT_ONE_H_SLOTS[0][1]
+    ends_at = getattr(meeting, "ends_at", None) or starts_at + timedelta(hours=1)
+    local_end = _as_local(ends_at)
+    end_time = local_end.time().replace(tzinfo=None)
+    for slot_time, label in TAK_INT_ONE_H_SLOTS:
+        if slot_time >= end_time:
+            return local_end.date(), label
+    return _shift_working_day(local_end.date(), 1), TAK_INT_ONE_H_SLOTS[0][1]
+
+
+def _one_h_slot_start_at(day: date, label: str) -> datetime:
+    slot_time = next(slot_time for slot_time, slot_label in TAK_INT_ONE_H_SLOTS if slot_label == label)
+    return datetime.combine(day, slot_time, tzinfo=_app_tz()).astimezone(timezone.utc)
+
+
+def _one_h_slot_finish_period(label: str) -> str:
+    return TaskFinishPeriod.AM.value if label < "12:00" else TaskFinishPeriod.PM.value
+
+
+def qualifies_for_tak_int_one_h_tasks(meeting: Meeting | object) -> bool:
+    recurrence_type = (getattr(meeting, "recurrence_type", None) or "").strip().lower()
+    sync_status = (getattr(meeting, "calendar_sync_status", None) or "").strip().lower()
+    return (
+        (getattr(meeting, "meeting_type", None) or "external") == "external"
+        and recurrence_type in ("", "none")
+        and getattr(meeting, "starts_at", None) is not None
+        and sync_status not in INACTIVE_CALENDAR_SYNC_STATUSES
+    )
+
+
+async def _post_internal_meeting(db: AsyncSession, external_meeting_id: uuid.UUID) -> Meeting | None:
+    return (
+        await db.execute(
+            select(Meeting).where(
+                Meeting.meeting_type == "internal",
+                Meeting.paired_external_meeting_id == external_meeting_id,
+            )
+        )
+    ).scalars().first()
+
+
+async def _linked_internal_meeting_ids(
+    db: AsyncSession,
+    external_meeting_id: uuid.UUID,
+) -> tuple[uuid.UUID | None, uuid.UUID | None]:
+    rows = (
+        await db.execute(
+            select(Meeting.id, Meeting.pre_external_meeting_id, Meeting.paired_external_meeting_id).where(
+                Meeting.meeting_type == "internal",
+                or_(
+                    Meeting.pre_external_meeting_id == external_meeting_id,
+                    Meeting.paired_external_meeting_id == external_meeting_id,
+                ),
+            )
+        )
+    ).all()
+    pre_id = next((row_id for row_id, pre, _ in rows if pre == external_meeting_id), None)
+    post_id = next((row_id for row_id, _, paired in rows if paired == external_meeting_id), None)
+    return pre_id, post_id
+
+
+async def _resolve_external_meeting(db: AsyncSession, meeting: Meeting) -> Meeting | None:
+    if meeting.meeting_type == "external":
+        return meeting
+    external_id = meeting.pre_external_meeting_id or meeting.paired_external_meeting_id
+    if external_id is None:
+        return None
+    return (await db.execute(select(Meeting).where(Meeting.id == external_id))).scalar_one_or_none()
+
+
+async def reconcile_tak_int_one_h_tasks_for_meeting(
+    db: AsyncSession,
+    meeting: Meeting,
+    *,
+    now_utc: datetime | None = None,
+) -> int:
+    """Create/update the TAK INT 1H tasks for the people assigned on a TAK EXT.
+
+    Accepts the TAK EXT itself or one of its linked TAK INT meetings.
+    """
+    external = await _resolve_external_meeting(db, meeting)
+    if external is None:
+        return 0
+
+    qualifies = qualifies_for_tak_int_one_h_tasks(external)
+    participant_ids: list[uuid.UUID] = []
+    post_internal: Meeting | None = None
+    if qualifies:
+        participant_ids = (await manual_participant_ids(db, [external.id])).get(external.id, [])
+        post_internal = await _post_internal_meeting(db, external.id)
+
+    changed = 0
+    for task_kind, base_title, description, slot in (
+        (
+            TAK_INT_PRE_ONE_H_TASK_KIND,
+            TAK_INT_PRE_ONE_H_TASK_TITLE,
+            TAK_INT_PRE_ONE_H_TASK_DESCRIPTION,
+            tak_int_pre_one_h_slot(external) if qualifies else None,
+        ),
+        (
+            TAK_INT_POST_ONE_H_TASK_KIND,
+            TAK_INT_POST_ONE_H_TASK_TITLE,
+            TAK_INT_POST_ONE_H_TASK_DESCRIPTION,
+            tak_int_post_one_h_slot(external, post_internal) if post_internal is not None else None,
+        ),
+    ):
+        changed += await _reconcile_tak_int_one_h_task_kind(
+            db,
+            external,
+            task_kind=task_kind,
+            task_title=_meeting_task_title(external, base_title),
+            description=description,
+            slot=slot,
+            participant_ids=participant_ids,
+            now_utc=now_utc or datetime.now(timezone.utc),
+        )
+    return changed
+
+
+async def _reconcile_tak_int_one_h_task_kind(
+    db: AsyncSession,
+    external: Meeting,
+    *,
+    task_kind: str,
+    task_title: str,
+    description: str,
+    slot: tuple[date, str] | None,
+    participant_ids: list[uuid.UUID],
+    now_utc: datetime,
+) -> int:
+    existing_tasks = (
+        await db.execute(
+            select(Task)
+            .where(Task.meeting_origin_id == external.id)
+            .where(Task.meeting_system_task_kind == task_kind)
+            .order_by(Task.created_at.asc())
+        )
+    ).scalars().all()
+    participant_id_set = set(participant_ids) if slot is not None else set()
+
+    current_by_user: dict[uuid.UUID, Task] = {}
+    for task in existing_tasks:
+        # Plain 1H tasks: detach anything left over from the system-task version.
+        task.system_template_origin_id = None
+        task.system_task_slot_id = None
+        task.origin_run_at = None
+        if task.assigned_to in participant_id_set and task.assigned_to not in current_by_user:
+            current_by_user[task.assigned_to] = task
+        elif task.status != TaskStatus.DONE:
+            task.is_active = False
+
+    if slot is None or not participant_ids:
+        return 0
+
+    slot_date, slot_label = slot
+    task_start_at = _one_h_slot_start_at(slot_date, slot_label)
+    finish_period = _one_h_slot_finish_period(slot_label)
+    department_map = await _user_department_map(db, participant_ids)
+    changed = 0
+    for user_id in participant_ids:
+        existing = current_by_user.get(user_id)
+        if existing is not None:
+            if existing.status == TaskStatus.DONE:
+                continue
+            if not existing.is_active:
+                changed += 1
+            existing.title = task_title
+            existing.description = description
+            existing.is_1h_report = True
+            existing.is_active = True
+            # Only move the slot when the meeting time moved, so manual slot edits stick.
+            if existing.start_date != task_start_at:
+                existing.start_date = task_start_at
+                existing.due_date = task_start_at
+                existing.meeting_occurrence_date = slot_date
+                existing.one_h_report_slot = slot_label
+                existing.finish_period = finish_period
+                await _set_one_h_report_slot_row(db, existing.id, slot_date, slot_label, overwrite=True)
+                changed += 1
+            else:
+                await _set_one_h_report_slot_row(
+                    db, existing.id, slot_date, existing.one_h_report_slot or slot_label, overwrite=False
+                )
+            continue
+
+        task_insert = pg_insert(Task).values(
+            {
+                "id": uuid.uuid4(),
+                "title": task_title,
+                "description": description,
+                "department_id": department_map.get(user_id) or external.department_id,
+                "assigned_to": user_id,
+                "created_by": external.created_by or user_id,
+                "start_date": task_start_at,
+                "due_date": task_start_at,
+                "meeting_origin_id": external.id,
+                "meeting_occurrence_date": slot_date,
+                "meeting_system_task_kind": task_kind,
+                "status": TaskStatus.TODO.value,
+                "priority": TaskPriority.NORMAL.value,
+                "finish_period": finish_period,
+                "is_1h_report": True,
+                "one_h_report_slot": slot_label,
+                "is_active": True,
+                "created_at": now_utc,
+                "updated_at": now_utc,
+            }
+        ).on_conflict_do_nothing(
+            index_elements=[
+                "meeting_origin_id",
+                "meeting_occurrence_date",
+                "assigned_to",
+                "meeting_system_task_kind",
+            ],
+            index_where=and_(
+                Task.meeting_origin_id.is_not(None),
+                Task.meeting_system_task_kind.is_not(None),
+            ),
+        ).returning(Task.id)
+        inserted_task_id = (await db.execute(task_insert)).scalar_one_or_none()
+        if inserted_task_id is None:
+            continue
+        await db.execute(
+            pg_insert(TaskAssignee)
+            .values({"task_id": inserted_task_id, "user_id": user_id})
+            .on_conflict_do_nothing(index_elements=["task_id", "user_id"])
+        )
+        await _set_one_h_report_slot_row(db, inserted_task_id, slot_date, slot_label, overwrite=True)
+        changed += 1
+    return changed
+
+
+async def _set_one_h_report_slot_row(
+    db: AsyncSession,
+    task_id: uuid.UUID,
+    report_date: date,
+    slot_label: str,
+    *,
+    overwrite: bool,
+) -> None:
+    """Daily views (My View, reports) read the 1H slot only from the per-day slot rows."""
+    statement = pg_insert(TaskOneHReportSlot).values(
+        {
+            "id": uuid.uuid4(),
+            "task_id": task_id,
+            "report_date": report_date,
+            "one_h_report_slot": slot_label,
+        }
+    )
+    if overwrite:
+        statement = statement.on_conflict_do_update(
+            index_elements=["task_id", "report_date"],
+            set_={"one_h_report_slot": slot_label, "updated_at": func.now()},
+        )
+    else:
+        statement = statement.on_conflict_do_nothing(index_elements=["task_id", "report_date"])
+    await db.execute(statement)
+
+
+async def reconcile_tak_int_one_h_tasks(
+    db: AsyncSession,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+    now_utc: datetime | None = None,
+) -> int:
+    now_utc = now_utc or datetime.now(timezone.utc)
+    local_today = now_utc.astimezone(_app_tz()).date()
+    start = start or local_today
+    end = end or (local_today + timedelta(days=max(int(settings.SYSTEM_TASK_GENERATE_AHEAD_DAYS), 0)))
+    if end < start:
+        return 0
+    start_utc, _ = _local_day_bounds_utc(start)
+    _, end_utc = _local_day_bounds_utc(end)
+    meetings = (
+        await db.execute(
+            select(Meeting)
+            .where(Meeting.starts_at.is_not(None))
+            .where(Meeting.starts_at >= start_utc)
+            .where(Meeting.starts_at < end_utc)
+            .where(Meeting.meeting_type == "external")
+        )
+    ).scalars().all()
+    changed = 0
+    for meeting in meetings:
+        changed += await reconcile_tak_int_one_h_tasks_for_meeting(db, meeting, now_utc=now_utc)
+    return changed
+
+
+async def sync_tak_int_one_h_tasks_with_held_status(
+    db: AsyncSession,
+    meeting: Meeting,
+    *,
+    held: bool,
+    now_utc: datetime | None = None,
+) -> int:
+    """Close (or reopen) the TAK INT 1H tasks when a TAK INT is marked held.
+
+    A TAK EXT without a TAK INT before it closes its own "para" tasks.
+    """
+    if meeting.pre_external_meeting_id is not None:
+        external_id, task_kind = meeting.pre_external_meeting_id, TAK_INT_PRE_ONE_H_TASK_KIND
+    elif meeting.paired_external_meeting_id is not None:
+        external_id, task_kind = meeting.paired_external_meeting_id, TAK_INT_POST_ONE_H_TASK_KIND
+    elif meeting.meeting_type == "external":
+        pre_internal_id, _ = await _linked_internal_meeting_ids(db, meeting.id)
+        if pre_internal_id is not None:
+            return 0
+        external_id, task_kind = meeting.id, TAK_INT_PRE_ONE_H_TASK_KIND
+    else:
+        return 0
+
+    now_utc = now_utc or datetime.now(timezone.utc)
+    tasks = (
+        await db.execute(
+            select(Task)
+            .where(Task.meeting_origin_id == external_id)
+            .where(Task.meeting_system_task_kind == task_kind)
+            .where(Task.is_active.is_(True))
+        )
+    ).scalars().all()
+    changed = 0
+    for task in tasks:
+        is_done = task.status == TaskStatus.DONE
+        if held and not is_done:
+            task.status = TaskStatus.DONE.value
+            task.completed_at = now_utc
+            changed += 1
+        elif not held and is_done:
+            task.status = TaskStatus.TODO.value
+            task.completed_at = None
+            changed += 1
     return changed

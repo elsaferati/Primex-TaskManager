@@ -41,6 +41,7 @@ from app.services.ga_time_table import (
     format_ga_time_label,
     get_ga_time_table_rows,
 )
+from app.services.ga_calendar_feed import build_ga_calendar, feed_token, is_valid_feed_token
 from app.services.ga_icloud_sync import (
     TimeRow,
     connection_id_from_token,
@@ -1129,6 +1130,41 @@ async def import_icloud_timetable_data(
         reminders_imported=reminder_count,
         skipped=skipped,
         synced_at=synced_at,
+    )
+
+
+@router.get("/calendar-feed")
+async def get_ga_calendar_feed_path(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    _ensure_can_edit(current_user)
+    ga_user = await _resolve_ga_user(db)
+    if ga_user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GA user not found")
+    response.headers["Cache-Control"] = "no-store"
+    # Relative to the API base; the frontend knows the public API host.
+    return {"feed_path": f"/ga-time-slots/calendar/{feed_token(ga_user.id)}.ics"}
+
+
+@router.get("/calendar/{token}.ics")
+async def get_ga_calendar_feed(token: str, db: AsyncSession = Depends(get_db)) -> Response:
+    # Public: Apple Calendar cannot send a login, so the secret token in the URL is the access check.
+    ga_user = await _resolve_ga_user(db)
+    if ga_user is None or not is_valid_feed_token(token, ga_user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    entries = (
+        await db.execute(
+            select(GaTimeSlotTemplate)
+            .where(GaTimeSlotTemplate.user_id == ga_user.id)
+            .order_by(GaTimeSlotTemplate.day_of_week, GaTimeSlotTemplate.start_time, GaTimeSlotTemplate.sort_order)
+        )
+    ).scalars().all()
+    return Response(
+        content=build_ga_calendar(list(entries)),
+        media_type="text/calendar; charset=utf-8",
+        headers={"Cache-Control": "no-cache", "Content-Disposition": 'inline; filename="primeflow-ga.ics"'},
     )
 
 

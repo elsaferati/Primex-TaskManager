@@ -8,6 +8,7 @@ import httpx
 
 from app.config import settings
 from app.db import SessionLocal
+from app.services.meeting_system_tasks import reconcile_tak_int_one_h_tasks
 from app.services.microsoft_calendar_sync import (
     get_shared_calendar_token,
     microsoft_calendar_sync_window,
@@ -34,6 +35,8 @@ async def run_microsoft_calendar_sync_once() -> None:
             start=sync_start,
             end=sync_end,
         )
+        await reconcile_tak_int_one_h_tasks(db, start=sync_start.date(), end=sync_end.date())
+        await db.commit()
         logger.info(
             "Microsoft calendar synchronized: fetched=%s created=%s updated=%s cancelled=%s skipped=%s",
             result.fetched,

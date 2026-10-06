@@ -119,7 +119,8 @@ def test_definition_of_done_metrics_keeps_extra_out_of_raw_denominator():
     assert metrics["postponed_count"] == 1
     assert metrics["no_progress_count"] == 1
     assert metrics["additional_completed_count"] == 2
-    assert metrics["raw_plan_realization"] == 87.5
+    # 7 / 8 = 87.5% base, minus 1 / 8 * 25 postponement penalty.
+    assert metrics["raw_plan_realization"] == 84.4
     assert metrics["total_completed_today_count"] == 7
 
 
@@ -153,7 +154,7 @@ def test_adjusted_metric_excludes_only_approved_scope_change():
         + [{"classification": "NO_PROGRESS", "in_original_plan": True}]
     )
     metrics = calculate_daily_metrics(rows)
-    assert metrics["raw_plan_realization"] == 70.0
+    assert metrics["raw_plan_realization"] == 65.0
     assert metrics["adjusted_denominator"] == 8
     assert metrics["adjusted_plan_realization"] == 87.5
 
@@ -171,6 +172,25 @@ def test_daily_extra_completions_count_but_realization_never_exceeds_100():
     assert metrics["additional_completed_count"] == 2
     assert metrics["raw_plan_realization"] == 100
     assert metrics["adjusted_plan_realization"] == 100
+
+
+def test_daily_realization_uses_weekly_formula():
+    rows = (
+        [{"classification": "REALIZED_AS_PLANNED", "in_original_plan": True}] * 3
+        + [{"classification": "POSTPONED_UNAPPROVED", "in_original_plan": True}] * 2
+        + [{"classification": "ADDITIONAL_COMPLETED", "in_original_plan": False}] * 2
+    )
+    metrics = calculate_daily_metrics(rows)
+    assert metrics["raw_plan_realization"] == 90.0
+    assert metrics["adjusted_plan_realization"] == 90.0
+
+
+def test_daily_realization_without_plan_uses_extras_as_base():
+    rows = [
+        {"classification": "ADDITIONAL_COMPLETED", "in_original_plan": False},
+        {"classification": "ADDED_DURING_DAY", "in_original_plan": False},
+    ]
+    assert calculate_daily_metrics(rows)["raw_plan_realization"] == 50.0
 
 
 def test_zero_denominators_are_na_not_false_success():

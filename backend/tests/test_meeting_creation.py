@@ -5,6 +5,7 @@ import unittest
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
@@ -84,6 +85,15 @@ class _FakeDb:
 
 
 class TestMeetingCreation(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        # The fake DB only models meeting/participant inserts; TAK INT 1H tasks are covered elsewhere.
+        reconcile_patch = patch(
+            "app.api.routers.meetings.reconcile_tak_int_one_h_tasks_for_meeting",
+            new=AsyncMock(return_value=0),
+        )
+        reconcile_patch.start()
+        self.addCleanup(reconcile_patch.stop)
+
     def test_paired_internal_meeting_is_deleted_with_its_external_meeting(self) -> None:
         foreign_key = next(iter(Meeting.__table__.c.paired_external_meeting_id.foreign_keys))
         self.assertEqual(foreign_key.target_fullname, "meetings.id")

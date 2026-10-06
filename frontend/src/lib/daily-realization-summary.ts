@@ -1,4 +1,5 @@
 import type { DailyRealizationLive, DailyRealizationMetrics } from "@/lib/types"
+import { weeklyRealizationPercent } from "@/lib/weekly-realization-percent"
 
 export function combineDailyRealization(reports: DailyRealizationLive[]): DailyRealizationLive | null {
   if (!reports.length) return null
@@ -13,8 +14,11 @@ export function combineDailyRealization(reports: DailyRealizationLive[]): DailyR
   }
   metrics.deadline_tasks = reports.flatMap((report) => report.metrics.deadline_tasks ?? [])
   const percent = (completed: number, total: number) => total ? Math.min(100, Math.round(completed * 1000 / total) / 10) : null
-  metrics.raw_plan_realization = percent(metrics.total_completed_today_count, metrics.original_planned_count)
-  metrics.adjusted_plan_realization = percent(metrics.total_completed_today_count, metrics.adjusted_denominator)
+  const realization = (planned: number, postponed: number) => planned || metrics.additional_count
+    ? weeklyRealizationPercent(planned, metrics.total_completed_today_count, metrics.additional_count, postponed)
+    : null
+  metrics.raw_plan_realization = realization(metrics.original_planned_count, metrics.postponed_count)
+  metrics.adjusted_plan_realization = realization(metrics.adjusted_denominator, metrics.unapproved_postponement_count)
   metrics.deadline_compliance_percentage = percent(metrics.deadlines_completed_count, metrics.deadlines_today_count)
   metrics.daily_control_state = reports.some((report) => report.metrics.daily_control_state === "ACTION_REQUIRED") ? "ACTION_REQUIRED" : "CLEAN_DAY"
   return {

@@ -37,6 +37,9 @@ from app.services.meeting_system_tasks import (
     reconcile_agent_test_task_for_meeting,
     reconcile_external_meeting_system_tasks_for_meeting,
     reconcile_pim_image_test_task_for_meeting,
+    reconcile_tak_int_one_h_tasks,
+    reconcile_tak_int_one_h_tasks_for_meeting,
+    sync_tak_int_one_h_tasks_with_held_status,
 )
 from app.services.meeting_scheduler import one_h_schedule_conflicts
 from app.services.audit import add_audit_log
@@ -172,6 +175,12 @@ async def sync_microsoft_calendar(
             start=sync_start,
             end=sync_end,
         )
+        await reconcile_tak_int_one_h_tasks(
+            db,
+            start=sync_start.date(),
+            end=sync_end.date(),
+        )
+        await db.commit()
     except HTTPException:
         raise
     except httpx.HTTPError as exc:
@@ -220,10 +229,14 @@ async def update_meeting_occurrence_status(
             occurrence_date=payload.occurrence_date,
         )
         db.add(row)
+    was_held = row.status == "held"
     row.status = payload.status
     row.note = payload.note
     row.checked_by_user_id = user.id
     row.checked_at = datetime.now().astimezone()
+    is_held = payload.status == "held"
+    if is_held != was_held:
+        await sync_tak_int_one_h_tasks_with_held_status(db, meeting, held=is_held)
     await db.commit()
     await db.refresh(row)
     return _occurrence_status_out(row)
@@ -396,6 +409,7 @@ async def create_meeting(
             ))
 
     await db.flush()
+    await reconcile_tak_int_one_h_tasks_for_meeting(db, meeting)
     await db.commit()
     await db.refresh(meeting)
     if paired_internal_meeting is not None:
@@ -450,6 +464,8 @@ async def update_meeting_reminder_settings(
             actor_user_id=user.id,
         )
     meeting.reminder_minutes_before = payload.reminder_minutes_before
+    await db.flush()
+    await reconcile_tak_int_one_h_tasks_for_meeting(db, meeting)
     add_audit_log(
         db=db,
         actor_user_id=user.id,
@@ -589,6 +605,7 @@ async def update_meeting(
 
     await db.flush()
     await reconcile_external_meeting_system_tasks_for_meeting(db, meeting)
+    await reconcile_tak_int_one_h_tasks_for_meeting(db, meeting)
 
     await db.commit()
     await db.refresh(meeting)
