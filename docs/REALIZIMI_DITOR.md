@@ -109,7 +109,15 @@ The classifier is a pure function. `TaskStatus` is unchanged.
 
 ## 11. Raw vs Adjusted realization
 
-Raw never changes its original denominator and never includes extra tasks. Adjusted denominator is `original_planned_count - approved postponements`. Reassignment does not alter the denominator. Adjusted realization is `planned_completed_today_count / adjusted_denominator * 100`; zero is N/A.
+Daily realization uses the same formula as weekly realization:
+
+```
+Base    = MIN(100, total_completed_today_count / plan * 100)   # planned done + extras done
+Penalty = postponed plan tasks / plan * 25
+Final   = MAX(0, Base - Penalty), rounded to one decimal
+```
+
+Raw uses `plan = original_planned_count` and penalises all postponements (approved and unapproved). Adjusted uses `plan = original_planned_count - approved postponements` and penalises only unapproved postponements. Reassignment does not alter the denominator. With no plan, the base is the number of extra tasks and there is no penalty; with neither plan nor extras the value is N/A.
 
 ## 11a. Daily explanation rule
 
