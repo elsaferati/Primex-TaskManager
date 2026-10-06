@@ -390,14 +390,15 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         department_result.scalars.return_value.all.return_value = [SimpleNamespace(id=department, code="DEV", name="Development")]
         db = AsyncMock()
         db.execute.side_effect = [result, department_result]
-        # One person realizes 1/1, the other 0/3: staff result must be 25%, not 50%.
+        # One person realizes 1/1, the other 0/3: staff result pools the tasks (25% base,
+        # minus 3 untouched * 25 / 4) rather than averaging the people's 100% and 0%.
         people = [{"user_id": str(ids[0]), "user_name": "A", "tasks": [{"in_original_plan": True, "classification": "REALIZED_AS_PLANNED"}], "metrics": {"raw_plan_realization": 100}},
                   {"user_id": str(ids[1]), "user_name": "B", "tasks": [{"in_original_plan": True, "classification": "NO_PROGRESS"}] * 3, "metrics": {"raw_plan_realization": 0}}]
         with patch.object(service, "build_live_daily_realization", new=AsyncMock(return_value={"baseline_available": True, "people": people})):
             capture = await service.build_realization_capture(db, DAY)
-        self.assertEqual(capture["percent"], 25)
+        self.assertEqual(capture["percent"], 6.3)
         self.assertEqual(capture["departments"][0]["code"], "DEV")
-        self.assertEqual(capture["departments"][0]["percent"], 25)
+        self.assertEqual(capture["departments"][0]["percent"], 6.3)
         db.execute.side_effect = [result, department_result]
         with patch.object(service, "build_live_daily_realization", new=AsyncMock(return_value={"baseline_available": False, "people": people})):
             capture = await service.build_realization_capture(db, DAY)

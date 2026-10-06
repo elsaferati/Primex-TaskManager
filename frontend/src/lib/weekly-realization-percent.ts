@@ -7,7 +7,7 @@ export function realizationPercent(credit: number, planWeight: number, extra: nu
   return Math.round(Math.max(0, base - penalty) * 10) / 10
 }
 
-/** Extras earn completion credit; unfinished plan tasks deduct their penalty points (25 postponed, more with a deadline). */
+/** Extras earn completion credit; unfinished tasks deduct their penalty points (25 postponed or untouched, more with a deadline). */
 export function weeklyRealizationPercent(planned: number, completed: number, extra: number, penaltyPoints: number): number {
-  return realizationPercent(completed, planned, extra, penaltyPoints, planned) ?? 0
+  return realizationPercent(completed, planned, extra, penaltyPoints, planned || extra) ?? 0
 }

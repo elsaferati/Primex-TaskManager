@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections import Counter
 from datetime import date, timedelta
 from typing import Iterable, Mapping
@@ -82,9 +83,13 @@ POSTPONED_DEADLINE_PENALTY = 40.0
 POSTPONED_CRITICAL_DEADLINE_PENALTY = 60.0
 MISSED_DEADLINE_PENALTY = 50.0
 MISSED_CRITICAL_DEADLINE_PENALTY = 70.0
+# Leaving a plan task untouched must not cost less than postponing it honestly.
+NO_PROGRESS_PENALTY = POSTPONED_PENALTY
 
 
-def plan_task_penalty(*, postponed: bool, deadline: bool, critical: bool, completed: bool) -> float:
+def plan_task_penalty(
+    *, postponed: bool, deadline: bool, critical: bool, completed: bool, no_progress: bool = False,
+) -> float:
     """Points one unfinished plan task deducts; a missed deadline costs more than an honest postponement."""
     if completed:
         return 0.0
@@ -94,33 +99,41 @@ def plan_task_penalty(*, postponed: bool, deadline: bool, critical: bool, comple
         return POSTPONED_PENALTY
     if deadline:
         return MISSED_CRITICAL_DEADLINE_PENALTY if critical else MISSED_DEADLINE_PENALTY
-    return 0.0
+    return NO_PROGRESS_PENALTY if no_progress else 0.0
+
+
+def extra_task_penalty(*, postponed: bool, deadline: bool, critical: bool, completed: bool) -> float:
+    """Extra work is only penalised for a deadline it let slip without postponing."""
+    if completed or postponed or not deadline:
+        return 0.0
+    return MISSED_CRITICAL_DEADLINE_PENALTY if critical else MISSED_DEADLINE_PENALTY
 
 
 def realization_percent(
     credit: float, plan_weight: float, extra: int, penalty_points: float, penalty_base: int,
 ) -> float | None:
-    """Daily and weekly realization: credit capped at 100, then penalty points per plan task deducted."""
+    """Daily and weekly realization: credit capped at 100, then penalty points per task deducted."""
     denominator = plan_weight or extra
     if not denominator:
         return None
     base = min(100.0, credit * 100.0 / denominator)
     penalty = penalty_points / penalty_base if penalty_base else 0.0
-    return round(max(0.0, base - penalty), 1)
+    # Half up, like the frontend's Math.round, so both sides show the same figure.
+    return math.floor(max(0.0, base - penalty) * 10 + 0.5) / 10
 
 
-def _realization_item(row: Mapping[str, object]) -> dict:
+def _realization_item(row: Mapping[str, object], *, extra_weight: float) -> dict:
     """How one row moved the daily percent, for the Plan RLZ explanation."""
     classification = str(row.get("classification") or "")
     planned = bool(row.get("in_original_plan"))
-    share = float(row.get("daily_share") or 1.0) if planned else 1.0
-    postponed = classification.startswith("POSTPONED")
+    share = float(row.get("daily_share") or 1.0) if planned else extra_weight
+    postponed = classification.startswith("POSTPONED") or (not planned and bool(row.get("postponed_today")))
     completed = classification in {"REALIZED_AS_PLANNED", *COMPLETED_CLASSIFICATIONS}
     deadline = bool(row.get("deadline_was_today"))
     critical = bool(row.get("deadline_critical"))
     if not planned:
         kind = "EXTRA_COMPLETED" if completed else "EXTRA_OPEN"
-        credit = 1.0 if completed else 0.0
+        credit = share if completed else 0.0
     elif completed:
         kind, credit = "COMPLETED", share
     elif postponed:
@@ -133,9 +146,15 @@ def _realization_item(row: Mapping[str, object]) -> dict:
         kind, credit = "REASSIGNED_OUT", 0.0
     else:
         kind, credit = "NO_PROGRESS", 0.0
-    penalty = 0.0
-    if planned and classification != "REASSIGNED_OUT":
-        penalty = plan_task_penalty(postponed=postponed, deadline=deadline, critical=critical, completed=completed)
+    if not planned:
+        penalty = extra_task_penalty(postponed=postponed, deadline=deadline, critical=critical, completed=completed)
+    elif classification == "REASSIGNED_OUT":
+        penalty = 0.0
+    else:
+        penalty = plan_task_penalty(
+            postponed=postponed, deadline=deadline, critical=critical, completed=completed,
+            no_progress=classification == "NO_PROGRESS",
+        )
     return {
         "task_id": str(row["task_id"]) if row.get("task_id") else None,
         "title": str(row.get("title") or "Pa titull"),
@@ -172,18 +191,21 @@ def calculate_daily_metrics(rows: Iterable[Mapping[str, object]]) -> dict[str, o
         row.get("classification") not in COMPLETED_CLASSIFICATIONS and row_has_progress(row)
         for row in extras
     )
-    realization_items = [_realization_item(row) for row in items]
+    plan_weight = round(sum(float(row.get("daily_share") or 1.0) for row in items if row.get("in_original_plan")), 4)
+    # An extra weighs as much as the day's average plan task, so small extras
+    # cannot cover multi-day plan work that only weighs a fraction of a task.
+    extra_weight = plan_weight / original if original else 1.0
+    realization_items = [_realization_item(row, extra_weight=extra_weight) for row in items]
     planned_items = [item for item in realization_items if item["planned"]]
-    plan_weight = round(sum(item["share"] for item in planned_items), 4)
     credit = round(sum(item["credit"] for item in realization_items), 4)
-    penalty_points = sum(item["penalty"] for item in planned_items)
+    penalty_points = sum(item["penalty"] for item in realization_items)
     # Approved postponements leave the adjusted plan, together with their penalty.
     approved_items = [item for item in planned_items if item["approved"]]
     adjusted_plan_weight = round(plan_weight - sum(item["share"] for item in approved_items), 4)
     adjusted_penalty_points = penalty_points - sum(item["penalty"] for item in approved_items)
-    raw = realization_percent(credit, plan_weight, len(extras), penalty_points, original)
+    raw = realization_percent(credit, plan_weight, len(extras), penalty_points, original or len(extras))
     adjusted = realization_percent(
-        credit, adjusted_plan_weight, len(extras), adjusted_penalty_points, adjusted_denominator,
+        credit, adjusted_plan_weight, len(extras), adjusted_penalty_points, adjusted_denominator or len(extras),
     )
     deadline_rows = [row for row in items if row.get("deadline_was_today")]
     deadline_cards = [
@@ -235,7 +257,9 @@ def calculate_daily_metrics(rows: Iterable[Mapping[str, object]]) -> dict[str, o
         "realization_penalty_points": penalty_points,
         "adjusted_realization_plan_weight": adjusted_plan_weight,
         "adjusted_realization_penalty_points": adjusted_penalty_points,
-        "realization_items": [item for item in realization_items if item["kind"] != "EXTRA_OPEN"],
+        "realization_items": [
+            item for item in realization_items if item["kind"] != "EXTRA_OPEN" or item["penalty"]
+        ],
         "deadline_tasks": sort_deadline_cards(deadline_cards),
         "deadlines_today_count": len(deadline_rows),
         "deadlines_completed_count": deadline_completed,

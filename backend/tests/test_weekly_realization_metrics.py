@@ -27,7 +27,8 @@ def test_extra_completions_count_toward_realization_and_open_extras_do_not():
     assert metrics["weekly_additional_postponed_count"] == 0
     assert metrics["weekly_additional_todo_count"] == 1
     assert metrics["weekly_additional_no_progress_count"] == 1
-    assert metrics["weekly_progress_percent"] == 100
+    # Base 2 / 2 = 100, minus 25 / 2 for the untouched plan task.
+    assert metrics["weekly_progress_percent"] == 87.5
 
 
 def test_extra_work_is_capped_at_full_realization():
@@ -42,13 +43,14 @@ def test_extra_work_is_capped_at_full_realization():
     (5, 3, 2, 2, 90),
     (5, 4, 1, 1, 95),
     (5, 5, 2, 0, 100),
-    (10, 6, 2, 2, 75),
+    (10, 6, 2, 2, 70),
     (10, 8, 5, 2, 95),
-    (100, 23, 0, 0, 23),
+    (100, 23, 0, 0, 3.8),
     (5, 0, 0, 5, 0),
     (3, 2, 0, 1, 58.3),
 ])
 def test_postponed_plan_penalty(planned, completed, extras, postponed, expected):
+    # Remaining plan tasks are untouched and deduct 25 each, like postponed ones.
     tasks = [
         task(f"P{i}", "planned_owner", "completed" if i < completed else
              "postponed_approved" if i < completed + postponed else "no_progress")
@@ -329,3 +331,9 @@ def test_unfinished_plan_deadlines_cost_more(classification, critical, expected)
     metrics = build_weekly_task_metrics(tasks, [day])
     # Base 3 / 4 = 75 is below the cap, so only the penalty changes: 40/60 postponed, 50/70 missed.
     assert metrics["weekly_progress_percent"] == expected - 25
+
+
+def test_extra_that_misses_its_deadline_costs_the_week():
+    tasks = [task("P", "planned_owner", "completed"), task("E", "additional_owner", "no_progress")]
+    day = {"date": "2026-10-07", "tasks": [{**task("E", "additional_owner", "no_progress"), "deadline_was_today": True, "deadline_critical": True}]}
+    assert build_weekly_task_metrics(tasks, [day])["weekly_progress_percent"] == 30

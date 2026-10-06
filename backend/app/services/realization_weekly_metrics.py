@@ -4,6 +4,7 @@ from datetime import date
 
 from app.services.daily_realization_metrics import (
     deadline_task_card,
+    extra_task_penalty,
     plan_task_penalty,
     realization_percent,
     sort_deadline_cards,
@@ -234,20 +235,30 @@ def build_weekly_task_metrics(
     }
     deadline_keys = {key for _day, key in deadline_occurrences}
     critical_keys = {key for (_day, key), task in deadline_occurrences.items() if task.get("deadline_critical")}
-    # Only plan work still unfinished at the end of the week is penalised.
+    # Only work still unfinished at the end of the week is penalised: every
+    # open plan task, and extras only for a deadline they let slip.
     penalty_points = sum(
         plan_task_penalty(
             postponed=key in planned_postponed,
             deadline=key in deadline_keys,
             critical=key in critical_keys,
             completed=False,
+            no_progress=key in planned_no_progress,
         )
         for key in pending_planned
+    ) + sum(
+        extra_task_penalty(
+            postponed=key in additional_postponed,
+            deadline=key in deadline_keys,
+            critical=key in critical_keys,
+            completed=False,
+        )
+        for key in additional_keys - additional_completed
     )
     metrics["weekly_penalty_points"] = penalty_points
     metrics["weekly_progress_percent"] = realization_percent(
         len(planned_completed | additional_completed), len(planned_keys), len(additional_keys),
-        penalty_points, len(planned_keys),
+        penalty_points, len(planned_keys) or len(additional_keys),
     ) or 0.0
     return metrics
 

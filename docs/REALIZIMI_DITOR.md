@@ -113,23 +113,26 @@ Daily realization uses the same formula as weekly realization:
 
 ```
 Base    = MIN(100, credit / plan weight * 100)
-Penalty = sum of penalty points / number of plan tasks
+Penalty = sum of penalty points / number of plan tasks (number of extras when there is no plan)
 Final   = MAX(0, Base - Penalty), rounded to one decimal
 ```
 
-Credit is 1 per completed plan task and per completed extra. A plan task spread over N working days (start date to deadline, Monday-Friday) weighs 1/N in the plan weight on each of those days, and while it is in progress before its deadline day it also earns 1/N credit. Every other plan task weighs 1.
+A plan task spread over N working days (start date to deadline, Monday-Friday) weighs 1/N in the plan weight on each of those days, and while it is in progress before its deadline day it also earns 1/N credit. Every other plan task weighs 1 and earns 1 when completed. A completed extra earns the day's average plan task weight (plan weight / number of plan tasks), so small extras cannot cover multi-day plan work that only weighs a fraction of a task; with no plan each extra weighs 1.
 
 Penalty points per unfinished plan task:
 
 | Case | Points |
 |---|---|
+| Plan task untouched (no progress), no deadline that day | 25 |
 | Postponed, no deadline that day | 25 |
 | Postponed, deadline that day | 40 |
 | Postponed, important deadline that day | 60 |
 | Deadline that day missed without postponing | 50 |
 | Important deadline missed without postponing | 70 |
 
-Raw uses the full plan. Adjusted removes approved postponements from both the plan weight and the penalty. Reassignment does not alter the denominator. With no plan, the base is the number of extra tasks and there is no penalty; with neither plan nor extras the value is N/A. Weekly realization applies the same penalty table to plan tasks still unfinished at the end of the week, without the multi-day share. Clicking a person's Plan RLZ in the daily staff table lists the tasks behind each part of the formula.
+Extras are penalised only for a deadline that day missed without postponing (50, or 70 when important).
+
+Raw uses the full plan. Adjusted removes approved postponements from both the plan weight and the penalty. Reassignment does not alter the denominator. With no plan, the base is the number of extra tasks and there is no penalty; with neither plan nor extras the value is N/A. Weekly realization applies the same penalty table to tasks still unfinished at the end of the week, without the multi-day share. Percentages round half up on both backend and frontend. Clicking a person's Plan RLZ in the daily staff table lists the tasks behind each part of the formula.
 
 ## 11a. Daily explanation rule
 
