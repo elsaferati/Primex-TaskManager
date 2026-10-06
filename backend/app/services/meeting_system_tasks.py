@@ -750,6 +750,16 @@ async def _reconcile_tak_int_one_h_task_kind(
         return 0
 
     slot_date, slot_label = slot
+    if slot_date < now_utc.astimezone(_app_tz()).date():
+        # The slot day is already over: never create (or move) a task into the past,
+        # and drop open tasks that were created only after their day had passed.
+        for task in current_by_user.values():
+            if task.status == TaskStatus.DONE or task.start_date is None or task.created_at is None:
+                continue
+            if _as_local(task.created_at).date() > _as_local(task.start_date).date():
+                task.is_active = False
+        return 0
+
     task_start_at = _one_h_slot_start_at(slot_date, slot_label)
     finish_period = _one_h_slot_finish_period(slot_label)
     department_map = await _user_department_map(db, participant_ids)
@@ -867,7 +877,8 @@ async def reconcile_tak_int_one_h_tasks(
     end = end or (local_today + timedelta(days=max(int(settings.SYSTEM_TASK_GENERATE_AHEAD_DAYS), 0)))
     if end < start:
         return 0
-    start_utc, _ = _local_day_bounds_utc(start)
+    # Look a week back too, so open tasks wrongly dated in the past get cleaned up.
+    start_utc, _ = _local_day_bounds_utc(start - timedelta(days=7))
     _, end_utc = _local_day_bounds_utc(end)
     meetings = (
         await db.execute(
