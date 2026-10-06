@@ -1406,6 +1406,54 @@ const gaTimeEntryStyle = (entry: Partial<GaTimeEntryFormat>): React.CSSPropertie
 // covers whatever is below it. Touch devices therefore get the same editor in a
 // full-width panel pinned to the top of the visible screen, with finger-sized
 // controls; desktop keeps the inline editor inside the cell.
+// Kept outside the page component: defining it inline gave it a new identity on
+// every render, so React remounted each section (scroll jump, lost focus).
+function AdminTasksSection({
+  sectionId,
+  title,
+  description,
+  actions,
+  children,
+  headerClassName,
+  contentClassName,
+  isCollapsed,
+  onToggle,
+}: {
+  sectionId: AdminTasksSectionId
+  title: string
+  description?: string
+  actions?: React.ReactNode
+  children?: React.ReactNode
+  headerClassName?: string
+  contentClassName?: string
+  isCollapsed: boolean
+  onToggle: (sectionId: AdminTasksSectionId) => void
+}) {
+  return (
+    <Card className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <CardHeader className={cn("flex flex-wrap items-center justify-center gap-3", "relative pl-14", headerClassName)}>
+        <div>
+          <CardTitle className="text-base font-semibold text-slate-900">{title}</CardTitle>
+          {description ? <div className="mt-1 text-xs text-slate-500">{description}</div> : null}
+        </div>
+        {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="absolute left-3 top-3 h-8 w-8 p-0 text-lg font-semibold leading-none print:hidden"
+          aria-label={isCollapsed ? `Open ${title}` : `Close ${title}`}
+          aria-expanded={!isCollapsed}
+          onClick={() => onToggle(sectionId)}
+        >
+          {isCollapsed ? "+" : "-"}
+        </Button>
+      </CardHeader>
+      {!isCollapsed && children ? <CardContent className={cn("px-2", contentClassName)}>{children}</CardContent> : null}
+    </Card>
+  )
+}
+
 function GaTimeEditorShell({ className, children }: { className: string; children: React.ReactNode }) {
   const [isTouch] = React.useState(
     () => typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches
@@ -4742,56 +4790,12 @@ export default function AdminTasksPage() {
     return stop
   }, [])
 
-  const sectionCardClass = "rounded-xl border border-slate-200 bg-white shadow-sm"
-  const sectionHeaderClass = "flex flex-wrap items-center justify-center gap-3"
-
-  const AdminTasksSection = ({
-    sectionId,
-    title,
-    description,
-    actions,
-    children,
-    headerClassName,
-    contentClassName,
-  }: {
-    sectionId: AdminTasksSectionId
-    title: string
-    description?: string
-    actions?: React.ReactNode
-    children?: React.ReactNode
-    headerClassName?: string
-    contentClassName?: string
-  }) => {
-    const isCollapsed = collapsedAdminSections[sectionId]
-    return (
-      <Card className={sectionCardClass}>
-        <CardHeader className={cn(sectionHeaderClass, "relative pl-14", headerClassName)}>
-          <div>
-            <CardTitle className="text-base font-semibold text-slate-900">{title}</CardTitle>
-            {description ? <div className="mt-1 text-xs text-slate-500">{description}</div> : null}
-          </div>
-          {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="absolute left-3 top-3 h-8 w-8 p-0 text-lg font-semibold leading-none print:hidden"
-            aria-label={isCollapsed ? `Open ${title}` : `Close ${title}`}
-            aria-expanded={!isCollapsed}
-            onClick={() => {
-              setCollapsedAdminSections((current) => ({
-                ...current,
-                [sectionId]: !current[sectionId],
-              }))
-            }}
-          >
-            {isCollapsed ? "+" : "-"}
-          </Button>
-        </CardHeader>
-        {!isCollapsed && children ? <CardContent className={cn("px-2", contentClassName)}>{children}</CardContent> : null}
-      </Card>
-    )
-  }
+  const toggleAdminSection = React.useCallback((sectionId: AdminTasksSectionId) => {
+    setCollapsedAdminSections((current) => ({
+      ...current,
+      [sectionId]: !current[sectionId],
+    }))
+  }, [])
 
   const commonFiltered = React.useMemo(() => {
     const datesToUse = commonWeekISOs
@@ -7145,6 +7149,8 @@ export default function AdminTasksPage() {
         <div className="print-section order-1" data-print-section="all-tasks">
           <AdminTasksSection
             sectionId="all-tasks"
+            isCollapsed={collapsedAdminSections["all-tasks"]}
+            onToggle={toggleAdminSection}
             title="ALL TASKS"
             description=""
             headerClassName="px-3 sm:px-6"
@@ -7288,6 +7294,8 @@ export default function AdminTasksPage() {
         <div className="order-3 print:hidden">
           <AdminTasksSection
             sectionId="one-h-print"
+            isCollapsed={collapsedAdminSections["one-h-print"]}
+            onToggle={toggleAdminSection}
             title="1H SHTYPI"
             description="Generate the same Today or Tomorrow report used by 1H SHTYPI."
           >
@@ -7360,6 +7368,8 @@ export default function AdminTasksPage() {
           <div className="print:hidden">
             <AdminTasksSection
               sectionId="common"
+              isCollapsed={collapsedAdminSections["common"]}
+              onToggle={toggleAdminSection}
               title={`COMMON VIEW - GANE TASKS${weekTitleRange ? ` (${weekTitleRange})` : ""}`}
               description=""
               actions={
@@ -7605,6 +7615,8 @@ export default function AdminTasksPage() {
           <div id="ga-time-table" className="scroll-mt-4 print:hidden">
           <AdminTasksSection
             sectionId="ga-time"
+            isCollapsed={collapsedAdminSections["ga-time"]}
+            onToggle={toggleAdminSection}
             title={`GA TIME TABLE${weekTitleRange ? ` (${weekTitleRange})` : ""}`}
             description=""
             actions={
@@ -8353,7 +8365,7 @@ export default function AdminTasksPage() {
     <div className="mx-4 bg-slate-50/30" data-print-target={printTarget || ""}>
       <div className="-mx-4 w-[calc(100%+2rem)] max-w-none space-y-6 px-1 py-4 sm:mx-0 sm:w-full sm:px-0">
         <div className="space-y-8">
-          <AdminCommonWeekTable />
+          {AdminCommonWeekTable()}
         </div>
       </div>
       <Dialog
