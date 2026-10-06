@@ -6,7 +6,7 @@ from unittest.mock import patch
 from zipfile import ZipFile
 
 from docx import Document
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from app.services import m3_reporting_points as report_service
 from app.services import m3_reporting_points_attachments as exports
@@ -34,6 +34,46 @@ def sample_report():
 
 
 class ReportingPointsAttachmentTests(unittest.TestCase):
+    def test_fast_wrapping_preserves_existing_line_breaks_and_uses_fewer_measurements(self):
+        font = ImageFont.load_default(size=17)
+        draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+        calls = 0
+
+        class Measure:
+            def textlength(self, value, **kwargs):
+                nonlocal calls
+                calls += 1
+                return draw.textlength(value, **kwargs)
+
+        def previous_wrap(value, limit):
+            lines = []
+            for source in value.split("\n"):
+                current = ""
+                for char in source.expandtabs(4):
+                    if current and draw.textlength(current + char, font=font) > limit:
+                        space = current.rfind(" ")
+                        if space > 0:
+                            lines.append(current[:space])
+                            current = current[space + 1:] + char
+                        else:
+                            lines.append(current)
+                            current = char
+                    else:
+                        current += char
+                lines.append(current)
+            return tuple(lines)
+
+        values = ["", "\n", "  Hapësira  të dyfishta  ", "ë ç M2/3\nRreshti tjetër\n",
+                  "A\tB", "X" * 80, "Detyrë me tekst të gjatë " * 8]
+        for value in values:
+            for width in (10, 60, 220):
+                self.assertEqual(exports._wrap_measured_text(value, font, width, Measure()), previous_wrap(value, width))
+        value = "Detyrë me tekst të gjatë " * 100
+        calls = 0
+        lines = exports._wrap_measured_text(value, font, 400, Measure())
+        self.assertTrue(lines)
+        self.assertLess(calls, len(value) // 2)
+
     def test_word_contains_all_sections_editable_tables_colors_and_repeating_headers(self):
         report = sample_report()
         data = exports.render_docx(report)

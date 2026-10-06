@@ -1,0 +1,240 @@
+from __future__ import annotations
+
+import asyncio
+import html
+from datetime import date, datetime
+
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.after_break_report_settings import AfterBreakReportSettings
+from app.models.m2_reporting_points import M2ReportingPointsReport
+from app.services.daily_realization_events import semantic_local_day
+from app.services import m3_reporting_points as m3
+from app.services.meetings_report import _clean_task_title, _m3_am_pm_label, _m3_task_type_label
+from app.services.meetings_report_scheduler import normalize_recipients
+from app.services.primeflow_report import GmailService, report_timezone
+from app.services.task_marker import active_one_h_marker, active_one_h_marker_by_ga, one_h_marker_label
+
+TITLE = "PIKAT PER RAPORTIM M2"
+MANUAL_POINTS = {"reorganization": "1. RIORGANIZIM? (PARA PAUZES)- PAS PAUZES ,TAKIM INT, NDARJE E DET?"}
+AUTO_TITLES = {
+    "postponed": "2. A KA DET QE SHTYHEN (SOT/SOT) OSE DEADLINE?",
+    "delivery": "3. A JANE DORZUAR TE GJITHA CKA ESHTE DASHUR M2?",
+}
+DELIVERY_MARKERS = {"M2", "M2_M3"}
+
+
+def subject_for(day: date) -> str:
+    return f"{TITLE} - {day:%d.%m.%Y}"
+
+
+def select_task_sections(tasks, events, day: date) -> dict:
+    sections = {"postponed": m3.select_task_sections(tasks, events, day)["ga_postponed"], "delivery": []}
+    for task in tasks:
+        marker = active_one_h_marker(task, day)
+        if marker not in DELIVERY_MARKERS:
+            continue
+        start, due, created, completed = (semantic_local_day(getattr(task, field, None))
+                                         for field in ("start_date", "due_date", "created_at", "completed_at"))
+        status = str(getattr(task.status, "value", task.status)).upper()
+        # Membership is determined by the saved symbol and inclusive planning
+        # interval, regardless of completion status.
+        if (created and created > day) or start is None or due is None or not start <= day <= due:
+            continue
+        system = bool(getattr(task, "system_template_origin_id", None) or getattr(task, "system_task_slot_id", None))
+        sections["delivery"].append({
+            "task_id": str(task.id), "title": _clean_task_title(task.title, is_system_task=system),
+            "status": status, "progress": task.progress_percentage or 0,
+            "start_date": start.isoformat() if start else None, "due_date": due.isoformat() if due else None,
+            "created_date": created.isoformat() if created else None, "completed_date": completed.isoformat() if completed else None,
+            "am_pm": _m3_am_pm_label(task), "task_type": _m3_task_type_label(task),
+            "deadline_important": bool(task.is_deadline_important), "is_system_task": system,
+            "marker": one_h_marker_label(marker, active_one_h_marker_by_ga(task, day)),
+        })
+    return sections
+
+
+async def build_task_data(db: AsyncSession, day: date) -> dict:
+    return await m3.build_task_data(db, day, section_selector=select_task_sections)
+
+
+async def get_settings(db: AsyncSession) -> AfterBreakReportSettings:
+    row = (await db.execute(select(AfterBreakReportSettings).order_by(AfterBreakReportSettings.created_at))).scalars().first()
+    if row is None:
+        raise ValueError("Konfiguro marresit e raportit M2 perpara dergimit.")
+    return row
+
+
+async def locked_report(db: AsyncSession, day: date) -> M2ReportingPointsReport:
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": f"m2_reporting_points|{day.isoformat()}"})
+    row = (await db.execute(select(M2ReportingPointsReport).where(M2ReportingPointsReport.report_date == day))).scalar_one_or_none()
+    if row is None:
+        row = M2ReportingPointsReport(report_date=day, manual_answers={}, data={}, status="DRAFT")
+        db.add(row)
+        await db.flush()
+    return row
+
+
+async def refresh_report(db: AsyncSession, row: M2ReportingPointsReport) -> None:
+    now = datetime.now(report_timezone())
+    if row.report_date != now.date():
+        raise ValueError("Raportet historike perdorin te dhenat e ruajtura te asaj dite.")
+    row.data = await build_task_data(db, row.report_date)
+    row.generated_at = now
+
+
+def report_payload(row: M2ReportingPointsReport) -> dict:
+    return {"id": str(row.id), "report_date": row.report_date.isoformat(), "subject": subject_for(row.report_date),
+            "manual_answers": row.manual_answers or {}, "data": row.data or {}, "status": row.status,
+            "generated_at": row.generated_at.isoformat() if row.generated_at else None,
+            "sent_at": row.sent_at.isoformat() if row.sent_at else None, "last_error": row.last_error}
+
+
+def table_groups(report, key):
+    return m3.task_table_groups(report.get("data", {}).get(key, []), "ga_postponed" if key == "postponed" else key)
+
+
+def table_columns(key, movement=""):
+    if key == "postponed":
+        return [(field, label, 60 if field == "am_pm" else width) for field, label, width in m3.report_table_columns("ga_postponed", movement)
+                if field not in {"reason", "comment", "category"}] + [("manual_comment", "KOMENT MANUAL", 220)]
+    return [("nr", "NR", 28), ("assignees", "KUSH", 42), ("department", "DEP", 44),
+            ("project", "PRJK", 96), ("am_pm", "AM/PM", 60), ("task_type", "LLOJI", 48),
+            ("marker", "SIMBOLI", 60), ("title", "TITULLI", 450), ("choice", "PO/JO", 50), ("answer", "PERGJIGJJA MANUALE", 300)]
+
+
+def table_value(report, row, column, index, movement):
+    if column == "manual_comment":
+        return report.get("manual_answers", {}).get(f"postponed_comment:{row['task_id']}") or "-"
+    if column == "choice":
+        return report.get("manual_answers", {}).get(f"delivery_choice:{row['task_id']}") or "-"
+    if column == "answer":
+        return report.get("manual_answers", {}).get(f"delivery:{row['task_id']}") or "Pa pergjigje"
+    if not movement and column == "title":
+        return row.get("title") or "-"
+    if column == "marker":
+        return row.get("marker") or "-"
+    return m3.report_table_value(row, column, index, movement)
+
+
+def export_blocks(report):
+    blocks = [{"kind": "text", "text": TITLE, "level": 1},
+              {"kind": "text", "text": f"Data: {report['report_date']}", "level": 0},
+              {"kind": "text", "text": MANUAL_POINTS["reorganization"], "level": 2},
+              {"kind": "text", "text": report.get("manual_answers", {}).get("reorganization") or "Pa pergjigje", "level": 0}]
+    for key, title in AUTO_TITLES.items():
+        blocks.append({"kind": "text", "text": title, "level": 2})
+        if key == "delivery":
+            rows = report.get("data", {}).get("delivery", [])
+            delivered = sum(report.get("manual_answers", {}).get(f"delivery_choice:{row['task_id']}") == "PO" for row in rows)
+            blocks.append({"kind": "text", "text": f"TOTALI/DËRGUAR: {len(rows)}/{delivered}", "level": 3, "font_size": 14})
+        if key == "postponed":
+            blocks.append({"kind": "legend", "runs": [
+                ("Shtyrjet e bëra gjatë ditës. ", None, "#000000"),
+                ("Brenda javës: OK.", "#dcfce7", "#14532d"),
+                (" Për të premten ose javën tjetër: RREZIK.", "#fee2e2", "#7f1d1d"),
+            ]})
+        for caption, movement, rows in table_groups(report, key):
+            if caption:
+                blocks.append({"kind": "text", "text": caption, "level": 3})
+            if not rows:
+                blocks.append({"kind": "text", "text": "Asnje detyre.", "level": 0})
+                continue
+            columns = table_columns(key, movement)
+            rendered = []
+            for index, row in enumerate(rows, 1):
+                fill, color, eight_am = m3.task_row_appearance(row)
+                cells = []
+                for column_index, (column, _, _) in enumerate(columns):
+                    value = str(table_value(report, row, column, index, movement))
+                    cell_fill, cell_color = fill, color
+                    if column in {"answer", "manual_comment", "choice"}:
+                        cell_fill, cell_color = "#ffffff", "#000000"
+                    if column == "choice" and value in {"PO", "JO"}:
+                        cell_fill, cell_color = ("#16a34a" if value == "PO" else "#dc2626"), "#ffffff"
+                    if column == "risk":
+                        cell_fill, cell_color = ("#fee2e2", "#7f1d1d") if value == "RREZIK" else ("#dcfce7", "#14532d")
+                    cells.append({
+                        "text": value, "fill": cell_fill, "color": cell_color,
+                        "bold": column in {"title", "marker", "choice", "risk"}, "marker": row.get("marker") if key == "postponed" and column == "title" else None,
+                        "eight_am": eight_am, "first": column_index == 0, "last": column_index == len(columns) - 1,
+                        "divider": column in {"from", "to"} and movement == "start_due",
+                    })
+                rendered.append(cells)
+            blocks.append({"kind": "table", "columns": columns, "rows": rendered})
+    return blocks
+
+
+def render_html(report):
+    def escaped(value):
+        return html.escape(str(value), quote=True).replace("\n", "<br>")
+    parts = ["<!doctype html><html><head><meta charset='utf-8'></head><body style='font-family:Arial,sans-serif;color:#0f172a'>"]
+    for block in export_blocks(report):
+        if block["kind"] == "text":
+            tag = "h1" if block["level"] == 1 else "h3" if block["level"] else "p"
+            style = f" style='font-size:{block['font_size']}pt;font-weight:bold'" if block.get("font_size") else ""
+            parts.append(f"<{tag}{style}>{escaped(block['text'])}</{tag}>")
+        elif block["kind"] == "legend":
+            parts.append("<p style='font-weight:bold'>" + "".join(
+                f"<span style='background:{fill or 'transparent'};color:{color};padding:2px 4px'>{escaped(value)}</span>"
+                for value, fill, color in block["runs"]) + "</p>")
+        else:
+            header = "".join(f"<th width='{width}' style='border:1px solid #000;padding:6px;background:#e2e8f0;text-align:left'>{escaped(label)}</th>" for _, label, width in block["columns"])
+            def render_cell(cell):
+                style = f"border:1px solid #000;padding:6px;vertical-align:top;background:{cell['fill']};color:{cell['color']};overflow-wrap:anywhere"
+                if cell.get("bold"):
+                    style += ";font-weight:bold"
+                if cell.get("eight_am"):
+                    style += ";border-top:3px solid #dc2626;border-bottom:3px solid #dc2626"
+                    if cell.get("first"):
+                        style += ";border-left:3px solid #dc2626"
+                    if cell.get("last"):
+                        style += ";border-right:3px solid #dc2626"
+                value = escaped(cell["text"])
+                if cell.get("divider"):
+                    first, _, last = cell["text"].partition("\n")
+                    value = f"<div style='border-bottom:2px solid #000;padding-bottom:3px;margin-bottom:3px'>{escaped(first)}</div>{escaped(last)}"
+                return f"<td style='{style}'>{value}</td>"
+            rows = "".join("<tr>" + "".join(render_cell(cell) for cell in row) + "</tr>" for row in block["rows"])
+            parts.append(f"<table width='100%' cellspacing='0' style='border-collapse:collapse;font-size:12px'><thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table>")
+    return "".join(parts) + "</body></html>"
+
+
+def render_plain_text(report):
+    return "\n\n".join(block["text"] if block["kind"] == "text" else
+        "".join(value for value, _, _ in block["runs"]) if block["kind"] == "legend" else "\n".join(
+        " | ".join(f"{column[1]}: {cell['text']}" for column, cell in zip(block["columns"], row))
+        for row in block["rows"]) for block in export_blocks(report))
+
+
+def report_attachments(report):
+    from app.services.m3_reporting_points_attachments import render_docx, render_png, DOCX_MIME
+    blocks = export_blocks(report)
+    stem = f"pikat_m2_{report['report_date']}"
+    return [(stem + ".docx", render_docx(report, blocks=blocks), DOCX_MIME),
+            (stem + ".png", render_png(report, blocks=blocks), "image/png")]
+
+
+async def send_report(db, row, recipients):
+    if row.status == "SENT":
+        return
+    recipients = normalize_recipients(recipients)
+    if not recipients["to"]:
+        raise ValueError("Shto te pakten nje marres To ne konfigurimin e M2.")
+    report = report_payload(row)
+    try:
+        gmail = GmailService()
+        message = await gmail.find_exact(report["subject"], recipients)
+        if not message:
+            html_body = render_html(report)
+            attachments = await asyncio.to_thread(report_attachments, report)
+            message = await gmail.send_verified(report["subject"], recipients, render_plain_text(report), html_body,
+                attachments=[(f"pikat_m2_{row.report_date.isoformat()}.html", html_body.encode("utf-8"), "text/html"), *attachments])
+    except Exception as exc:
+        row.status, row.last_error = "FAILED", str(exc)[:2000]
+        await db.commit()
+        raise
+    row.status, row.sent_at = "SENT", datetime.now(report_timezone())
+    row.gmail_message_id, row.last_error = message.get("id"), None
+    await db.commit()

@@ -401,8 +401,9 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         db.execute.side_effect = [result, department_result]
         with patch.object(service, "build_live_daily_realization", new=AsyncMock(return_value={"baseline_available": False, "people": people})):
             capture = await service.build_realization_capture(db, DAY)
-        self.assertIsNone(capture["percent"])
-        self.assertIsNone(capture["departments"][0]["percent"])
+        self.assertEqual(capture["percent"], 25)
+        self.assertEqual(capture["departments"][0]["percent"], 25)
+        self.assertFalse(capture["baseline_available"])
 
     async def test_departments_have_separate_weighted_percentages_and_saved_order(self):
         dev, gd, pcm = [SimpleNamespace(id=uuid.uuid4(), code=code, name=code) for code in ("DEV", "GD", "PCM")]
@@ -421,8 +422,48 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(service, "build_live_daily_realization", new=build):
             capture = await service.build_realization_capture(db, DAY)
         self.assertEqual([(item["code"], item["percent"]) for item in capture["departments"]], [("DEV", 100), ("GD", 0), ("PCM", None)])
-        self.assertIsNone(capture["percent"])
+        self.assertEqual(capture["percent"], 25)
         self.assertEqual([item["employees"] for item in capture["departments"]], [1, 1, 1])
+
+    async def test_realization_includes_all_departments_and_the_complete_live_population(self):
+        departments = [SimpleNamespace(id=uuid.uuid4(), code=code, name=code)
+                       for code in ("DEV", "FIN", "GA", "GD", "HR", "PCM")]
+        def result(values):
+            item = MagicMock()
+            item.scalars.return_value.all.return_value = values
+            return item
+        db = AsyncMock()
+        db.execute.side_effect = [result([]), result(departments)]
+        async def build(_, department_id, day):
+            # A manager/historical assignee is present in Realization even though
+            # absent from the active STAFF query that previously filtered M3.
+            tasks = ([{"in_original_plan": True, "classification": "REALIZED_AS_PLANNED"},
+                      {"in_original_plan": True, "classification": "NO_PROGRESS"}]
+                     if department_id == departments[1].id else [])
+            return {"baseline_available": False, "people": [
+                {"user_id": str(uuid.uuid4()), "user_name": "Manager", "tasks": tasks,
+                 "metrics": service.calculate_daily_metrics(tasks)}] if tasks else []}
+        with patch.object(service, "build_live_daily_realization", new=AsyncMock(side_effect=build)) as live:
+            capture = await service.build_realization_capture(db, DAY)
+        self.assertEqual(live.await_count, 6)
+        self.assertEqual({item["code"] for item in capture["departments"]},
+                         {"DEV", "FIN", "GA", "GD", "HR", "PCM"})
+        self.assertEqual(capture["percent"], 50)
+        self.assertEqual(capture["metrics"]["original_planned_count"], 2)
+        self.assertEqual(capture["metrics"]["total_completed_today_count"], 1)
+        self.assertEqual(next(item for item in capture["departments"] if item["code"] == "FIN")["percent"], 50)
+        self.assertIsNone(next(item for item in capture["departments"] if item["code"] == "GA")["percent"])
+        report = {"report_date": DAY.isoformat(), "subject": "M3", "manual_answers": {},
+                  "data": {}, "realization": capture, "realization_captured_at": None}
+        from app.services.m3_reporting_points_attachments import export_blocks
+        blocks = export_blocks(report)
+        department_table = next(block for block in blocks if block.get("kind") == "table"
+                                and block["columns"][0][0] == "code")
+        self.assertEqual(len(department_table["rows"]), 6)
+        self.assertIn("50%", service.render_plain_text(report))
+        html = service.render_html(report)
+        for department in departments:
+            self.assertIn(department.code, html)
 
     async def test_regeneration_after_1615_replaces_realization_and_preserves_answers(self):
         now = datetime.fromisoformat("2026-10-05T17:02:00+02:00")

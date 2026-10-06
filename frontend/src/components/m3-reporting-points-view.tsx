@@ -200,9 +200,10 @@ export function M3ReportingPointsView({ report, answers, onAnswerChange, disable
       <Point title="3. SOT PËR SOT — PROGRESI?" note="Vetëm detyrat që nuk janë DONE dhe kanë Creation Date, Start Date dhe Due Date në datën e këtij raporti." rows={(data.same_day || []).filter((row) => row.status !== "DONE")} kind="same_day" />
       <section className="rounded-xl border bg-card p-5" aria-labelledby="m3-realization-title">
         <h3 id="m3-realization-title" className="font-semibold">4. REALIZIMI — A MBËRRIHET?</h3>
-        <p className="mt-1 text-xs text-muted-foreground">Realizimi ditor i gjithë stafit. Ruhet në 16:15 dhe sa herë gjenerohet raporti pas 16:15.</p>
+        <p className="mt-1 text-xs text-muted-foreground">PLAN RLZ total dhe të gjitha departamentet, si te Realization. Ruhet në 16:15 dhe sa herë gjenerohet raporti pas 16:15.</p>
         {realization ? <div className="mt-5 flex flex-wrap items-center gap-5">
           <div className={`rounded-xl px-5 py-3 text-3xl font-bold ${realization.percent == null ? "bg-muted" : realization.percent < 50 ? "bg-red-100 text-red-900" : "bg-green-100 text-green-900"}`}>
+            <span className="mb-1 block text-xs font-semibold">PLAN RLZ TOTAL</span>
             {realization.percent == null ? "Pa të dhëna" : `${realization.percent}%`}
           </div>
           <div><p className="font-medium">{realization.comment}</p><p className="mt-1 text-xs text-muted-foreground">{realization.employees} persona · {report.realization_captured_at ? `Marrë në ${reportTime(report.realization_captured_at)}` : <><span className="rounded bg-blue-100 px-1 py-0.5 font-semibold text-blue-800">LIVE</span> në {reportTime(report.generated_at)} · ende pa u ruajtur, ruhet pas 16:15</>}</p></div>

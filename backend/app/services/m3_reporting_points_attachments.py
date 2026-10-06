@@ -8,11 +8,43 @@ from __future__ import annotations
 import io
 import os
 import re
+from functools import lru_cache
 from typing import Any
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 GREEN, GREEN_TEXT = "#dcfce7", "#14532d"
 RED, RED_TEXT = "#fee2e2", "#7f1d1d"
+
+
+def _wrap_measured_text(value, font, limit, measure):
+    """Keep greedy wrapping while measuring prefixes instead of every character."""
+    lines = []
+    for source in value.split("\n"):
+        remaining = source.expandtabs(4)
+        if not remaining:
+            lines.append("")
+            continue
+        while remaining:
+            if measure.textlength(remaining, font=font) <= limit:
+                lines.append(remaining)
+                break
+            # A single glyph is retained even if it exceeds a very narrow cell.
+            low, high = 1, len(remaining)
+            while low < high:
+                middle = (low + high + 1) // 2
+                if measure.textlength(remaining[:middle], font=font) <= limit:
+                    low = middle
+                else:
+                    high = middle - 1
+            prefix = remaining[:low]
+            space = prefix.rfind(" ")
+            if space > 0:
+                lines.append(prefix[:space])
+                remaining = remaining[space + 1:]
+            else:
+                lines.append(prefix)
+                remaining = remaining[low:]
+    return tuple(lines)
 
 
 def _text(value: Any) -> str:
@@ -99,7 +131,7 @@ def export_blocks(report: dict) -> list[dict]:
     return blocks
 
 
-def render_docx(report: dict) -> bytes:
+def render_docx(report: dict, *, blocks: list[dict] | None = None) -> bytes:
     from docx import Document
     from docx.enum.section import WD_ORIENT
     from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
@@ -118,6 +150,11 @@ def render_docx(report: dict) -> bytes:
     normal.font.name, normal.font.size = "Arial", Pt(9)
     normal.font.color.rgb = RGBColor(0, 0, 0)
     normal.paragraph_format.space_after = Pt(4)
+    if blocks is not None:
+        # Custom report titles use plain black typography, without the default
+        # Word template's blue paragraph border.
+        for border in list(document.styles["Title"]._element.xpath("./w:pPr/w:pBdr")):
+            border.getparent().remove(border)
     available = int((page.page_width - page.left_margin - page.right_margin) / 635)
 
     def font(run, *, bold=False, color="#000000", size=8):
@@ -163,13 +200,13 @@ def render_docx(report: dict) -> bytes:
                 paragraph_borders.append(bottom)
                 paragraph._p.get_or_add_pPr().append(paragraph_borders)
 
-    for block in export_blocks(report):
+    for block in (export_blocks(report) if blocks is None else blocks):
         if block["kind"] == "text":
             level = block["level"]
             paragraph = document.add_paragraph(style="Title" if level == 1 else None)
             paragraph.paragraph_format.space_before = Pt(8 if level else 0)
             paragraph.paragraph_format.keep_with_next = bool(level)
-            font(paragraph.add_run(block["text"]), bold=bool(level), size={1: 16, 2: 10, 3: 9}.get(level, 9))
+            font(paragraph.add_run(block["text"]), bold=bool(level), size=block.get("font_size", {1: 16, 2: 10, 3: 9}.get(level, 9)))
         elif block["kind"] == "legend":
             paragraph = document.add_paragraph()
             paragraph.paragraph_format.keep_with_next = True
@@ -195,6 +232,9 @@ def render_docx(report: dict) -> bytes:
                 write_cell(cell, label, "#e2e8f0", bold=True)
             for values in block["rows"]:
                 row = table.add_row()
+                if blocks is not None:
+                    # Keep an ordinary M2 task row together across page breaks.
+                    row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
                 for index, value in enumerate(values):
                     cell = row.cells[index]
                     cell.width = Twips(widths[index])
@@ -205,10 +245,10 @@ def render_docx(report: dict) -> bytes:
     return output.getvalue()
 
 
-def render_png(report: dict) -> bytes:
+def render_png(report: dict, *, blocks: list[dict] | None = None) -> bytes:
     from PIL import Image, ImageDraw, ImageFont
 
-    blocks = export_blocks(report)
+    blocks = export_blocks(report) if blocks is None else blocks
     # At least the email's full column budget, enlarged for readable text.
     scale, margin = 1.4, 40
     content_width = max(1400, round(max((sum(c[2] for c in b["columns"]) for b in blocks if b["kind"] == "table"), default=1000) * scale))
@@ -229,30 +269,20 @@ def render_png(report: dict) -> bytes:
     fonts = {"normal": load_font(False, 17), "bold": load_font(True, 17), "title": load_font(True, 28)}
     measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
 
+    @lru_cache(maxsize=4096)
     def wrap(value, font, limit):
-        # Preserve manual line breaks and split long unbroken titles/comments.
-        lines = []
-        for source in value.split("\n"):
-            current = ""
-            for char in source.expandtabs(4):
-                if current and measure.textlength(current + char, font=font) > limit:
-                    space = current.rfind(" ")
-                    if space > 0:
-                        lines.append(current[:space])
-                        current = current[space + 1:] + char
-                    else:
-                        lines.append(current)
-                        current = char
-                else:
-                    current += char
-            lines.append(current)
-        return lines
+        # Repeated initials, dates and comments share measurements in this PNG.
+        # The cache is discarded with the render; report content is not retained.
+        return _wrap_measured_text(value, font, limit, measure)
 
     layout = []
     for block in blocks:
         if block["kind"] == "text":
             text_font = fonts["title" if block["level"] == 1 else "bold" if block["level"] else "normal"]
             step = 36 if block["level"] == 1 else 25
+            if block.get("font_size"):
+                text_font = load_font(True, round(block["font_size"] * 1.7))
+                step = round(block["font_size"] * 2.2)
             lines = wrap(block["text"], text_font, content_width)
             layout.append({"kind": "text", "lines": lines, "font": text_font, "step": step, "height": len(lines) * step + 14})
         elif block["kind"] == "legend":
@@ -322,7 +352,9 @@ def render_png(report: dict) -> bytes:
                 draw.rectangle((margin, y, margin + content_width, y + block["height"]), outline="#dc2626", width=3)
         y += block["height"]
     output = io.BytesIO()
-    image.save(output, format="PNG", optimize=True)
+    # Default lossless compression avoids the extra optimization pass. Pixels
+    # remain identical; files grow slightly while encoding finishes much sooner.
+    image.save(output, format="PNG", compress_level=6)
     return output.getvalue()
 
 

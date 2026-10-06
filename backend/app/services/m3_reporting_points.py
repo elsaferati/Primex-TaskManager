@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_log import AuditLog
 from app.models.department import Department
-from app.models.enums import UserRole
 from app.models.m3_reporting_points import M3ReportingPointsReport
 from app.models.meetings_report_settings import MeetingsReportSettings
 from app.models.project import Project
@@ -154,7 +153,7 @@ def select_task_sections(tasks: list[Any], events: list[Any], day: date) -> dict
     return sections
 
 
-async def build_task_data(db: AsyncSession, day: date) -> dict:
+async def build_task_data(db: AsyncSession, day: date, *, section_selector=select_task_sections) -> dict:
     local_start = datetime.combine(day, time.min, tzinfo=report_timezone())
     start, end = local_start.astimezone(timezone.utc), (local_start + timedelta(days=1)).astimezone(timezone.utc)
     tasks = list((await db.execute(select(Task).where(Task.is_active.is_(True), Task.created_at < end)
@@ -163,7 +162,7 @@ async def build_task_data(db: AsyncSession, day: date) -> dict:
         AuditLog.entity_type == "task", AuditLog.action.in_(DATE_ACTIONS),
         AuditLog.created_at >= start, AuditLog.created_at < end,
     ).order_by(AuditLog.created_at, AuditLog.id))).scalars().all())
-    sections = select_task_sections(tasks, events, day)
+    sections = section_selector(tasks, events, day)
     selected = {uuid.UUID(row["task_id"]) for rows in sections.values() for row in rows}
     if not selected:
         return sections
@@ -220,12 +219,10 @@ async def build_task_data(db: AsyncSession, day: date) -> dict:
 
 async def build_realization_capture(db: AsyncSession, day: date) -> dict:
     users = list((await db.execute(select(User).where(User.is_active.is_(True),
-        User.role == UserRole.STAFF, User.department_id.is_not(None)))).scalars().all())
-    ids = {str(user.id) for user in users}
-    department_ids = {user.department_id for user in users}
-    department_by_id = {item.id: item for item in (await db.execute(select(Department).where(Department.id.in_(department_ids)))).scalars().all()}
+        User.department_id.is_not(None)))).scalars().all())
+    department_by_id = {item.id: item for item in (await db.execute(select(Department))).scalars().all()}
     rows, people, missing, departments = [], [], [], []
-    for department_id in sorted(department_ids, key=lambda value: (
+    for department_id in sorted(department_by_id, key=lambda value: (
         {"DEV": 0, "GD": 1, "PCM": 2}.get(getattr(department_by_id.get(value), "code", ""), 3),
         getattr(department_by_id.get(value), "code", str(value)),
     )):
@@ -234,14 +231,14 @@ async def build_realization_capture(db: AsyncSession, day: date) -> dict:
         if not live.get("baseline_available"):
             missing.append(str(department_id))
         for person in live.get("people", []):
-            if str(person["user_id"]) not in ids:
-                continue
+            # Use the same complete live population as the Realization page,
+            # including managers and historical assignees retained by its engine.
             department_rows.extend(person.get("tasks") or [])
             people.append({"user_id": str(person["user_id"]), "name": person.get("user_name"),
                            "percent": (person.get("metrics") or {}).get("raw_plan_realization")})
         rows.extend(department_rows)
         department_metrics = calculate_daily_metrics(department_rows)
-        department_percent = department_metrics["raw_plan_realization"] if live.get("baseline_available") else None
+        department_percent = department_metrics["raw_plan_realization"]
         department = department_by_id.get(department_id)
         departments.append({"department_id": str(department_id), "code": getattr(department, "code", str(department_id)),
                             "name": getattr(department, "name", ""), "percent": department_percent,
@@ -249,7 +246,9 @@ async def build_realization_capture(db: AsyncSession, day: date) -> dict:
                             "baseline_available": bool(live.get("baseline_available")), "metrics": department_metrics,
                             "comment": realization_comment(department_percent)})
     metrics = calculate_daily_metrics(rows)
-    percent = metrics["raw_plan_realization"] if not missing and users else None
+    # Missing baselines are metadata, not a reason to hide PLAN RLZ: the daily
+    # dashboard also calculates its weighted total from the available live rows.
+    percent = metrics["raw_plan_realization"]
     return {"percent": percent, "employees": len(users), "people": people, "metrics": metrics,
             "baseline_available": not missing and bool(users), "missing_departments": missing,
             "comment": realization_comment(percent), "departments": departments}

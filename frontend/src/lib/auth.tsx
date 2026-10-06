@@ -788,27 +788,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             >
               Stop alarm
             </button>
-            {activeMeetingAlarm.openUrl ? (
-              <button
-                type="button"
-                onClick={() => {
-                  const openUrl = activeMeetingAlarm.openUrl
-                  stopActiveMeetingAlarm()
-                  if (openUrl) window.open(openUrl, "_blank", "noopener,noreferrer")
-                }}
-                style={{
-                  border: "1px solid #cbd5e1",
-                  borderRadius: 8,
-                  background: "white",
-                  color: "#0f172a",
-                  cursor: "pointer",
-                  fontWeight: 600,
-                  padding: "9px 14px",
-                }}
-              >
-                Open meeting
-              </button>
-            ) : null}
           </div>
         </div>
       ) : null}

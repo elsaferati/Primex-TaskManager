@@ -90,9 +90,12 @@ Manual Save remains available for retry; send/preview/generation wait for saving
 The API owns a separate capture loop controlled by `REPORT_SCHEDULERS_ENABLED`.
 It captures at 16:15 Monday–Friday in Europe/Tirane, with a database transaction
 lock preventing duplicate capture across API processes. It aggregates the
-existing Daily Realization metric across all active STAFF, using the same
-completed/planned denominator rather than averaging individual percentages.
-Missing baselines produce an explicit unavailable result, never a fabricated 0%.
+existing Daily Realization PLAN RLZ metric across the complete live population,
+including managers and historical assignees retained by that engine. It uses
+the same weighted credit and penalties rather than averaging percentages.
+Missing baselines remain flagged in metadata but do not hide the live percentage,
+matching the Realization dashboard. No plan or extra-task denominator produces
+an explicit unavailable result, never a fabricated 0%.
 
 Generating or sending today's report also recomputes the realization. Before
 16:15 the value is a live preview: it is shown as LIVE, is not stored as the
@@ -103,8 +106,9 @@ If the service was down at 16:15, generating the report afterwards captures it.
 Historical reports read their saved data; they cannot be rebuilt using today's
 TODO statuses.
 Each capture now also stores a separate weighted percentage and +/-50% comment
-for each staff department, ordered DEV, GD, PCM then other departments. Missing
-department baselines remain unavailable; they are never shown as zero. Older
+for every department, ordered DEV, GD, PCM then other departments, including
+departments without active staff or daily tasks. Departments without a metric
+denominator remain unavailable; they are never shown as zero. Older
 captures without department breakdowns are not retroactively recomputed.
 
 Apply migration `0142_m3_reporting_points` through the normal deployment before

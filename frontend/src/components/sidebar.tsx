@@ -111,7 +111,8 @@ const gaReportItems: NavItem[] = [
   { href: "/morning-report", label: "M1 Start of Day", icon: MailCheck },
   { href: "/after-break-report", label: "M2 Post-Break Summary", icon: MailCheck },
   { href: "/meetings-report", label: "M3 End of Day", icon: MailCheck },
-  { href: "/m3-reporting-points", label: "PIKAT PER RAP M3", icon: ClipboardCheck },
+  { href: "/m2-reporting-points", label: "M2 PIKAT PER RAP", icon: ClipboardCheck },
+  { href: "/m3-reporting-points", label: "M3 PIKAT PER RAP", icon: ClipboardCheck },
 ]
 
 const gaReportHrefs = new Set(gaReportItems.map((item) => item.href))
@@ -240,7 +241,8 @@ const navGroups: NavGroup[] = [
           { href: "/morning-report", label: "M1 Start of Day", icon: MailCheck },
           { href: "/after-break-report", label: "M2 Post-Break Summary", icon: MailCheck },
           { href: "/meetings-report", label: "M3 End of Day", icon: MailCheck },
-          { href: "/m3-reporting-points", label: "PIKAT PER RAP M3", icon: ClipboardCheck },
+          { href: "/m2-reporting-points", label: "M2 PIKAT PER RAP", icon: ClipboardCheck },
+          { href: "/m3-reporting-points", label: "M3 PIKAT PER RAP", icon: ClipboardCheck },
         ],
       },
     ],
