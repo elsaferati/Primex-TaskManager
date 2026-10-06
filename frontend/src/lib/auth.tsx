@@ -5,6 +5,7 @@ import { toast } from "sonner"
 
 import { API_HTTP_URL, API_HTTP_FALLBACK_URL, API_WS_URL } from "@/lib/config"
 import { clearDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
+import { clearPersistentPageCache } from "@/lib/persistent-page-cache"
 import type { User } from "@/lib/types"
 
 type AuthContextValue = {
@@ -84,6 +85,7 @@ function clearSessionCaches() {
   referenceResponseCache.clear()
   prefetchedResponseCache.clear()
   clearDepartmentBootstrapCache()
+  void clearPersistentPageCache()
 }
 
 function createRequestKey(url: string, headers: Headers, init: RequestInit) {

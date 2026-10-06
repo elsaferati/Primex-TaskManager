@@ -29,6 +29,7 @@ import { PxJavPlanningBriefView } from "@/components/px-jav-planning-brief-view"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
+import { readPersistentPageCache, writePersistentPageCache } from "@/lib/persistent-page-cache"
 import { departmentTableTag, formatDepartmentName } from "@/lib/department-name"
 import { loadGaNoteTaskAssigneeIds, replaceGaNoteTaskAssignees } from "@/lib/ga-note-task-membership"
 import { buildMarkedAppendOnlyText, getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
@@ -1654,6 +1655,7 @@ export default function DepartmentKanban() {
           internalNoteProjects: projects,
         }
         setDepartmentBootstrapCache(cacheKey, payload)
+        void writePersistentPageCache(cacheKey, payload)
       } catch (error) {
         console.error("Error loading department data:", error)
         toast.error("Failed to load department data. Please check if the backend server is running.")
@@ -1675,7 +1677,22 @@ export default function DepartmentKanban() {
       void loadBootstrapData({ silent: true })
       return
     }
-    void loadBootstrapData({ silent: false })
+    let cancelled = false
+    // Not in memory (reload or new tab): paint from the copy saved on this
+    // device, if any, and revalidate silently behind it like the path above.
+    void readPersistentPageCache<DepartmentBootstrapPayload>(cacheKey).then((persisted) => {
+      if (cancelled) return
+      if (persisted) {
+        applyBootstrap(persisted)
+        setLoading(false)
+        void loadBootstrapData({ silent: true })
+        return
+      }
+      void loadBootstrapData({ silent: false })
+    })
+    return () => {
+      cancelled = true
+    }
   }, [applyBootstrap, cacheKey, loadBootstrapData])
 
   React.useEffect(() => {
@@ -4692,7 +4709,16 @@ export default function DepartmentKanban() {
         setLoadingDailyReport(false)
         return
       }
-      setLoadingDailyReport(true)
+      // Show the last copy of this report at once; the request below refreshes it.
+      const dailyReportCacheKey = `daily-report|${department.id}|${targetUserId}|${selectedAllReportIso}`
+      const cachedDailyReport = await readPersistentPageCache<DailyReportResponse>(dailyReportCacheKey)
+      if (cancelled) return
+      if (cachedDailyReport) {
+        setDailyReport(cachedDailyReport)
+        setDailyReportOneHSlots(buildDailyReportOneHSlotMap(cachedDailyReport))
+      } else {
+        setLoadingDailyReport(true)
+      }
       try {
         const qs = new URLSearchParams({
           day: selectedAllReportIso,
@@ -4709,6 +4735,7 @@ export default function DepartmentKanban() {
         if (!cancelled) {
           setDailyReport(payload)
           setDailyReportOneHSlots(buildDailyReportOneHSlotMap(payload))
+          void writePersistentPageCache(dailyReportCacheKey, payload)
         }
       } catch {
         if (!cancelled) {
