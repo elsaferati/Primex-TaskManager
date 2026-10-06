@@ -1,8 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
-import { createPortal } from "react-dom"
-
+import { CellPopover } from "@/components/cell-popover"
 import { getPlainMarkedText } from "@/lib/note-markup"
 import type { RealizationDeadlineState, RealizationDeadlineTask } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -78,7 +76,8 @@ const weekdays = ["E diel", "E hënë", "E martë", "E mërkurë", "E enjte", "E
 
 const PANEL_WIDTH = 460
 
-function deadlineTitle(title: string) {
+/** Task titles can hold several lines of notes; the popovers name a task by its first line. */
+export function firstLineTitle(title: string) {
   const [firstLine] = getPlainMarkedText(title).split("\n")
   return firstLine?.trim() || "Pa titull"
 }
@@ -101,117 +100,56 @@ export function RealizationDeadlineTasksPopover({ tasks, title, children }: {
   title: string
   children: React.ReactNode
 }) {
-  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null)
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
-  const open = anchor !== null
-
-  const toggle = () => {
-    if (open) {
-      setAnchor(null)
-      return
-    }
-    const rect = triggerRef.current?.getBoundingClientRect()
-    if (!rect) return
-    setAnchor({
-      top: rect.bottom + 4,
-      left: Math.max(8, Math.min(rect.left, window.innerWidth - PANEL_WIDTH - 8)),
-    })
-  }
-
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as Node
-      if (!triggerRef.current?.contains(target) && !panelRef.current?.contains(target)) setAnchor(null)
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setAnchor(null)
-    }
-    // The tables scroll inside their card, so a portalled panel would drift
-    // away from its cell. Closing keeps it anchored to what it describes.
-    const close = () => setAnchor(null)
-    const onScroll = (event: Event) => {
-      // Capturing also receives scrolls from the deadline list itself.
-      if (event.target instanceof Node && panelRef.current?.contains(event.target)) return
-      close()
-    }
-    document.addEventListener("pointerdown", onPointerDown)
-    document.addEventListener("keydown", onKeyDown)
-    window.addEventListener("scroll", onScroll, true)
-    window.addEventListener("resize", close)
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown)
-      document.removeEventListener("keydown", onKeyDown)
-      window.removeEventListener("scroll", onScroll, true)
-      window.removeEventListener("resize", close)
-    }
-  }, [open])
-
   if (!tasks.length) return <>{children}</>
 
   const unfinished = tasks.filter((task) => task.state !== "COMPLETED")
   const alarms = tasks.filter(isDeadlineAlarm)
 
-  return <>
-    <button
-      ref={triggerRef}
-      type="button"
-      aria-expanded={open}
-      onClick={toggle}
-      className="block w-full text-left"
-      title="Kliko për të parë cilat detyra kishin afat"
-    >
-      {children}
-    </button>
-    {anchor ? createPortal(
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-label={title}
-        className="fixed z-50 rounded-md border border-slate-300 bg-white p-2 shadow-xl"
-        style={{ top: anchor.top, left: anchor.left, width: PANEL_WIDTH }}
-      >
-        <p className="mb-1 flex items-baseline justify-between gap-2 border-b pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-          <span className="truncate">{title}</span>
-          <span className={cn("shrink-0 font-bold normal-case", unfinished.length ? "text-rose-700" : "text-emerald-700")}>
-            {unfinished.length ? `${unfinished.length} pa kryer` : "Të gjitha u kryen"}
+  return <CellPopover
+    label={title}
+    triggerTitle="Kliko për të parë cilat detyra kishin afat"
+    width={PANEL_WIDTH}
+    panel={<>
+      <p className="mb-1 flex items-baseline justify-between gap-2 border-b pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+        <span className="truncate">{title}</span>
+        <span className={cn("shrink-0 font-bold normal-case", unfinished.length ? "text-rose-700" : "text-emerald-700")}>
+          {unfinished.length ? `${unfinished.length} pa kryer` : "Të gjitha u kryen"}
+        </span>
+      </p>
+      {alarms.length ? <p className="mb-1 rounded border border-red-300 bg-red-50 px-2 py-1 text-[11px] leading-4 text-red-900">
+        <b>{alarms.length} alarm{alarms.length === 1 ? "" : "e"}:</b> detyra me deadline important që nuk u mbyllën brenda afatit.
+      </p> : null}
+      <ul className="max-h-80 space-y-0.5 overflow-y-auto overscroll-contain">
+        {tasks.map((task, index) => <li
+          key={`${task.task_id ?? "anonymous"}:${task.day ?? index}`}
+          className={cn(
+            "flex items-start gap-2 rounded px-1 py-1",
+            isDeadlineAlarm(task) ? "border border-red-300 bg-red-50" : "hover:bg-slate-50",
+          )}
+        >
+          <span className={cn("shrink-0 rounded border px-1 py-px text-[10px] font-bold uppercase", stateClasses[task.state])}>
+            {stateLabels[task.state]}
           </span>
-        </p>
-        {alarms.length ? <p className="mb-1 rounded border border-red-300 bg-red-50 px-2 py-1 text-[11px] leading-4 text-red-900">
-          <b>{alarms.length} alarm{alarms.length === 1 ? "" : "e"}:</b> detyra me deadline important që nuk u mbyllën brenda afatit.
-        </p> : null}
-        <ul className="max-h-80 space-y-0.5 overflow-y-auto overscroll-contain">
-          {tasks.map((task, index) => <li
-            key={`${task.task_id ?? "anonymous"}:${task.day ?? index}`}
+          {task.critical ? <span
             className={cn(
-              "flex items-start gap-2 rounded px-1 py-1",
-              isDeadlineAlarm(task) ? "border border-red-300 bg-red-50" : "hover:bg-slate-50",
+              "shrink-0 rounded border px-1 py-px text-[10px] font-bold uppercase",
+              isDeadlineAlarm(task) ? "border-red-600 bg-red-600 text-white" : "border-red-300 bg-red-50 text-red-800",
             )}
+            title={isDeadlineAlarm(task)
+              ? `Alarm: deadline important, ${stateLabels[task.state].toLowerCase()}`
+              : "Deadline important, i kryer"}
           >
-            <span className={cn("shrink-0 rounded border px-1 py-px text-[10px] font-bold uppercase", stateClasses[task.state])}>
-              {stateLabels[task.state]}
-            </span>
-            {task.critical ? <span
-              className={cn(
-                "shrink-0 rounded border px-1 py-px text-[10px] font-bold uppercase",
-                isDeadlineAlarm(task) ? "border-red-600 bg-red-600 text-white" : "border-red-300 bg-red-50 text-red-800",
-              )}
-              title={isDeadlineAlarm(task)
-                ? `Alarm: deadline important, ${stateLabels[task.state].toLowerCase()}`
-                : "Deadline important, i kryer"}
-            >
-              {isDeadlineAlarm(task) ? "Alarm" : "Important"}
-            </span> : null}
-            <span className="min-w-0 flex-1 text-xs leading-4 text-slate-800">
-              {task.person ? <b className="mr-1 text-slate-900">{task.person}:</b> : null}
-              {deadlineTitle(task.title)}
-            </span>
-            {task.day ? <span className="shrink-0 whitespace-nowrap text-[10px] tabular-nums text-slate-500">{dayLabel(task.day)}</span> : null}
-          </li>)}
-        </ul>
-      </div>,
-      document.body,
-    ) : null}
-  </>
+            {isDeadlineAlarm(task) ? "Alarm" : "Important"}
+          </span> : null}
+          <span className="min-w-0 flex-1 text-xs leading-4 text-slate-800">
+            {task.person ? <b className="mr-1 text-slate-900">{task.person}:</b> : null}
+            {firstLineTitle(task.title)}
+          </span>
+          {task.day ? <span className="shrink-0 whitespace-nowrap text-[10px] tabular-nums text-slate-500">{dayLabel(task.day)}</span> : null}
+        </li>)}
+      </ul>
+    </>}
+  >
+    {children}
+  </CellPopover>
 }

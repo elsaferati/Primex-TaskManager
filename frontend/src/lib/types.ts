@@ -905,6 +905,23 @@ export interface RealizationDeadlineTask {
   person?: string
 }
 
+export type RealizationItemKind = "COMPLETED" | "IN_PROGRESS" | "POSTPONED" | "NO_PROGRESS" | "REASSIGNED_OUT" | "EXTRA_COMPLETED"
+
+/** How one task moved a person's Plan RLZ for the day. */
+export interface RealizationItem {
+  task_id: string | null
+  title: string
+  kind: RealizationItemKind
+  planned: boolean
+  /** Weight in the plan: 1, or 1/N for a task spread over N working days. */
+  share: number
+  credit: number
+  penalty: number
+  approved: boolean
+  deadline: boolean
+  critical: boolean
+}
+
 export interface DailyRealizationMetrics {
   quantity_task_count: number
   quantity_planned_count: number
@@ -932,6 +949,12 @@ export interface DailyRealizationMetrics {
   adjusted_denominator: number
   raw_plan_realization: number | null
   adjusted_plan_realization: number | null
+  realization_plan_weight: number
+  realization_credit: number
+  realization_penalty_points: number
+  adjusted_realization_plan_weight: number
+  adjusted_realization_penalty_points: number
+  realization_items?: RealizationItem[]
   deadlines_today_count: number
   deadlines_completed_count: number
   deadlines_postponed_count: number
@@ -1125,6 +1148,8 @@ export interface RealizationPersonResult {
     weekly_additional_no_progress_count?: number
     weekly_in_progress_task_count?: number
     weekly_postponed_task_count?: number
+    /** Points deducted for plan tasks still unfinished at week end (25 postponed, 40/60 postponed with deadline, 50/70 missed deadline). */
+    weekly_penalty_points?: number
     weekly_no_progress_task_count?: number
     weekly_quantity_task_count?: number
     weekly_quantity_planned_count?: number

@@ -9,6 +9,7 @@ import { RealizationDailyPersonComment } from "@/components/realization-daily-pe
 import { RealizationQuantityDelta } from "@/components/realization-quantity"
 import { RealizationDeadlineStatusGrid, RealizationExtraStatusGrid, RealizationPlanStatusGrid, RealizationStatusLegend, metricBand, metricCell, metricHeadline } from "@/components/realization-plan-status-grid"
 import { RealizationDeadlineTasksPopover, criticalDeadlineCounts, criticalDeadlineSummary, deadlineAlarmCount } from "@/components/realization-deadline-tasks"
+import { RealizationPlanRlzPopover } from "@/components/realization-plan-rlz-popover"
 import { realizationDepartmentTag } from "@/lib/department-name"
 import type { ExtraTaskState } from "@/lib/realization-extras"
 import type { DailyRealizationPerson, Department, RealizationPersonResult } from "@/lib/types"
@@ -127,8 +128,10 @@ export function DailyStaffTable({ people, filterPeople, departments, departmentI
                 </RealizationDeadlineTasksPopover>
               </TableCell>
               <TableCell className={cn(metricCell, "text-center")}>
-                <p className={cn(metricHeadline, "justify-center text-base font-bold tabular-nums", realization == null ? "text-slate-400" : realization >= 100 ? "text-emerald-700" : realization >= 50 ? "text-amber-700" : "text-rose-700")}>{realization == null ? "—" : `${realization}%`}</p>
-                {realization != null ? <div className="mx-auto mt-1 h-1.5 w-16 overflow-hidden rounded-full bg-slate-200"><div className={cn("h-full rounded-full", realization >= 100 ? "bg-emerald-500" : realization >= 50 ? "bg-amber-500" : "bg-rose-500")} style={{ width: `${realization}%` }} /></div> : null}
+                <RealizationPlanRlzPopover metrics={metrics} title={`Plan RLZ · ${person.user_name}`}>
+                  <p className={cn(metricHeadline, "justify-center text-base font-bold tabular-nums", realization == null ? "text-slate-400" : realization >= 100 ? "text-emerald-700" : realization >= 50 ? "text-amber-700" : "text-rose-700", realization != null && "cursor-pointer hover:underline")}>{realization == null ? "—" : `${realization}%`}</p>
+                  {realization != null ? <div className="mx-auto mt-1 h-1.5 w-16 overflow-hidden rounded-full bg-slate-200"><div className={cn("h-full rounded-full", realization >= 100 ? "bg-emerald-500" : realization >= 50 ? "bg-amber-500" : "bg-rose-500")} style={{ width: `${realization}%` }} /></div> : null}
+                </RealizationPlanRlzPopover>
               </TableCell>
               <RealizationReviewCells
                 periodId={periodIds[person.department_id] || ""} userId={person.user_id} userName={person.user_name}
@@ -142,7 +145,7 @@ export function DailyStaffTable({ people, filterPeople, departments, departmentI
         </TableBody>
       </Table>
       <div className="grid gap-px border-t bg-slate-200 text-[11px] text-slate-500 md:grid-cols-3">
-        <p className="bg-white px-3 py-2"><b className="text-slate-700">Plan:</b> plani fillestar + ekstra = ngarkesa totale. Poshtë shfaqen të kryera, në progres, të shtyra dhe pa progres.</p>
+        <p className="bg-white px-3 py-2"><b className="text-slate-700">Plan:</b> plani fillestar + ekstra = ngarkesa totale. Poshtë shfaqen të kryera, në progres, të shtyra dhe pa progres. Kliko Plan RLZ për të parë si u llogarit.</p>
         <p className="bg-white px-3 py-2"><b className="text-slate-700">Sasia:</b> kryer / planifikuar. Diferenca tregon mungesën ose tejkalimin e produkteve/pikëve.</p>
         <p className="bg-white px-3 py-2"><b className="text-slate-700">Deadline:</b> kryer / gjithsej. Kutia me unazë të kuqe mban sipër numrin e kuq të atyre që janë deadline important. Kliko kutitë për të parë cilat detyra kishin afat dhe çfarë ndodhi me secilën.</p>
       </div>

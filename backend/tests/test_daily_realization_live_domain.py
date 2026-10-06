@@ -17,7 +17,7 @@ from app.services.daily_realization_live import (
     credited_completion_day, day_bounds, local_day,
     manager_decision_timeline_item, timeline_from_events,
 )
-from app.services.daily_realization_metrics import calculate_daily_metrics
+from app.services.daily_realization_metrics import calculate_daily_metrics, multi_day_share
 from app.services.daily_realization_close_state import resolve_daily_close_state
 
 
@@ -519,3 +519,65 @@ def test_move_away_and_back_is_not_final_postponement_but_keeps_history():
     assert [row["type"] for row in timeline] == ["POSTPONED", "MOVED_BACK_TO_TODAY"]
     assert classify_daily_task(case(current_due_date=DAY, postponed=False, status="TODO")) == "NO_PROGRESS"
     assert classify_daily_task(case(current_due_date=DAY, postponed=False, status="IN_PROGRESS")) == "IN_PROGRESS"
+
+
+def test_multi_day_task_weighs_its_daily_share_across_working_days():
+    monday, wednesday, friday = date(2026, 10, 5), date(2026, 10, 7), date(2026, 10, 9)
+    assert multi_day_share(monday, friday, wednesday) == (0.2, True)
+    assert multi_day_share(monday, friday, friday) == (0.2, False)
+    assert multi_day_share(friday, date(2026, 10, 13), date(2026, 10, 12)) == (1 / 3, True)
+    assert multi_day_share(friday, friday, friday) == (1.0, False)
+    assert multi_day_share(None, friday, wednesday) == (1.0, False)
+
+
+def test_multi_day_task_in_progress_counts_as_its_daily_share():
+    rows = [
+        {"classification": "REALIZED_AS_PLANNED", "in_original_plan": True},
+        {"classification": "REALIZED_AS_PLANNED", "in_original_plan": True},
+        {"classification": "IN_PROGRESS", "in_original_plan": True, "daily_share": 0.2, "multi_day_before_deadline": True},
+    ]
+    metrics = calculate_daily_metrics(rows)
+    assert metrics["realization_plan_weight"] == 2.2
+    assert metrics["realization_credit"] == 2.2
+    assert metrics["raw_plan_realization"] == 100
+
+
+def test_single_day_task_in_progress_earns_nothing():
+    rows = [
+        {"classification": "REALIZED_AS_PLANNED", "in_original_plan": True},
+        {"classification": "IN_PROGRESS", "in_original_plan": True},
+    ]
+    assert calculate_daily_metrics(rows)["raw_plan_realization"] == 50
+
+
+@pytest.mark.parametrize(("row", "expected"), [
+    ({"classification": "POSTPONED_UNAPPROVED"}, 68.8),
+    ({"classification": "POSTPONED_UNAPPROVED", "deadline_was_today": True}, 65.0),
+    ({"classification": "POSTPONED_UNAPPROVED", "deadline_was_today": True, "deadline_critical": True}, 60.0),
+    ({"classification": "NO_PROGRESS"}, 75.0),
+    ({"classification": "NO_PROGRESS", "deadline_was_today": True}, 62.5),
+    ({"classification": "IN_PROGRESS", "deadline_was_today": True, "deadline_critical": True}, 57.5),
+])
+def test_deadlines_raise_the_penalty(row, expected):
+    # Base 3 / 4 = 75; penalty points / 4: 25 postponed, 40/60 with deadline, 50/70 missed deadline.
+    rows = [{"classification": "REALIZED_AS_PLANNED", "in_original_plan": True}] * 3 + [
+        {"in_original_plan": True, "task_id": "x", "title": "Detyra", **row},
+    ]
+    assert calculate_daily_metrics(rows)["raw_plan_realization"] == expected
+
+
+def test_realization_items_explain_the_percent():
+    metrics = calculate_daily_metrics([
+        {"task_id": "a", "title": "Raport\nshënime", "classification": "REALIZED_AS_PLANNED", "in_original_plan": True},
+        {"task_id": "b", "title": "Oferta", "classification": "POSTPONED_APPROVED", "in_original_plan": True, "deadline_was_today": True},
+        {"task_id": "c", "title": "Ekstra", "classification": "ADDITIONAL_COMPLETED", "in_original_plan": False},
+        {"task_id": "d", "title": "E hapur", "classification": "ADDED_DURING_DAY", "in_original_plan": False},
+    ])
+    items = {item["task_id"]: item for item in metrics["realization_items"]}
+    assert set(items) == {"a", "b", "c"}
+    assert items["a"]["kind"] == "COMPLETED" and items["a"]["credit"] == 1
+    assert items["b"]["kind"] == "POSTPONED" and items["b"]["penalty"] == 40 and items["b"]["approved"]
+    assert items["c"]["kind"] == "EXTRA_COMPLETED"
+    # Base 2 / 2 = 100, penalty 40 / 2 = 20; adjusted drops the approved postponement.
+    assert metrics["raw_plan_realization"] == 80.0
+    assert metrics["adjusted_plan_realization"] == 100.0

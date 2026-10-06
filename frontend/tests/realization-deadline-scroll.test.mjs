@@ -6,7 +6,7 @@ import { test } from "node:test"
 import ts from "typescript"
 
 const require = createRequire(import.meta.url)
-const source = readFileSync(new URL("../src/components/realization-deadline-tasks.tsx", import.meta.url), "utf8")
+const source = readFileSync(new URL("../src/components/cell-popover.tsx", import.meta.url), "utf8")
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
@@ -47,14 +47,11 @@ function openPopover() {
         useRef: () => refs.shift(), useEffect: (effect) => effects.push(effect),
       }
       if (name === "react-dom") return { createPortal: (element) => element }
-      if (name === "@/lib/note-markup") return { getPlainMarkedText: (title) => title }
-      if (name === "@/lib/utils") return { cn: (...values) => values.filter(Boolean).join(" ") }
       return require(name)
     },
   })
-  loadedModule.exports.RealizationDeadlineTasksPopover({
-    tasks: [{ task_id: "task", title: "Deadline", state: "NO_PROGRESS", critical: false }],
-    title: "Afatet", children: "1/2",
+  loadedModule.exports.CellPopover({
+    label: "Afatet", triggerTitle: "Afatet", panel: "Deadline", children: "1/2",
   })
   const cleanup = effects[0]()
   const scroll = (target) => listeners.get("window:scroll").callback({ target })
