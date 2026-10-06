@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { API_HTTP_URL } from "@/lib/config"
 import { useAuth } from "@/lib/auth"
 import { TaskOneHMarker } from "@/components/task-one-h-marker"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
@@ -2319,6 +2320,8 @@ export default function AdminTasksPage() {
   const [gaTimeNewRowOpen, setGaTimeNewRowOpen] = React.useState(false)
   const [gaTimeNewRowSaving, setGaTimeNewRowSaving] = React.useState(false)
   const [gaIcloudDialogOpen, setGaIcloudDialogOpen] = React.useState(false)
+  const [gaCalendarDialogOpen, setGaCalendarDialogOpen] = React.useState(false)
+  const [gaCalendarFeedUrl, setGaCalendarFeedUrl] = React.useState<string | null>(null)
   const [gaIcloudConnection, setGaIcloudConnection] = React.useState<GaIcloudSyncConnection | null>(null)
   const [gaIcloudPairing, setGaIcloudPairing] = React.useState<GaIcloudSyncPairing | null>(null)
   const [gaIcloudLoading, setGaIcloudLoading] = React.useState(false)
@@ -2705,6 +2708,19 @@ export default function AdminTasksPage() {
     setGaIcloudDialogOpen(true)
     void loadGaIcloudConnection()
   }, [loadGaIcloudConnection])
+
+  const openGaCalendarDialog = React.useCallback(async () => {
+    setGaCalendarDialogOpen(true)
+    if (gaCalendarFeedUrl) return
+    try {
+      const res = await apiFetch("/ga-time-slots/calendar-feed")
+      if (!res.ok) throw new Error("Failed to load the calendar link.")
+      const data = (await res.json()) as { feed_path: string }
+      setGaCalendarFeedUrl(`${API_HTTP_URL}${data.feed_path}`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load the calendar link.")
+    }
+  }, [apiFetch, gaCalendarFeedUrl])
 
   const pairGaIcloudDevice = React.useCallback(async () => {
     const calendarName = gaIcloudCalendarName.trim()
@@ -7640,6 +7656,9 @@ export default function AdminTasksPage() {
                     <Button variant="outline" size="sm" onClick={openGaIcloudDialog}>
                       iPhone Sync
                     </Button>
+                    <Button variant="outline" size="sm" onClick={() => void openGaCalendarDialog()}>
+                      Apple Calendar
+                    </Button>
                     <Button variant="outline" size="sm" onClick={openGaTimeRowsDialog}>
                       <Pencil className="mr-2 h-4 w-4" />
                       Times
@@ -8062,6 +8081,53 @@ export default function AdminTasksPage() {
           </div>
           </AdminTasksSection>
           </div>
+          <Dialog open={gaCalendarDialogOpen} onOpenChange={setGaCalendarDialogOpen}>
+            <DialogContent className="sm:max-w-xl">
+              <DialogHeader>
+                <DialogTitle>Apple Calendar &amp; Reminders</DialogTitle>
+                <p className="text-xs text-slate-500">
+                  Every GA Time Table entry shows in the iPhone Calendar every week, with a reminder at the row start time.
+                </p>
+              </DialogHeader>
+              <div className="space-y-4 text-sm">
+                <div className="space-y-1.5">
+                  <Label htmlFor="ga-calendar-feed-url">Calendar link (keep it private)</Label>
+                  <div className="flex gap-2">
+                    <Input id="ga-calendar-feed-url" readOnly value={gaCalendarFeedUrl ?? "Loading…"} className="font-mono text-xs" />
+                    <Button
+                      variant="outline"
+                      disabled={!gaCalendarFeedUrl}
+                      onClick={() => gaCalendarFeedUrl && void copyGaIcloudValue(gaCalendarFeedUrl, "Calendar link")}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                </div>
+                {gaCalendarFeedUrl ? (
+                  <Button asChild className="w-full">
+                    <a href={gaCalendarFeedUrl.replace(/^https?:\/\//, "webcal://")}>Open on iPhone</a>
+                  </Button>
+                ) : null}
+                <ol className="list-decimal space-y-1 pl-5 text-slate-700">
+                  <li>On GA&apos;s iPhone, open this page in Safari and tap <b>Open on iPhone</b>, then <b>Subscribe</b>.</li>
+                  <li>
+                    Or by hand: <b>Settings → Apps → Calendar → Calendar Accounts → Add Account → Other → Add Subscribed
+                    Calendar</b> and paste the link.
+                  </li>
+                  <li>
+                    Turn <b>Remove Alerts</b> OFF, otherwise the iPhone hides the reminders.
+                  </li>
+                  <li>
+                    So new entries show up quickly, set <b>Settings → Apps → Calendar → Calendar Accounts → Fetch New Data</b> to
+                    every 15 minutes.
+                  </li>
+                </ol>
+                <p className="text-xs text-slate-500">
+                  One-way: changes in PrimeFlow reach the phone, but changes on the phone do not come back.
+                </p>
+              </div>
+            </DialogContent>
+          </Dialog>
           <Dialog
             open={gaIcloudDialogOpen}
             onOpenChange={(open) => {
