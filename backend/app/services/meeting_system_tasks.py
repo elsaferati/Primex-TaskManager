@@ -71,7 +71,8 @@ TAK_INT_ONE_H_SLOTS: tuple[tuple[time, str], ...] = (
     (time(11, 0), "11:00"),
     (time(11, 50), "11:50"),
     (time(14, 20), "14:20"),
-    (time(16, 0), "16:00"),
+    # The "1H 16:00" row is held at 15:50 (see ONE_H_SLOT_TIMES in calendar sync).
+    (time(15, 50), "16:00"),
 )
 INACTIVE_CALENDAR_SYNC_STATUSES = {"cancelled", "excluded"}
 
@@ -576,11 +577,24 @@ def tak_int_pre_one_h_slot(meeting: Meeting | object) -> tuple[date, str] | None
     return _shift_working_day(local_start.date(), -1), TAK_INT_ONE_H_SLOTS[-1][1]
 
 
-def tak_int_post_one_h_slot(meeting: Meeting | object) -> tuple[date, str] | None:
-    """Return the first 1H slot once the TAK EXT has finished (ends 13:30 -> 14:20)."""
+def tak_int_post_one_h_slot(
+    meeting: Meeting | object,
+    internal_meeting: Meeting | object | None = None,
+) -> tuple[date, str] | None:
+    """Return the 1H slot for the TAK INT held after a TAK EXT.
+
+    With a scheduled TAK INT it is the slot it falls in (TAK INT 14:30 -> 14:20);
+    otherwise the first slot once the TAK EXT has finished (ends 13:30 -> 14:20).
+    """
     starts_at = getattr(meeting, "starts_at", None)
     if starts_at is None:
         return None
+    internal_starts_at = getattr(internal_meeting, "starts_at", None)
+    if internal_starts_at is not None:
+        local_internal = _as_local(internal_starts_at)
+        internal_time = local_internal.time().replace(tzinfo=None)
+        current = [label for slot_time, label in TAK_INT_ONE_H_SLOTS if slot_time <= internal_time]
+        return local_internal.date(), current[-1] if current else TAK_INT_ONE_H_SLOTS[0][1]
     ends_at = getattr(meeting, "ends_at", None) or starts_at + timedelta(hours=1)
     local_end = _as_local(ends_at)
     end_time = local_end.time().replace(tzinfo=None)
@@ -608,6 +622,17 @@ def qualifies_for_tak_int_one_h_tasks(meeting: Meeting | object) -> bool:
         and getattr(meeting, "starts_at", None) is not None
         and sync_status not in INACTIVE_CALENDAR_SYNC_STATUSES
     )
+
+
+async def _post_internal_meeting(db: AsyncSession, external_meeting_id: uuid.UUID) -> Meeting | None:
+    return (
+        await db.execute(
+            select(Meeting).where(
+                Meeting.meeting_type == "internal",
+                Meeting.paired_external_meeting_id == external_meeting_id,
+            )
+        )
+    ).scalars().first()
 
 
 async def _linked_internal_meeting_ids(
@@ -655,26 +680,24 @@ async def reconcile_tak_int_one_h_tasks_for_meeting(
 
     qualifies = qualifies_for_tak_int_one_h_tasks(external)
     participant_ids: list[uuid.UUID] = []
-    post_internal_id: uuid.UUID | None = None
+    post_internal: Meeting | None = None
     if qualifies:
         participant_ids = (await manual_participant_ids(db, [external.id])).get(external.id, [])
-        _, post_internal_id = await _linked_internal_meeting_ids(db, external.id)
+        post_internal = await _post_internal_meeting(db, external.id)
 
     changed = 0
-    for task_kind, base_title, description, slot_fn, kind_qualifies in (
+    for task_kind, base_title, description, slot in (
         (
             TAK_INT_PRE_ONE_H_TASK_KIND,
             TAK_INT_PRE_ONE_H_TASK_TITLE,
             TAK_INT_PRE_ONE_H_TASK_DESCRIPTION,
-            tak_int_pre_one_h_slot,
-            qualifies,
+            tak_int_pre_one_h_slot(external) if qualifies else None,
         ),
         (
             TAK_INT_POST_ONE_H_TASK_KIND,
             TAK_INT_POST_ONE_H_TASK_TITLE,
             TAK_INT_POST_ONE_H_TASK_DESCRIPTION,
-            tak_int_post_one_h_slot,
-            qualifies and post_internal_id is not None,
+            tak_int_post_one_h_slot(external, post_internal) if post_internal is not None else None,
         ),
     ):
         changed += await _reconcile_tak_int_one_h_task_kind(
@@ -683,7 +706,7 @@ async def reconcile_tak_int_one_h_tasks_for_meeting(
             task_kind=task_kind,
             task_title=_meeting_task_title(external, base_title),
             description=description,
-            slot=slot_fn(external) if kind_qualifies else None,
+            slot=slot,
             participant_ids=participant_ids,
             now_utc=now_utc or datetime.now(timezone.utc),
         )

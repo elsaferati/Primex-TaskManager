@@ -45,12 +45,26 @@ class TestTakIntOneHSlots(unittest.TestCase):
         meeting = _meeting(datetime(2026, 10, 6, 13, 0, tzinfo=TZ), datetime(2026, 10, 6, 13, 30, tzinfo=TZ))
         self.assertEqual(tak_int_post_one_h_slot(meeting), (date(2026, 10, 6), "14:20"))
 
+    def test_post_slot_is_the_slot_the_tak_int_falls_in(self) -> None:
+        meeting = _meeting(datetime(2026, 10, 6, 13, 0, tzinfo=TZ))
+        internal = SimpleNamespace(starts_at=datetime(2026, 10, 6, 14, 30, tzinfo=TZ))
+        self.assertEqual(tak_int_post_one_h_slot(meeting, internal), (date(2026, 10, 6), "14:20"))
+
+    def test_post_slot_for_tak_int_on_the_1550_slot(self) -> None:
+        meeting = _meeting(datetime(2026, 10, 6, 14, 0, tzinfo=TZ), datetime(2026, 10, 6, 15, 0, tzinfo=TZ))
+        internal = SimpleNamespace(starts_at=datetime(2026, 10, 6, 15, 50, tzinfo=TZ))
+        self.assertEqual(tak_int_post_one_h_slot(meeting, internal), (date(2026, 10, 6), "16:00"))
+
+    def test_pre_slot_for_meeting_at_1600_is_the_1600_row(self) -> None:
+        meeting = _meeting(datetime(2026, 10, 6, 16, 0, tzinfo=TZ))
+        self.assertEqual(tak_int_pre_one_h_slot(meeting), (date(2026, 10, 6), "16:00"))
+
     def test_post_slot_defaults_to_one_hour_meeting(self) -> None:
         meeting = _meeting(datetime(2026, 10, 6, 9, 0, tzinfo=TZ))
         self.assertEqual(tak_int_post_one_h_slot(meeting), (date(2026, 10, 6), "10:00"))
 
     def test_late_meeting_post_slot_moves_to_next_workday(self) -> None:
-        meeting = _meeting(datetime(2026, 10, 9, 16, 0, tzinfo=TZ))  # Friday
+        meeting = _meeting(datetime(2026, 10, 9, 15, 30, tzinfo=TZ))  # Friday, ends 16:30
         self.assertEqual(tak_int_post_one_h_slot(meeting), (date(2026, 10, 12), "10:00"))
 
     def test_qualification(self) -> None:
