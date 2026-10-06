@@ -71,6 +71,57 @@ function writeGaViewCache(key: string, value: unknown) {
     // Storage full or blocked: the table simply loads from the network.
   }
 }
+
+// The main task lists are too large for localStorage, so the last loaded copy
+// lives in IndexedDB. The page paints from it at once and refreshes behind it.
+const ADMIN_TASKS_IDB_NAME = "primeflow-admin-tasks"
+const ADMIN_TASKS_IDB_STORE = "cache"
+function openAdminTasksDb(): Promise<IDBDatabase | null> {
+  return new Promise((resolve) => {
+    try {
+      const request = window.indexedDB.open(ADMIN_TASKS_IDB_NAME, 1)
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(ADMIN_TASKS_IDB_STORE)) {
+          request.result.createObjectStore(ADMIN_TASKS_IDB_STORE)
+        }
+      }
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => resolve(null)
+      request.onblocked = () => resolve(null)
+    } catch {
+      resolve(null)
+    }
+  })
+}
+async function readAdminTasksCache<T>(key: string): Promise<T | null> {
+  const db = await openAdminTasksDb()
+  if (!db) return null
+  return new Promise((resolve) => {
+    try {
+      const request = db.transaction(ADMIN_TASKS_IDB_STORE, "readonly").objectStore(ADMIN_TASKS_IDB_STORE).get(key)
+      request.onsuccess = () => resolve((request.result as T | undefined) ?? null)
+      request.onerror = () => resolve(null)
+    } catch {
+      resolve(null)
+    } finally {
+      db.close()
+    }
+  })
+}
+async function writeAdminTasksCache(key: string, value: unknown) {
+  const db = await openAdminTasksDb()
+  if (!db) return
+  try {
+    const store = db.transaction(ADMIN_TASKS_IDB_STORE, "readwrite").objectStore(ADMIN_TASKS_IDB_STORE)
+    // One entry per user: switching accounts on a device replaces the old copy.
+    store.clear()
+    store.put(value, key)
+  } catch {
+    // Storage full or blocked: the page simply loads from the network.
+  } finally {
+    db.close()
+  }
+}
 const NO_PROJECT_TYPES = [
   { id: "normal", label: "Normal", description: "General tasks without a project." },
   { id: "personal", label: "Personal", description: "Personal tasks tracked only in this view." },
@@ -2439,34 +2490,67 @@ export default function AdminTasksPage() {
   )
   const ganeUserId = ganeUser?.id ?? null
 
+  const mainCacheKey = `main|${user?.id || ""}|${user?.role || ""}`
+  // Set once fresh data arrives so a slower cache read can never overwrite it.
+  const mainNetworkLoadedRef = React.useRef(false)
+
+  React.useEffect(() => {
+    if (!user?.id) return
+    let mounted = true
+    void readAdminTasksCache<{
+      tasks: Task[]
+      departments: Department[]
+      systemTasks: SystemTaskOut[]
+      users: AssigneeUser[]
+    }>(mainCacheKey).then((cached) => {
+      if (!mounted || !cached || mainNetworkLoadedRef.current) return
+      setTasks(cached.tasks)
+      setDepartments(cached.departments)
+      setSystemTasks(cached.systemTasks)
+      setUsers(cached.users)
+      setLoadingTasks(false)
+    })
+    return () => {
+      mounted = false
+    }
+  }, [mainCacheKey, user?.id])
+
   const load = React.useCallback(async () => {
     setLoadingTasks(true)
     try {
-      const [tasksRes, departmentsRes, systemTasksRes] = await Promise.all([
-        apiFetch("/tasks?include_done=true"),
-        apiFetch("/departments"),
-        apiFetch("/system-tasks?only_active=false"),
-      ])
-      if (tasksRes.ok) {
-        setTasks((await tasksRes.json()) as Task[])
-      }
-      if (departmentsRes.ok) {
-        setDepartments((await departmentsRes.json()) as Department[])
-      }
-      if (systemTasksRes.ok) {
-        setSystemTasks((await systemTasksRes.json()) as SystemTaskOut[])
-      }
-      if (user?.role === "STAFF") {
-        const usersList = await fetchUsersLookupCached(apiFetch)
-        if (usersList) setUsers(usersList as AssigneeUser[])
-      } else {
+      const loadUsers = async (): Promise<AssigneeUser[] | null> => {
+        if (user?.role === "STAFF") {
+          const usersList = await fetchUsersLookupCached(apiFetch)
+          return usersList ? (usersList as AssigneeUser[]) : null
+        }
         const usersRes = await apiFetch("/users")
-        if (usersRes.ok) setUsers((await usersRes.json()) as AssigneeUser[])
+        return usersRes.ok ? ((await usersRes.json()) as AssigneeUser[]) : null
+      }
+      const readJson = async <T,>(res: Response): Promise<T | null> => (res.ok ? ((await res.json()) as T) : null)
+      // All four lookups are independent, so they run side by side.
+      const [nextTasks, nextDepartments, nextSystemTasks, nextUsers] = await Promise.all([
+        apiFetch("/tasks?include_done=true").then((res) => readJson<Task[]>(res)),
+        apiFetch("/departments").then((res) => readJson<Department[]>(res)),
+        apiFetch("/system-tasks?only_active=false").then((res) => readJson<SystemTaskOut[]>(res)),
+        loadUsers(),
+      ])
+      mainNetworkLoadedRef.current = true
+      if (nextTasks) setTasks(nextTasks)
+      if (nextDepartments) setDepartments(nextDepartments)
+      if (nextSystemTasks) setSystemTasks(nextSystemTasks)
+      if (nextUsers) setUsers(nextUsers)
+      if (user?.id && nextTasks && nextDepartments && nextSystemTasks && nextUsers) {
+        void writeAdminTasksCache(mainCacheKey, {
+          tasks: nextTasks,
+          departments: nextDepartments,
+          systemTasks: nextSystemTasks,
+          users: nextUsers,
+        })
       }
     } finally {
       setLoadingTasks(false)
     }
-  }, [apiFetch, user?.role])
+  }, [apiFetch, mainCacheKey, user?.id, user?.role])
 
   const adminDepartmentId = React.useMemo(() => {
     const byCode = departments.find((dept) => dept.code?.toUpperCase() === "GA")
@@ -2644,7 +2728,13 @@ export default function AdminTasksPage() {
         setGaSystemByDay({})
         return
       }
-      setGaSystemLoading(true)
+      const cacheKey = `system|${user?.id || ""}|${ganeUserId}|${adminDepartmentId || ""}|${commonWeekISOs.join(",")}`
+      const cached = readGaViewCache<Record<string, DailyReportSystemOccurrence[]>>(cacheKey)
+      if (cached) {
+        setGaSystemByDay(cached)
+      } else {
+        setGaSystemLoading(true)
+      }
       setGaSystemError(null)
       try {
         const results = await Promise.all(
@@ -2667,9 +2757,10 @@ export default function AdminTasksPage() {
           nextMap[iso] = occurrences
         }
         setGaSystemByDay(nextMap)
+        writeGaViewCache(cacheKey, nextMap)
       } catch (err) {
         console.error("Failed to load GA system occurrences", err)
-        if (mounted) setGaSystemError("Failed to load DET GA system tasks.")
+        if (mounted && !cached) setGaSystemError("Failed to load DET GA system tasks.")
       } finally {
         if (mounted) setGaSystemLoading(false)
       }
@@ -2678,7 +2769,7 @@ export default function AdminTasksPage() {
     return () => {
       mounted = false
     }
-  }, [adminDepartmentId, apiFetch, commonWeekISOs, ganeUserId, secondarySectionsReady])
+  }, [adminDepartmentId, apiFetch, commonWeekISOs, ganeUserId, secondarySectionsReady, user?.id])
 
   const loadDailyReport = React.useCallback(async () => {
     // This section always displays Gane's report for the GA department.
