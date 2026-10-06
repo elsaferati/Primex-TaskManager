@@ -1565,6 +1565,10 @@ async def retry(operation: Callable[[], Awaitable[Any]], *, delays: tuple[float,
     raise last
 
 
+# Access tokens from PrimeFlowClient logins, shared by every report build.
+_LOGIN_TOKENS: dict[tuple[str, str | None], str] = {}
+
+
 @dataclass
 class PrimeFlowClient:
     base_url: str
@@ -1572,14 +1576,24 @@ class PrimeFlowClient:
     password: str | None
     access_token: str | None = None
 
+    def _login_cache_key(self) -> tuple[str, str | None]:
+        return (self.base_url, self.email)
+
     async def _token(self, client: httpx.AsyncClient) -> str:
         if self.access_token:
             return self.access_token
+        # Logging in hashes the password on the server, so every report used
+        # to pay for it. Reuse the last token; a 401 below logs in again.
+        cached = _LOGIN_TOKENS.get(self._login_cache_key())
+        if cached:
+            self.access_token = cached
+            return cached
         response = await client.post("/api/auth/login", json={"email": self.email, "password": self.password})
         response.raise_for_status()
         self.access_token = response.json().get("access_token") or response.json().get("accessToken")
         if not self.access_token:
             raise ValueError("PrimeFlow login response contained no access token")
+        _LOGIN_TOKENS[self._login_cache_key()] = self.access_token
         return self.access_token
 
     async def common_view(self, day: date) -> dict[str, Any]:
@@ -1599,6 +1613,7 @@ class PrimeFlowClient:
                 )
                 if response.status_code == 401:
                     self.access_token = None
+                    _LOGIN_TOKENS.pop(self._login_cache_key(), None)
                     token = await self._token(client)
                     response = await client.get(
                         "/api/common-view",
@@ -1610,10 +1625,15 @@ class PrimeFlowClient:
                 if any((payload.get("guardrails", {}).get("truncated") or {}).values()):
                     raise ValueError("Common View contains truncated buckets")
                 return payload
-            current = await retry(lambda: retrieve(day))
             if day.weekday() != 0:
-                return current
-            previous = await retry(lambda: retrieve(previous_working_day(day)))
+                return await retry(lambda: retrieve(day))
+            # Monday also needs Friday; log in once, then load both weeks at
+            # the same time instead of one after the other.
+            await self._token(client)
+            current, previous = await asyncio.gather(
+                retry(lambda: retrieve(day)),
+                retry(lambda: retrieve(previous_working_day(day))),
+            )
             for bucket, values in (previous.get("items") or {}).items():
                 current.setdefault("items", {}).setdefault(bucket, []).extend(values)
             current["generated_at"] = max(current["generated_at"], previous["generated_at"])

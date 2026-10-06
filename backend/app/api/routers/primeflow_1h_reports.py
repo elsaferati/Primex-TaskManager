@@ -27,6 +27,7 @@ from app.services.primeflow_report_delivery import (
     configured_recipients,
     deliver_report,
     generate_fresh,
+    load_common_view,
     render_ga_recipient_email_html,
 )
 from app.services.daily_rlz_control_delivery import (
@@ -280,7 +281,10 @@ async def preview(
     _: User = Depends(get_current_user),
 ):
     recipients = await _recipient_map(payload)
-    document = await generate_fresh(payload.report_date, payload.report_slot, recipients)
+    # Load Common View once; the GA email body below reuses it instead of
+    # fetching the same data a second time.
+    source_data = await load_common_view(payload.report_date)
+    document = await generate_fresh(payload.report_date, payload.report_slot, recipients, data=source_data)
     filename = f"PrimeFlow_1H_{payload.report_date:%d.%m.%Y}_{payload.report_slot.replace(':', '-')}"
     if payload.format == "docx":
         return _file_response(render_docx(document), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename + ".docx")
@@ -288,7 +292,7 @@ async def preview(
         return _file_response(render_png(document), "image/png", filename + ".png")
     if payload.format == "txt":
         return _file_response(render_plain_text(document).encode(), "text/plain; charset=utf-8", filename + ".txt")
-    email_html = await render_ga_recipient_email_html(db, document, payload.report_date)
+    email_html = await render_ga_recipient_email_html(db, document, payload.report_date, source_data=source_data)
     if payload.format == "html":
         return HTMLResponse(email_html)
     return {

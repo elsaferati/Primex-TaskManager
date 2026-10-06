@@ -360,7 +360,7 @@ async def _text_overrides_for_1h_interval(
     return title_overrides, description_overrides
 
 
-async def _load_common_view(day: date) -> dict:
+async def load_common_view(day: date) -> dict:
     client = PrimeFlowClient(
         os.environ["PRIMEFLOW_API_BASE_URL"].rstrip("/"),
         os.getenv("PRIMEFLOW_EMAIL"), os.getenv("PRIMEFLOW_PASSWORD"), os.getenv("PRIMEFLOW_ACCESS_TOKEN"),
@@ -375,7 +375,7 @@ async def generate_fresh(
     *,
     data: dict | None = None,
 ) -> ReportDocument:
-    data = data or await _load_common_view(day)
+    data = data or await load_common_view(day)
     reminders = await load_1h_reminder_questions(slot, day)
     undiscussed_notes = await load_undiscussed_notes()
     title_overrides, description_overrides = await _text_overrides_for_1h_interval(
@@ -401,10 +401,11 @@ async def render_ga_recipient_email_html(
     day: date,
     *,
     today_print_html: str | None = None,
+    source_data: dict | None = None,
 ) -> str:
     """Render the same GA-only email body for previews and real delivery."""
     if today_print_html is None:
-        source_data = await _load_common_view(day)
+        source_data = source_data or await load_common_view(day)
         try:
             today_print_report = await build_today_print_report(
                 day,
@@ -482,7 +483,7 @@ async def deliver_report(
                     run.finished_at = datetime.now(report_timezone())
                     await db.commit()
                     return run
-            source_data = await _load_common_view(day)
+            source_data = await load_common_view(day)
             document = await generate_fresh(day, slot, recipient_map, data=source_data)
             attachment_warnings: list[str] = []
             try:
