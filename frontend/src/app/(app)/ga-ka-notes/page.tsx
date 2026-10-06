@@ -1162,6 +1162,10 @@ function isGraphicDesignDepartment(dept?: Department | null) {
   return name === "GRAPHIC DESIGN" || code === "GD" || code === "GDS"
 }
 
+const GA_NOTE_TEMPLATE_EMAIL = "ga@primexeu.com"
+// Note text goes on line 1; the template starts on line 4.
+const GA_NOTE_TEMPLATE = "\n\n\nDL:\nAM/PM:\nLL:\nSIMBOLI:"
+
 export default function GaKaNotesPage() {
   const { user, apiFetch } = useAuth()
   const canViewStrikeTimestamps = user?.role === "ADMIN"
@@ -1196,6 +1200,8 @@ export default function GaKaNotesPage() {
   const [departmentId, setDepartmentId] = React.useState(urlDepartmentId || "ALL")
   const [projectId, setProjectId] = React.useState(urlProjectId || "NONE")
   const [content, setContent] = React.useState("")
+  const defaultNoteContent =
+    user?.email?.trim().toLowerCase() === GA_NOTE_TEMPLATE_EMAIL ? GA_NOTE_TEMPLATE : ""
   const [noteOneHMarker, setNoteOneHMarker] = React.useState<OneHMarker | typeof ONE_H_MARKER_NONE>(ONE_H_MARKER_NONE)
   const [noteOneHMarkerComment, setNoteOneHMarkerComment] = React.useState("")
   const [noteType] = React.useState<NoteType>("GA")
@@ -1264,6 +1270,19 @@ export default function GaKaNotesPage() {
   const [markingSelectedNoteId, setMarkingSelectedNoteId] = React.useState<string | null>(null)
   const contentTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
   const editTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
+
+  React.useEffect(() => {
+    if (!defaultNoteContent) return
+    setContent((prev) => (prev ? prev : defaultNoteContent))
+  }, [defaultNoteContent])
+
+  React.useEffect(() => {
+    if (!defaultNoteContent || content !== defaultNoteContent) return
+    const textarea = contentTextareaRef.current
+    if (textarea && document.activeElement === textarea) {
+      textarea.setSelectionRange(0, 0)
+    }
+  }, [content, defaultNoteContent])
   const editContentLatestRef = React.useRef("")
   const editDictationSelectionRef = React.useRef({ start: 0, end: 0 })
   const [attachmentsDialogOpen, setAttachmentsDialogOpen] = React.useState(false)
@@ -1992,7 +2011,7 @@ export default function GaKaNotesPage() {
   }, [attachmentsDialogOpen, resetManageAttachmentsState])
 
   const createNote = async () => {
-    if (!content.trim()) {
+    if (!content.trim() || (defaultNoteContent && content.trim() === defaultNoteContent.trim())) {
       toast.error("Content is required")
       return
     }
@@ -2048,7 +2067,7 @@ export default function GaKaNotesPage() {
       }
       const created = (await res.json()) as GaNote
       setNotes((prev) => [created, ...prev])
-      setContent("")
+      setContent(defaultNoteContent)
       setNoteOneHMarker(ONE_H_MARKER_NONE)
       setNoteOneHMarkerComment("")
       if (selectedFiles.length > 0) {
