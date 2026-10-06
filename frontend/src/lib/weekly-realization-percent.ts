@@ -1,7 +1,13 @@
-/** Extras earn completion credit; unfinished postponed plan tasks deduct up to 25 points. */
-export function weeklyRealizationPercent(planned: number, completed: number, extra: number, postponed: number): number {
-  const denominator = planned || extra
-  const base = denominator ? Math.min(100, completed * 100 / denominator) : 0
-  const penalty = planned ? postponed * 25 / planned : 0
+/** Credit (planned done, multi-day shares, extras) capped at 100, then penalty points per plan task deducted. */
+export function realizationPercent(credit: number, planWeight: number, extra: number, penaltyPoints: number, penaltyBase: number): number | null {
+  const denominator = planWeight || extra
+  if (!denominator) return null
+  const base = Math.min(100, credit * 100 / denominator)
+  const penalty = penaltyBase ? penaltyPoints / penaltyBase : 0
   return Math.round(Math.max(0, base - penalty) * 10) / 10
+}
+
+/** Extras earn completion credit; unfinished plan tasks deduct their penalty points (25 postponed, more with a deadline). */
+export function weeklyRealizationPercent(planned: number, completed: number, extra: number, penaltyPoints: number): number {
+  return realizationPercent(completed, planned, extra, penaltyPoints, planned) ?? 0
 }

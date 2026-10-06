@@ -27,7 +27,7 @@ from app.models.enums import AttendanceType
 from app.services.daily_realization_classifier import (
     DailyClassificationInput, EXCEPTION_CLASSIFICATIONS, classify_daily_task,
 )
-from app.services.daily_realization_metrics import calculate_daily_metrics
+from app.services.daily_realization_metrics import calculate_daily_metrics, multi_day_share
 from app.services.daily_realization_quantities import daily_task_quantity
 from app.services.daily_realization_events import semantic_local_day
 from app.services.daily_realization_explanation import requires_daily_explanation
@@ -522,6 +522,9 @@ async def build_live_daily_realization(
             )
             deadline_is_overdue = bool(current_due and current_due < day)
             completed_today = completion_credited
+            daily_share, multi_day_before_deadline = multi_day_share(
+                local_day(task.start_date) if task else None, original_due or current_due, day,
+            )
             requirement = requires_daily_explanation(
                 status=task.status if task else "TODO", selected_day=day,
                 deadline=current_due, deadline_was_today=deadline_was_today,
@@ -597,6 +600,8 @@ async def build_live_daily_realization(
                 "comment_missing": comment_missing,
                 "deadline_was_today": deadline_was_today,
                 "deadline_is_overdue": deadline_is_overdue,
+                "daily_share": daily_share,
+                "multi_day_before_deadline": multi_day_before_deadline,
                 "postponed_today": postponed_today,
                 "had_postponement_event": had_postponement_event,
                 "deadline_completed": bool(deadline_was_today and completed_today),

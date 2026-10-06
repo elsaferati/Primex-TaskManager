@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import date, timedelta
 from typing import Iterable, Mapping
 
 COMPLETED_CLASSIFICATIONS = {"ADDITIONAL_COMPLETED", "COMPLETED_LATE", "COMPLETED_EARLY"}
@@ -54,14 +55,99 @@ def sort_deadline_cards(cards: list[dict]) -> list[dict]:
     )
 
 
-def realization_percent(completed: int, planned: int, extra: int, postponed: int) -> float | None:
-    """Same rule as the weekly percent: extras earn credit up to 100, postponed plan tasks deduct up to 25."""
-    denominator = planned or extra
+def working_days(start: date, end: date) -> int:
+    """Monday-Friday days from start to end, both included."""
+    return sum(
+        1 for offset in range((end - start).days + 1)
+        if (start + timedelta(days=offset)).weekday() < 5
+    )
+
+
+def multi_day_share(start: date | None, due: date | None, day: date) -> tuple[float, bool]:
+    """A task spread over several working days weighs 1/N of a task on each of them.
+
+    Returns the day's share and whether the day comes before the deadline, the
+    only days on which being in progress means the task is on schedule.
+    """
+    if not start or not due or start >= due or not start <= day <= due:
+        return 1.0, False
+    days = working_days(start, due)
+    if days <= 1:
+        return 1.0, False
+    return 1.0 / days, day < due
+
+
+POSTPONED_PENALTY = 25.0
+POSTPONED_DEADLINE_PENALTY = 40.0
+POSTPONED_CRITICAL_DEADLINE_PENALTY = 60.0
+MISSED_DEADLINE_PENALTY = 50.0
+MISSED_CRITICAL_DEADLINE_PENALTY = 70.0
+
+
+def plan_task_penalty(*, postponed: bool, deadline: bool, critical: bool, completed: bool) -> float:
+    """Points one unfinished plan task deducts; a missed deadline costs more than an honest postponement."""
+    if completed:
+        return 0.0
+    if postponed:
+        if deadline:
+            return POSTPONED_CRITICAL_DEADLINE_PENALTY if critical else POSTPONED_DEADLINE_PENALTY
+        return POSTPONED_PENALTY
+    if deadline:
+        return MISSED_CRITICAL_DEADLINE_PENALTY if critical else MISSED_DEADLINE_PENALTY
+    return 0.0
+
+
+def realization_percent(
+    credit: float, plan_weight: float, extra: int, penalty_points: float, penalty_base: int,
+) -> float | None:
+    """Daily and weekly realization: credit capped at 100, then penalty points per plan task deducted."""
+    denominator = plan_weight or extra
     if not denominator:
         return None
-    base = min(100.0, completed * 100.0 / denominator)
-    penalty = postponed * 25.0 / planned if planned else 0.0
+    base = min(100.0, credit * 100.0 / denominator)
+    penalty = penalty_points / penalty_base if penalty_base else 0.0
     return round(max(0.0, base - penalty), 1)
+
+
+def _realization_item(row: Mapping[str, object]) -> dict:
+    """How one row moved the daily percent, for the Plan RLZ explanation."""
+    classification = str(row.get("classification") or "")
+    planned = bool(row.get("in_original_plan"))
+    share = float(row.get("daily_share") or 1.0) if planned else 1.0
+    postponed = classification.startswith("POSTPONED")
+    completed = classification in {"REALIZED_AS_PLANNED", *COMPLETED_CLASSIFICATIONS}
+    deadline = bool(row.get("deadline_was_today"))
+    critical = bool(row.get("deadline_critical"))
+    if not planned:
+        kind = "EXTRA_COMPLETED" if completed else "EXTRA_OPEN"
+        credit = 1.0 if completed else 0.0
+    elif completed:
+        kind, credit = "COMPLETED", share
+    elif postponed:
+        kind, credit = "POSTPONED", 0.0
+    elif classification == "IN_PROGRESS":
+        kind = "IN_PROGRESS"
+        # Multi-day work earns its daily share for every day it is still running before the deadline.
+        credit = share if row.get("multi_day_before_deadline") else 0.0
+    elif classification == "REASSIGNED_OUT":
+        kind, credit = "REASSIGNED_OUT", 0.0
+    else:
+        kind, credit = "NO_PROGRESS", 0.0
+    penalty = 0.0
+    if planned and classification != "REASSIGNED_OUT":
+        penalty = plan_task_penalty(postponed=postponed, deadline=deadline, critical=critical, completed=completed)
+    return {
+        "task_id": str(row["task_id"]) if row.get("task_id") else None,
+        "title": str(row.get("title") or "Pa titull"),
+        "kind": kind,
+        "planned": planned,
+        "share": round(share, 4),
+        "credit": round(credit, 4),
+        "penalty": penalty,
+        "approved": classification == "POSTPONED_APPROVED",
+        "deadline": deadline,
+        "critical": critical,
+    }
 
 
 def calculate_daily_metrics(rows: Iterable[Mapping[str, object]]) -> dict[str, object]:
@@ -86,11 +172,19 @@ def calculate_daily_metrics(rows: Iterable[Mapping[str, object]]) -> dict[str, o
         row.get("classification") not in COMPLETED_CLASSIFICATIONS and row_has_progress(row)
         for row in extras
     )
-    # Postponed classifications only exist for original-plan rows, so these are plan postponements.
-    unapproved_postponed = outcomes["POSTPONED_UNAPPROVED"]
-    raw = realization_percent(total_completed, original, len(extras), approved_scope + unapproved_postponed)
-    # Approved postponements leave the denominator, so only unapproved ones are penalised.
-    adjusted = realization_percent(total_completed, adjusted_denominator, len(extras), unapproved_postponed)
+    realization_items = [_realization_item(row) for row in items]
+    planned_items = [item for item in realization_items if item["planned"]]
+    plan_weight = round(sum(item["share"] for item in planned_items), 4)
+    credit = round(sum(item["credit"] for item in realization_items), 4)
+    penalty_points = sum(item["penalty"] for item in planned_items)
+    # Approved postponements leave the adjusted plan, together with their penalty.
+    approved_items = [item for item in planned_items if item["approved"]]
+    adjusted_plan_weight = round(plan_weight - sum(item["share"] for item in approved_items), 4)
+    adjusted_penalty_points = penalty_points - sum(item["penalty"] for item in approved_items)
+    raw = realization_percent(credit, plan_weight, len(extras), penalty_points, original)
+    adjusted = realization_percent(
+        credit, adjusted_plan_weight, len(extras), adjusted_penalty_points, adjusted_denominator,
+    )
     deadline_rows = [row for row in items if row.get("deadline_was_today")]
     deadline_cards = [
         deadline_task_card(row, state=deadline_state(row)) for row in deadline_rows
@@ -136,6 +230,12 @@ def calculate_daily_metrics(rows: Iterable[Mapping[str, object]]) -> dict[str, o
         "adjusted_denominator": adjusted_denominator,
         "raw_plan_realization": raw,
         "adjusted_plan_realization": adjusted,
+        "realization_plan_weight": plan_weight,
+        "realization_credit": credit,
+        "realization_penalty_points": penalty_points,
+        "adjusted_realization_plan_weight": adjusted_plan_weight,
+        "adjusted_realization_penalty_points": adjusted_penalty_points,
+        "realization_items": [item for item in realization_items if item["kind"] != "EXTRA_OPEN"],
         "deadline_tasks": sort_deadline_cards(deadline_cards),
         "deadlines_today_count": len(deadline_rows),
         "deadlines_completed_count": deadline_completed,

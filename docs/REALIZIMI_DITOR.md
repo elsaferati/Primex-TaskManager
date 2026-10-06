@@ -112,12 +112,24 @@ The classifier is a pure function. `TaskStatus` is unchanged.
 Daily realization uses the same formula as weekly realization:
 
 ```
-Base    = MIN(100, total_completed_today_count / plan * 100)   # planned done + extras done
-Penalty = postponed plan tasks / plan * 25
+Base    = MIN(100, credit / plan weight * 100)
+Penalty = sum of penalty points / number of plan tasks
 Final   = MAX(0, Base - Penalty), rounded to one decimal
 ```
 
-Raw uses `plan = original_planned_count` and penalises all postponements (approved and unapproved). Adjusted uses `plan = original_planned_count - approved postponements` and penalises only unapproved postponements. Reassignment does not alter the denominator. With no plan, the base is the number of extra tasks and there is no penalty; with neither plan nor extras the value is N/A.
+Credit is 1 per completed plan task and per completed extra. A plan task spread over N working days (start date to deadline, Monday-Friday) weighs 1/N in the plan weight on each of those days, and while it is in progress before its deadline day it also earns 1/N credit. Every other plan task weighs 1.
+
+Penalty points per unfinished plan task:
+
+| Case | Points |
+|---|---|
+| Postponed, no deadline that day | 25 |
+| Postponed, deadline that day | 40 |
+| Postponed, important deadline that day | 60 |
+| Deadline that day missed without postponing | 50 |
+| Important deadline missed without postponing | 70 |
+
+Raw uses the full plan. Adjusted removes approved postponements from both the plan weight and the penalty. Reassignment does not alter the denominator. With no plan, the base is the number of extra tasks and there is no penalty; with neither plan nor extras the value is N/A. Weekly realization applies the same penalty table to plan tasks still unfinished at the end of the week, without the multi-day share. Clicking a person's Plan RLZ in the daily staff table lists the tasks behind each part of the formula.
 
 ## 11a. Daily explanation rule
 

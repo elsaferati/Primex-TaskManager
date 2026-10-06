@@ -16,5 +16,5 @@ test("weekly completion credit is capped before the postponed-plan penalty", () 
     [10, 8, 2, 2, 75], [10, 13, 5, 2, 95], [100, 23, 0, 0, 23],
     [5, 0, 0, 5, 0], [3, 2, 0, 1, 58.3],
     [0, 1, 4, 0, 25], [0, 4, 4, 0, 100], [0, 0, 0, 0, 0],
-  ]) assert.equal(weeklyRealizationPercent(plan, completed, extra, postponed), expected)
+  ]) assert.equal(weeklyRealizationPercent(plan, completed, extra, postponed * 25), expected)
 })
