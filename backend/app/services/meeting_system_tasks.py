@@ -16,6 +16,7 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
 from app.services.meeting_participants import manual_participant_ids
 
@@ -771,7 +772,12 @@ async def _reconcile_tak_int_one_h_task_kind(
                 existing.meeting_occurrence_date = slot_date
                 existing.one_h_report_slot = slot_label
                 existing.finish_period = finish_period
+                await _set_one_h_report_slot_row(db, existing.id, slot_date, slot_label, overwrite=True)
                 changed += 1
+            else:
+                await _set_one_h_report_slot_row(
+                    db, existing.id, slot_date, existing.one_h_report_slot or slot_label, overwrite=False
+                )
             continue
 
         task_insert = pg_insert(Task).values(
@@ -816,8 +822,36 @@ async def _reconcile_tak_int_one_h_task_kind(
             .values({"task_id": inserted_task_id, "user_id": user_id})
             .on_conflict_do_nothing(index_elements=["task_id", "user_id"])
         )
+        await _set_one_h_report_slot_row(db, inserted_task_id, slot_date, slot_label, overwrite=True)
         changed += 1
     return changed
+
+
+async def _set_one_h_report_slot_row(
+    db: AsyncSession,
+    task_id: uuid.UUID,
+    report_date: date,
+    slot_label: str,
+    *,
+    overwrite: bool,
+) -> None:
+    """Daily views (My View, reports) read the 1H slot only from the per-day slot rows."""
+    statement = pg_insert(TaskOneHReportSlot).values(
+        {
+            "id": uuid.uuid4(),
+            "task_id": task_id,
+            "report_date": report_date,
+            "one_h_report_slot": slot_label,
+        }
+    )
+    if overwrite:
+        statement = statement.on_conflict_do_update(
+            index_elements=["task_id", "report_date"],
+            set_={"one_h_report_slot": slot_label, "updated_at": func.now()},
+        )
+    else:
+        statement = statement.on_conflict_do_nothing(index_elements=["task_id", "report_date"])
+    await db.execute(statement)
 
 
 async def reconcile_tak_int_one_h_tasks(
