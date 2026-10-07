@@ -412,12 +412,8 @@ def _waiting_client_task_rows(
     ]
 
 
-async def apply_unfinished_priority_task_table(
-    db: AsyncSession,
-    sections: list[dict[str, str]],
-    report_day: date,
-) -> list[dict[str, str]]:
-    """Refresh M2 section 7 from the task state at the configured send cutoff."""
+async def build_unfinished_priority_task_rows(db: AsyncSession, report_day: date) -> list[list[str]]:
+    """Load unfinished morning work at the configured M2 send cutoff."""
     tasks = (await db.execute(select(Task).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
@@ -427,7 +423,7 @@ async def apply_unfinished_priority_task_table(
         for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
     }
     cutoff, cutoff_timezone = await _after_break_cutoff(db, report_day)
-    rows = _unfinished_priority_task_rows(
+    return _unfinished_priority_task_rows(
         tasks,
         names,
         assignee_ids_by_task,
@@ -436,6 +432,15 @@ async def apply_unfinished_priority_task_table(
         cutoff_timezone,
         department_codes,
     )
+
+
+async def apply_unfinished_priority_task_table(
+    db: AsyncSession,
+    sections: list[dict[str, str]],
+    report_day: date,
+) -> list[dict[str, str]]:
+    """Refresh M2 section 7 from the task state at the configured send cutoff."""
+    rows = await build_unfinished_priority_task_rows(db, report_day)
     body = _normalize_section(
         _ascii_table(
             UNFINISHED_PRIORITY_TABLE_LABEL,

@@ -55,7 +55,7 @@ def _text(value: Any) -> str:
 def export_blocks(report: dict) -> list[dict]:
     from app.services.m3_reporting_points import (
         AUTO_TITLES, GA_TITLE, M3_TITLE, MANUAL_POINTS,
-        report_table_columns, report_table_value, task_table_groups, task_row_appearance,
+        report_table_columns, report_table_value, task_table_groups, task_row_appearance, realization_department_rows,
     )
 
     blocks: list[dict] = []
@@ -112,9 +112,10 @@ def export_blocks(report: dict) -> list[dict]:
         percent = realization.get("percent")
         text((f"{percent:g}%" if percent is not None else "Pa te dhena") + " — " + str(realization.get("comment") or ""))
         text(f"Marrë në: {report.get('realization_captured_at') or '16:15'}")
-        if realization.get("departments"):
+        department_rows = realization_department_rows(realization)
+        if department_rows:
             departments = []
-            for item in realization["departments"]:
+            for item in department_rows:
                 value = item.get("percent")
                 fill = "#e2e8f0" if value is None else RED if value < 50 else GREEN
                 departments.append([

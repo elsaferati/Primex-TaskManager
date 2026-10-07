@@ -52,13 +52,14 @@ const answerKey = `delivery:${taskId}`
 const row = { task_id: taskId, title: "Detyra <script>", assignees: "EF", department: "DEV", project: "P", status: "TODO", progress: 0, am_pm: "AM", task_type: "1H", marker: "M2/3" }
 const report = { id: "report", report_date: "2026-10-06", manual_answers: {}, data: { delivery: [row] }, status: "DRAFT" }
 
-test("M2 presents all three points with a final per-task manual answer", () => {
+test("M2 presents all four points with a final per-task manual answer", () => {
   const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
     report, answers: { reorganization: "Riorganizo", [answerKey]: "Dorezuar", [`delivery_choice:${taskId}`]: "PO" }, disabled: false, onAnswerChange: () => {},
   }))
   assert.match(html, /1\. RIORGANIZIM\?/)
-  assert.match(html, /2\. A KA DET/)
-  assert.match(html, /3\. A JAN. DOR.ZUAR/)
+  assert.match(html, /2\. DET TE PAKRYERA, 08:00\/DEADLINE/)
+  assert.match(html, /3\. A KA DET/)
+  assert.match(html, /4\. A JAN. DOR.ZUAR/)
   assert.equal((html.match(/<textarea/g) || []).length, 2)
   assert.match(html, /Dorezuar/)
   assert.match(html, /M2\/3/)
@@ -71,6 +72,23 @@ test("M2 presents all three points with a final per-task manual answer", () => {
   assert.match(deliveryTable, /<option value="JO">JO<\/option>/)
   assert.match(html, /Detyra &lt;script&gt;/)
   assert.match(html, /P.RGJIGJJA MANUALE<\/th><\/tr>/)
+})
+
+test("unfinished priority tasks appear second with due labels and priority styling", () => {
+  const priority = { assignees: "ER", department: "GD", am_pm: "AM", status: "IN_PROGRESS", priority: "DEADLINE / 08:00",
+    task_type: "PRJK", title: "08:00 Detyre <test>", due_label: "SOT", deadline_important: true, eight_am: true }
+  const html = renderToStaticMarkup(React.createElement(M2ReportingPointsView, {
+    report: { ...report, data: { ...report.data, unfinished_priority: [priority] } }, answers: {}, disabled: false, onAnswerChange: () => {},
+  }))
+  const section = html.slice(html.indexOf('aria-labelledby="m2-unfinished-priority"'), html.indexOf('aria-labelledby="m2-postponed"'))
+  assert.ok(html.indexOf('id="m2-reorganization"') < html.indexOf('id="m2-unfinished-priority"'))
+  assert.match(section, /LLOJI<\/th><th[^>]*>TIPI<\/th>/)
+  assert.match(section, /DUE DATE<\/th>/)
+  assert.match(section, /08:00 Detyre &lt;test&gt;/)
+  assert.match(section, />SOT<\/td>/)
+  assert.match(section, /background:#dc2626;color:white/)
+  assert.match(section, /border-top:3px solid #dc2626/)
+  assert.doesNotMatch(section, /<textarea|<select|>STATUS<\/th>/)
 })
 
 test("read-only reports keep both manual fields disabled", () => {
@@ -162,14 +180,21 @@ function mountPage(storage, apiFetch) {
       clearTimeout: (id) => timers.delete(id), setInterval: () => -1, clearInterval: () => {},
     },
   })
-  const findView = (node) => {
+  const findNode = (node, predicate) => {
     if (!node || typeof node !== "object") return null
-    if (node.type === M2ReportingPointsView) return node
+    if (predicate(node)) return node
     for (const child of React.Children.toArray(node.props?.children)) {
-      const found = findView(child)
+      const found = findNode(child, predicate)
       if (found) return found
     }
     return null
+  }
+  const findView = (node) => findNode(node, (item) => item.type === M2ReportingPointsView)
+  const content = (node) => typeof node === "string" ? node : React.Children.toArray(node?.props?.children).map(content).join("")
+  const button = (label) => {
+    const node = findNode(tree, (item) => item.props?.onClick && content(item) === label)
+    assert.ok(node, `Button missing: ${label}`)
+    return node
   }
   return {
     async flush() {
@@ -181,6 +206,9 @@ function mountPage(storage, apiFetch) {
     },
     edit(key, value) { findView(tree).props.onAnswerChange(key, value) },
     answers() { return findView(tree).props.answers },
+    viewDisabled() { return findView(tree).props.disabled },
+    buttonDisabled(label) { return !!button(label).props.disabled },
+    click(label) { const node = button(label); assert.ok(!node.props.disabled); return node.props.onClick() },
     fireSave() {
       assert.equal(timers.size, 1)
       const [id, callback] = timers.entries().next().value
@@ -190,6 +218,68 @@ function mountPage(storage, apiFetch) {
     unmount() { for (const effect of effects) effect?.cleanup?.() },
   }
 }
+
+test("sent reports remain editable, regenerate, autosave and send repeatedly", async () => {
+  const values = new Map()
+  const storage = { getItem: (key) => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) }
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Tirane", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+  let server = { ...report, report_date: day, status: "SENT", sent_at: new Date().toISOString(), generated_at: new Date().toISOString() }
+  let sends = 0, generations = 0
+  const api = async (url, options) => {
+    if (options?.method === "PUT") server = { ...server, status: "DRAFT", manual_answers: JSON.parse(options.body).manual_answers }
+    if (url.includes("/generate?")) { generations++; server = { ...server, status: "DRAFT" } }
+    if (url.endsWith("/send")) { sends++; server = { ...server, status: "SENT", sent_at: new Date().toISOString() } }
+    return { ok: true, status: 200, json: async () => url.endsWith("/recipients") ? { recipients: { to: ["test@example.com"], cc: [], bcc: [] } } : { ...server } }
+  }
+  const page = mountPage(storage, api)
+  await page.flush()
+  assert.equal(page.viewDisabled(), false)
+  assert.equal(page.buttonDisabled("Gjenero raportin"), false)
+  assert.equal(page.buttonDisabled("Dërgo sërish"), false)
+  await page.click("Gjenero raportin")
+  await page.flush()
+  assert.equal(generations, 1)
+  for (let i = 0; i < 3; i++) {
+    page.edit(answerKey, `Përgjigjja ${i}`)
+    await page.flush()
+    await page.fireSave()
+    await page.flush()
+    assert.equal(server.manual_answers[answerKey], `Përgjigjja ${i}`)
+    assert.equal(page.buttonDisabled("Dërgo sërish"), false)
+    page.click("Dërgo sërish")
+    await page.flush()
+    await page.click("Dërgo raportin")
+    await page.flush()
+    assert.equal(page.viewDisabled(), false)
+    assert.equal(page.buttonDisabled("Gjenero raportin"), false)
+  }
+  assert.equal(sends, 3)
+  page.unmount()
+})
+
+test("sent reports restore and autosave local edits after reload", async () => {
+  const values = new Map()
+  const storage = { getItem: (key) => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) }
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Tirane", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+  let server = { ...report, report_date: day, status: "SENT", sent_at: new Date().toISOString() }
+  const api = async (url, options) => {
+    if (options?.method === "PUT") server = { ...server, status: "DRAFT", manual_answers: JSON.parse(options.body).manual_answers }
+    return { ok: true, status: 200, json: async () => url.endsWith("/recipients") ? { recipients: { to: [], cc: [], bcc: [] } } : { ...server } }
+  }
+  const first = mountPage(storage, api)
+  await first.flush()
+  first.edit(answerKey, "Ndryshim pas dërgimit")
+  await first.flush()
+  first.unmount()
+  const reloaded = mountPage(storage, api)
+  await reloaded.flush()
+  assert.equal(reloaded.answers()[answerKey], "Ndryshim pas dërgimit")
+  await reloaded.fireSave()
+  await reloaded.flush()
+  assert.equal(server.manual_answers[answerKey], "Ndryshim pas dërgimit")
+  assert.equal(values.size, 0)
+  reloaded.unmount()
+})
 
 test("answers survive immediate reload and automatically persist without pressing Save", async () => {
   const values = new Map()

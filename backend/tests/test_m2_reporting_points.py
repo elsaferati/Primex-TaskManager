@@ -211,6 +211,37 @@ def test_delivery_dropdown_accepts_supported_choices(choice):
 
 
 class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unfinished_priority_reuses_after_break_rows_and_preserves_existing_sections(self):
+        rows = [
+            ["1", "ER", "GD", "AM", "TODO", "DUE SOT", "PRJK", "ER: Detyre", "SOT"],
+            ["2", "EF", "DEV", "AM/PM", "IN_PROGRESS", "DEADLINE / 08:00", "1H", "08:00 EF: Test <task>", "SOT"],
+        ]
+        db = AsyncMock()
+        with patch.object(service.m3, "build_task_data", new=AsyncMock(return_value={"postponed": [], "delivery": []})), \
+             patch.object(service, "build_unfinished_priority_task_rows", new=AsyncMock(return_value=rows)) as shared_rows:
+            data = await service.build_task_data(db, DAY)
+        shared_rows.assert_awaited_once_with(db, DAY)
+        assert data["delivery"] == data["postponed"] == []
+        assert [row["title"] for row in data["unfinished_priority"]] == [row[7] for row in rows]
+        assert data["unfinished_priority"][0]["deadline_important"] is False
+        priority = data["unfinished_priority"][1]
+        assert priority["eight_am"] and priority["deadline_important"]
+        assert priority["am_pm"] == "AM/PM" and priority["due_label"] == "SOT"
+        value = {"report_date": DAY.isoformat(), "manual_answers": {}, "data": data}
+        blocks = service.export_blocks(value)
+        titles = [block["text"] for block in blocks if block["kind"] == "text" and block["level"] == 2]
+        assert titles == [service.MANUAL_POINTS["reorganization"], *service.AUTO_TITLES.values()]
+        table = next(block for block in blocks if block["kind"] == "table")
+        assert [column[1] for column in table["columns"]] == ["NR", "KUSH", "DEP", "AM/PM", "LLOJI", "TIPI", "TITULLI", "DUE DATE"]
+        assert all(cell["fill"] == "#dc2626" and cell["eight_am"] for cell in table["rows"][1])
+        html = service.render_html(value)
+        assert "08:00 EF: Test &lt;task&gt;" in html
+        assert "DUE DATE: SOT" in service.render_plain_text(value)
+        attachments = service.report_attachments(value)
+        word = Document(io.BytesIO(attachments[0][1]))
+        assert word.tables[0].rows[2].cells[6].text == priority["title"]
+        assert word.tables[0].rows[2].cells[7].text == "SOT"
+
     async def test_email_preparation_uses_full_html_word_and_png_without_real_email(self):
         fixture = complete_export_fixture()
         row = M2ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers=fixture["manual_answers"], data=fixture["data"], status="DRAFT")
@@ -260,16 +291,74 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
                 await api.save_answers(row.id, api.ManualAnswersPayload(manual_answers={f"delivery:{uuid.uuid4()}": "Jo"}), db, SimpleNamespace(id=uuid.uuid4()))
             assert error.value.status_code == 422
             row.status = "SENT"
-            with pytest.raises(HTTPException) as error:
-                await api.save_answers(row.id, api.ManualAnswersPayload(manual_answers={"reorganization": "Ndrysho"}), db, SimpleNamespace(id=uuid.uuid4()))
-            assert error.value.status_code == 409
+            row.sent_at = datetime(2026, 10, 6, 10, tzinfo=timezone.utc)
+            result = await api.save_answers(row.id, api.ManualAnswersPayload(manual_answers={"reorganization": "Ndrysho"}), db, SimpleNamespace(id=uuid.uuid4()))
+            assert result["manual_answers"]["reorganization"] == "Ndrysho"
+            assert result["status"] == "DRAFT"
+            assert result["sent_at"] == row.sent_at.isoformat()
 
 
-    async def test_sent_report_does_not_send_again(self):
-        row = SimpleNamespace(status="SENT")
-        with patch.object(service, "GmailService") as gmail:
-            await service.send_report(AsyncMock(), row, {"to": ["test@example.com"]})
-        gmail.assert_not_called()
+    async def test_manual_send_delivers_every_time_with_latest_answers(self):
+        row = M2ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={"reorganization": "Fillimi"},
+                                      data={}, status="SENT", gmail_message_id="previous-message")
+        gmail = SimpleNamespace(find_exact=AsyncMock(return_value={"id": "previous-message"}),
+                                send_verified=AsyncMock(side_effect=[{"id": f"new-{i}"} for i in range(3)]))
+        db = AsyncMock()
+        with patch.object(service, "GmailService", return_value=gmail), patch.object(service, "report_attachments", return_value=[]):
+            await service.send_report(db, row, {"to": ["test@example.com"]})
+            first_sent_at = row.sent_at
+            row.manual_answers = {"reorganization": "Ndryshimi"}
+            await service.send_report(db, row, {"to": ["test@example.com"]})
+            await service.send_report(db, row, {"to": ["test@example.com"]})
+        assert gmail.send_verified.await_count == 3
+        gmail.find_exact.assert_not_awaited()
+        assert "Fillimi" in gmail.send_verified.call_args_list[0].args[2]
+        assert all("Ndryshimi" in call.args[2] for call in gmail.send_verified.call_args_list[1:])
+        assert row.status == "SENT" and row.gmail_message_id == "new-2"
+        assert row.sent_at >= first_sent_at
+        assert db.commit.await_count == 3
+
+    async def test_sent_report_can_be_regenerated_without_losing_answers_or_last_send(self):
+        sent_at = datetime(2026, 10, 6, 9, tzinfo=timezone.utc)
+        row = M2ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={"reorganization": "Po"},
+                                      data={}, status="SENT", sent_at=sent_at, gmail_message_id="old-message")
+        db = AsyncMock()
+        with patch.object(api, "datetime") as clock, patch.object(service, "datetime") as service_clock, \
+             patch.object(api, "locked_report", new=AsyncMock(return_value=row)), patch.object(api, "add_audit_log"), \
+             patch.object(service, "build_task_data", new=AsyncMock(return_value={"unfinished_priority": [{"title": "Detyre e re"}]})):
+            clock.now.return_value = service_clock.now.return_value = datetime(2026, 10, 6, 11, tzinfo=timezone.utc)
+            result = await api.generate(DAY, db, SimpleNamespace(id=uuid.uuid4()))
+        assert result["status"] == "DRAFT"
+        assert result["data"]["unfinished_priority"][0]["title"] == "Detyre e re"
+        assert result["manual_answers"] == {"reorganization": "Po"}
+        assert row.sent_at == sent_at and row.gmail_message_id == "old-message"
+        db.commit.assert_awaited_once()
+
+    async def test_send_route_refreshes_and_audits_every_resend(self):
+        row = M2ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={}, data={},
+                                      status="SENT", generated_at=datetime(2026, 10, 6, 9, tzinfo=timezone.utc))
+        with patch.object(api, "datetime") as clock, patch.object(api, "_by_id", new=AsyncMock(return_value=row)), \
+             patch.object(api, "locked_report", new=AsyncMock(return_value=row)), \
+             patch.object(api, "get_settings", new=AsyncMock(return_value=SimpleNamespace(recipients={"to": ["test@example.com"]}))), \
+             patch.object(api, "refresh_report", new=AsyncMock()) as refresh, \
+             patch.object(api, "send_report", new=AsyncMock()) as send, patch.object(api, "add_audit_log") as audit:
+            clock.now.return_value = datetime(2026, 10, 6, 11, tzinfo=timezone.utc)
+            for _ in range(3):
+                await api.send(row.id, AsyncMock(), SimpleNamespace(id=uuid.uuid4()))
+        assert refresh.await_count == send.await_count == audit.call_count == 3
+
+    async def test_failed_resend_keeps_last_successful_delivery_and_can_be_retried(self):
+        sent_at = datetime(2026, 10, 6, 9, tzinfo=timezone.utc)
+        row = M2ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={}, data={},
+                                      status="SENT", sent_at=sent_at, gmail_message_id="previous-message")
+        gmail = SimpleNamespace(send_verified=AsyncMock(side_effect=[RuntimeError("SMTP unavailable"), {"id": "retry-message"}]))
+        db = AsyncMock()
+        with patch.object(service, "GmailService", return_value=gmail), patch.object(service, "report_attachments", return_value=[]):
+            with pytest.raises(RuntimeError, match="SMTP unavailable"):
+                await service.send_report(db, row, {"to": ["test@example.com"]})
+            assert row.status == "FAILED" and row.sent_at == sent_at and row.gmail_message_id == "previous-message"
+            await service.send_report(db, row, {"to": ["test@example.com"]})
+        assert row.status == "SENT" and row.gmail_message_id == "retry-message" and row.last_error is None
 
 
     async def test_m2_recipient_configuration_is_used(self):

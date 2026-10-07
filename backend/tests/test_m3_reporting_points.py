@@ -460,11 +460,14 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         blocks = export_blocks(report)
         department_table = next(block for block in blocks if block.get("kind") == "table"
                                 and block["columns"][0][0] == "code")
-        self.assertEqual(len(department_table["rows"]), 6)
+        self.assertEqual(len(department_table["rows"]), 4)
         self.assertIn("50%", service.render_plain_text(report))
         html = service.render_html(report)
         for department in departments:
-            self.assertIn(department.code, html)
+            if department.code not in {"GA", "HR"}:
+                self.assertIn(department.code, html)
+            else:
+                self.assertNotIn(f">{department.code}</td>", html)
 
     async def test_regeneration_after_1615_replaces_realization_and_preserves_answers(self):
         now = datetime.fromisoformat("2026-10-05T17:02:00+02:00")
@@ -495,14 +498,82 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 await service.refresh_report(AsyncMock(), row)
         builder.assert_not_awaited()
 
-    async def test_sent_report_is_idempotent_and_blank_recipients_do_not_send(self):
+    async def test_blank_recipients_do_not_send_even_after_a_previous_delivery(self):
         row = SimpleNamespace(status="SENT")
         with patch.object(service, "GmailService") as gmail:
-            await service.send_report(AsyncMock(), row, {"to": ["recipient@example.com"]})
-            row.status = "DRAFT"
             with self.assertRaises(ValueError):
                 await service.send_report(AsyncMock(), row, {"to": []})
         gmail.assert_not_called()
+
+    async def test_manual_resends_always_deliver_latest_answers_and_update_last_send(self):
+        row = M3ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={"underload": "Fillimi"},
+                                      data={}, status="SENT", gmail_message_id="previous-message")
+        gmail = SimpleNamespace(find_exact=AsyncMock(return_value={"id": "previous-message"}),
+                                send_verified=AsyncMock(side_effect=[{"id": f"new-{i}"} for i in range(3)]))
+        db = AsyncMock()
+        with patch.object(service, "GmailService", return_value=gmail), \
+             patch("app.services.m3_reporting_points_attachments.report_attachments", return_value=[]):
+            await service.send_report(db, row, {"to": ["test@example.com"]})
+            first_sent_at = row.sent_at
+            row.manual_answers = {"underload": "Ndryshimi", "ga_reorganization": "GA e re"}
+            await service.send_report(db, row, {"to": ["test@example.com"]})
+            await service.send_report(db, row, {"to": ["test@example.com"]})
+        self.assertEqual(gmail.send_verified.await_count, 3)
+        gmail.find_exact.assert_not_awaited()
+        self.assertIn("Fillimi", gmail.send_verified.call_args_list[0].args[2])
+        for call in gmail.send_verified.call_args_list[1:]:
+            self.assertIn("Ndryshimi", call.args[2])
+            self.assertIn("GA e re", call.args[2])
+        self.assertEqual((row.status, row.gmail_message_id), ("SENT", "new-2"))
+        self.assertGreaterEqual(row.sent_at, first_sent_at)
+        self.assertEqual(db.commit.await_count, 3)
+
+    async def test_sent_report_can_be_regenerated_with_latest_realization(self):
+        now = datetime.fromisoformat("2026-10-05T17:02:00+02:00")
+        sent_at = datetime.fromisoformat("2026-10-05T16:20:00+02:00")
+        row = M3ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={"underload": "Po"},
+                                      data={}, status="SENT", sent_at=sent_at, gmail_message_id="old-message",
+                                      realization={"percent": 62}, realization_captured_at=sent_at)
+        db = AsyncMock()
+        with patch.object(api, "datetime") as clock, patch.object(service, "datetime") as service_clock, \
+             patch.object(api, "locked_report", new=AsyncMock(return_value=row)), patch.object(api, "add_audit_log"), \
+             patch.object(service, "build_task_data", new=AsyncMock(return_value={"untouched": []})), \
+             patch.object(service, "build_realization_capture", new=AsyncMock(return_value={"percent": 71})):
+            clock.now.return_value = service_clock.now.return_value = now
+            result = await api.generate(DAY, db, SimpleNamespace(id=uuid.uuid4()))
+        self.assertEqual(result["status"], "DRAFT")
+        self.assertEqual(result["realization"], {"percent": 71})
+        self.assertEqual(row.realization_captured_at, now)
+        self.assertEqual(result["manual_answers"], {"underload": "Po"})
+        self.assertEqual((row.sent_at, row.gmail_message_id), (sent_at, "old-message"))
+        db.commit.assert_awaited_once()
+
+    async def test_resend_route_refreshes_and_audits_every_delivery(self):
+        now = datetime.fromisoformat("2026-10-05T17:02:00+02:00")
+        row = M3ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={}, data={}, status="SENT",
+                                      generated_at=now, realization_captured_at=now)
+        with patch.object(api, "datetime") as clock, patch.object(api, "_by_id", new=AsyncMock(return_value=row)), \
+             patch.object(api, "locked_report", new=AsyncMock(return_value=row)), \
+             patch.object(api, "get_settings", new=AsyncMock(return_value=SimpleNamespace(recipients={"to": ["test@example.com"]}))), \
+             patch.object(api, "refresh_report", new=AsyncMock()) as refresh, \
+             patch.object(api, "send_report", new=AsyncMock()) as send, patch.object(api, "add_audit_log") as audit:
+            clock.now.return_value = now
+            for _ in range(3):
+                await api.send(row.id, AsyncMock(), SimpleNamespace(id=uuid.uuid4()))
+        self.assertEqual((refresh.await_count, send.await_count, audit.call_count), (3, 3, 3))
+
+    async def test_failed_resend_preserves_last_delivery_and_can_be_retried(self):
+        sent_at = datetime.fromisoformat("2026-10-05T16:20:00+02:00")
+        row = M3ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={}, data={},
+                                      status="SENT", sent_at=sent_at, gmail_message_id="previous-message")
+        gmail = SimpleNamespace(send_verified=AsyncMock(side_effect=[RuntimeError("SMTP unavailable"), {"id": "retry-message"}]))
+        with patch.object(service, "GmailService", return_value=gmail), \
+             patch("app.services.m3_reporting_points_attachments.report_attachments", return_value=[]):
+            with self.assertRaisesRegex(RuntimeError, "SMTP unavailable"):
+                await service.send_report(AsyncMock(), row, {"to": ["test@example.com"]})
+            self.assertEqual((row.status, row.sent_at, row.gmail_message_id), ("FAILED", sent_at, "previous-message"))
+            await service.send_report(AsyncMock(), row, {"to": ["test@example.com"]})
+        self.assertEqual((row.status, row.gmail_message_id, row.last_error), ("SENT", "retry-message", None))
 
     async def test_manual_send_attaches_the_entire_report_without_real_email(self):
         row = M3ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={"underload": "Koment"},
@@ -597,7 +668,7 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_api_preserves_other_answers_and_1615_capture_when_saving(self):
         row = M3ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers={"underload": "Ruaj kete"},
-                                      data={}, status="DRAFT", realization={"percent": 62},
+                                      data={}, status="SENT", realization={"percent": 62}, sent_at=datetime.now(timezone.utc),
                                       realization_captured_at=datetime.fromisoformat("2026-10-05T16:15:00+02:00"))
         db = SimpleNamespace(get=AsyncMock(return_value=row), refresh=AsyncMock(), commit=AsyncMock(), add=MagicMock())
         with patch.object(api, "locked_report", new=AsyncMock(return_value=row)):
@@ -605,6 +676,8 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
                                              db, SimpleNamespace(id=uuid.uuid4()))
         self.assertEqual(result["manual_answers"], {"underload": "Ruaj kete", "ga_reorganization": "Jo"})
         self.assertEqual(result["realization"], {"percent": 62})
+        self.assertEqual(result["status"], "DRAFT")
+        self.assertEqual(result["sent_at"], row.sent_at.isoformat())
         db.commit.assert_awaited_once()
 
     async def test_api_manual_send_reads_current_m3_recipients_and_requires_capture(self):

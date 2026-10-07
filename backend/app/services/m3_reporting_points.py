@@ -254,6 +254,11 @@ async def build_realization_capture(db: AsyncSession, day: date) -> dict:
             "comment": realization_comment(percent), "departments": departments}
 
 
+def realization_department_rows(realization: dict | None) -> list[dict]:
+    return [item for item in (realization or {}).get("departments", [])
+            if str(item.get("code") or "").strip().upper() not in {"GA", "HR"}]
+
+
 def realization_comment(percent: float | None) -> str:
     if percent is None:
         return "Mungojne te dhenat e plota per realizimin e stafit."
@@ -301,10 +306,13 @@ async def refresh_report(db: AsyncSession, row: M3ReportingPointsReport, now: da
 
 
 def report_payload(row: M3ReportingPointsReport) -> dict:
+    realization = row.realization
+    if realization and "departments" in realization:
+        realization = {**realization, "departments": realization_department_rows(realization)}
     return {"id": str(row.id), "report_date": row.report_date.isoformat(), "subject": subject_for(row.report_date),
             "manual_answers": row.manual_answers or {},
             "data": {key: [item for item in rows if item.get("status") != "DONE"] if key == "same_day" else rows
-                     for key, rows in (row.data or {}).items()}, "realization": row.realization,
+                     for key, rows in (row.data or {}).items()}, "realization": realization,
             "realization_captured_at": row.realization_captured_at.isoformat() if row.realization_captured_at else None,
             "generated_at": row.generated_at.isoformat() if row.generated_at else None, "status": row.status,
             "sent_at": row.sent_at.isoformat() if row.sent_at else None, "last_error": row.last_error}
@@ -456,10 +464,11 @@ def render_html(report: dict) -> str:
         percent = realization.get("percent")
         summary = f"{percent:g}%" if percent is not None else "Pa te dhena"
         realization_html = f"<p><strong>{summary}</strong> — {_cell(realization['comment'])}</p><p>Marrë në: {_cell(report.get('realization_captured_at'))}</p>"
-        if realization.get("departments"):
+        department_rows = realization_department_rows(realization)
+        if department_rows:
             realization_html += "<table width='100%' border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;border:1px solid #000'><tr>"
             realization_html += "".join(f"<th bgcolor='#e2e8f0' style='{cell_style};background-color:#e2e8f0'>{label}</th>" for label in ("DEPARTAMENTI", "REALIZIMI", "VLERËSIMI")) + "</tr>"
-            for item in realization["departments"]:
+            for item in department_rows:
                 value = item.get("percent")
                 fill = "#e2e8f0" if value is None else "#fee2e2" if value < 50 else "#dcfce7"
                 realization_html += (f"<tr><td style='{cell_style}'>{_cell(item['code'])}</td>"
@@ -490,7 +499,7 @@ def render_plain_text(report: dict) -> str:
             realization = report.get("realization")
             lines.append(f"{realization.get('percent')}% - {realization['comment']}" if realization and realization.get("percent") is not None
                          else "Pa te dhena te ruajtura ne 16:15.")
-            for item in (realization or {}).get("departments", []):
+            for item in realization_department_rows(realization):
                 value = item.get("percent")
                 lines.append(f"{item['code']}: " + (f"{value:g}%" if value is not None else "Pa të dhëna") + f" - {item['comment']}")
             continue
@@ -506,25 +515,21 @@ def render_plain_text(report: dict) -> str:
 
 
 async def send_report(db: AsyncSession, row: M3ReportingPointsReport, recipients: dict) -> None:
-    if row.status == "SENT":
-        return
     recipients = normalize_recipients(recipients)
     if not recipients["to"]:
         raise ValueError("Shto te pakten nje marres To perpara dergimit.")
     report = report_payload(row)
     try:
         gmail = GmailService()
-        message = await gmail.find_exact(report["subject"], recipients)
-        if not message:
-            html_body = render_html(report)
-            from app.services.m3_reporting_points_attachments import report_attachments
-            attachments = await asyncio.to_thread(report_attachments, report)
-            # A full TODO list can exceed an email client's inline display limit.
-            # Keep every row in a standalone copy as well as in the email body.
-            message = await gmail.send_verified(report["subject"], recipients,
-                                                 render_plain_text(report), html_body,
-                                                 attachments=[(f"pikat_m3_ga_{row.report_date.isoformat()}.html",
-                                                               html_body.encode("utf-8"), "text/html"), *attachments])
+        html_body = render_html(report)
+        from app.services.m3_reporting_points_attachments import report_attachments
+        attachments = await asyncio.to_thread(report_attachments, report)
+        # Every manual send is a new delivery, including an unchanged report.
+        # Keep every row in a standalone copy as well as in the email body.
+        message = await gmail.send_verified(report["subject"], recipients,
+                                             render_plain_text(report), html_body,
+                                             attachments=[(f"pikat_m3_ga_{row.report_date.isoformat()}.html",
+                                                           html_body.encode("utf-8"), "text/html"), *attachments])
     except Exception as exc:
         row.status, row.last_error = "FAILED", str(exc)[:2000]
         await db.commit()

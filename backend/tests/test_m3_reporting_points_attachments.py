@@ -29,7 +29,9 @@ def sample_report():
                      "ga_postponed": [{**base, "title": "DEADLINE IMPORTANT për GA", "status": "WAITING_CLIENT", "category": "Deadline Important"}]},
             "realization": {"percent": 62, "comment": "Jemi mbi 50%", "departments": [
                 {"department_id": "dev", "code": "DEV", "name": "Development", "percent": 75, "employees": 5, "comment": "Jemi mbi 50%"},
-                {"department_id": "gd", "code": "GD", "name": "Graphic Design", "percent": 25, "employees": 2, "comment": "Jemi nen 50%"}]},
+                {"department_id": "gd", "code": "GD", "name": "Graphic Design", "percent": 25, "employees": 2, "comment": "Jemi nen 50%"},
+                {"department_id": "ga", "code": "GA", "percent": None, "comment": "Hidden GA comment"},
+                {"department_id": "hr", "code": "HR", "percent": None, "comment": "Hidden HR comment"}]},
             "realization_captured_at": "2026-10-02T16:15:00+02:00"}
 
 
@@ -101,6 +103,12 @@ class ReportingPointsAttachmentTests(unittest.TestCase):
         self.assertIn("DET FT DHE PRJK PA PROGRES:", paragraphs)
         self.assertIn("75%", table_text)
         self.assertIn("25%", table_text)
+        self.assertNotIn("Hidden GA comment", table_text)
+        self.assertNotIn("Hidden HR comment", table_text)
+        self.assertEqual(len(report["realization"]["departments"]), 4)
+        for rendered in (report_service.render_html(report), report_service.render_plain_text(report)):
+            self.assertNotIn("Hidden GA comment", rendered)
+            self.assertNotIn("Hidden HR comment", rendered)
         self.assertIn("👁 Detyrë me status TODO", table_text)
         self.assertIn("! Detyrë me status IN_PROGRESS", table_text)
         self.assertIn("START: 02.10.2026\nDUE: 02.10.2026", table_text)
