@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from app.services import m3_reporting_points as report_service
 from app.services import m3_reporting_points_attachments as exports
+from app.services.reporting_points_excel import XLSX_MIME
 
 
 def sample_report():
@@ -165,7 +166,8 @@ class ReportingPointsAttachmentTests(unittest.TestCase):
 
     def test_attachment_formats_and_names(self):
         attachments = exports.report_attachments(sample_report())
-        self.assertEqual([item[2] for item in attachments], [exports.DOCX_MIME, "image/png"])
-        self.assertEqual([item[0] for item in attachments], ["PrimeFlow-PIKAT-M3-GA-2026-10-02.docx", "PrimeFlow-PIKAT-M3-GA-2026-10-02.png"])
+        self.assertEqual([item[2] for item in attachments], [exports.DOCX_MIME, "image/png", XLSX_MIME])
+        self.assertEqual([item[0] for item in attachments], ["PrimeFlow-PIKAT-M3-GA-2026-10-02.docx", "PrimeFlow-PIKAT-M3-GA-2026-10-02.png", "PrimeFlow-PIKAT-M3-GA-2026-10-02.xlsx"])
         self.assertTrue(attachments[0][1].startswith(b"PK"))
         self.assertTrue(attachments[1][1].startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertTrue(attachments[2][1].startswith(b"PK"))

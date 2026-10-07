@@ -23,6 +23,7 @@ from app.services import m3_reporting_points_scheduler as scheduler
 from app.services.daily_realization_metrics import calculate_daily_metrics
 from app.services.primeflow_report import GmailService, REPORT_SENDER_EMAIL
 from tests.test_migration_graph import migration_scripts
+from app.services.reporting_points_excel import XLSX_MIME
 
 DAY = date(2026, 10, 5)
 
@@ -597,7 +598,7 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call.args[1], recipients)
         self.assertEqual(call.kwargs["attachments"][0][1].decode(), call.args[3])
         self.assertEqual(call.kwargs["attachments"][0][2], "text/html")
-        self.assertEqual([a[2] for a in call.kwargs["attachments"]], ["text/html", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/png"])
+        self.assertEqual([a[2] for a in call.kwargs["attachments"]], ["text/html", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/png", XLSX_MIME])
         self.assertEqual(row.status, "SENT")
         db.commit.assert_awaited_once()
 
@@ -630,7 +631,7 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         message = BytesParser(policy=policy.default).parsebytes(sent.as_bytes())
         inline_html = message.get_body(preferencelist=("html",)).get_content()
         attachments = list(message.iter_attachments())
-        self.assertEqual([a.get_content_type() for a in attachments], ["text/html", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/png"])
+        self.assertEqual([a.get_content_type() for a in attachments], ["text/html", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/png", XLSX_MIME])
         from docx import Document
         from PIL import Image
         from io import BytesIO
@@ -640,6 +641,12 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Përgjigje me ë dhe ç", "\n".join(p.text for p in word.paragraphs))
         png = Image.open(BytesIO(attachments[2].get_payload(decode=True)))
         png.verify()
+        from openpyxl import load_workbook
+        excel = load_workbook(BytesIO(attachments[3].get_payload(decode=True))).active
+        excel_values = [cell.value for line in excel for cell in line]
+        self.assertIn("Detyrë e paprekur 119", excel_values)
+        self.assertIn("Përgjigje me ë dhe ç", excel_values)
+        self.assertEqual(attachments[3].get_filename(), "PrimeFlow-PIKAT-M3-GA-2026-10-05.xlsx")
         attachment = attachments[0]
         attached_html = attachment.get_payload(decode=True).decode("utf-8")
         self.assertEqual(inline_html.strip(), expected_html.strip())

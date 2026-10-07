@@ -14,6 +14,7 @@ from app.api.routers import api_router
 from app.config import settings
 from app.services.meetings_report_scheduler import run_meetings_report_scheduler_forever
 from app.services.m3_reporting_points_scheduler import run_m3_reporting_points_scheduler_forever
+from app.services.reporting_points_auto_scheduler import run_reporting_points_auto_scheduler_forever
 from app.services.meeting_reminder_scheduler import run_meeting_reminder_scheduler_forever
 from app.services.microsoft_calendar_sync_scheduler import run_microsoft_calendar_sync_forever
 from app.services.after_break_report_scheduler import run_after_break_report_scheduler_forever
@@ -52,6 +53,7 @@ scheduler_task: asyncio.Task | None = None
 system_task_daily_reconciliation_task: asyncio.Task | None = None
 meetings_report_scheduler_task: asyncio.Task | None = None
 m3_reporting_points_scheduler_task: asyncio.Task | None = None
+reporting_points_auto_scheduler_task: asyncio.Task | None = None
 after_break_report_scheduler_task: asyncio.Task | None = None
 end_week_bz_report_scheduler_task: asyncio.Task | None = None
 morning_report_scheduler_task: asyncio.Task | None = None
@@ -70,6 +72,7 @@ async def health() -> dict:
 @app.on_event("startup")
 async def _startup() -> None:
     global m3_reporting_points_scheduler_task
+    global reporting_points_auto_scheduler_task
     global today_print_report_freeze_scheduler_task
     global listener_task, scheduler_task, system_task_daily_reconciliation_task, meetings_report_scheduler_task, after_break_report_scheduler_task, end_week_bz_report_scheduler_task, morning_report_scheduler_task, tomorrow_print_report_scheduler_task, today_print_report_scheduler_task, std_feedback_sync_task, microsoft_calendar_sync_task, meeting_reminder_scheduler_task
     if settings.REDIS_ENABLED:
@@ -82,6 +85,7 @@ async def _startup() -> None:
     if settings.REPORT_SCHEDULERS_ENABLED:
         today_print_report_freeze_scheduler_task = asyncio.create_task(run_today_print_report_freeze_scheduler_forever())
         m3_reporting_points_scheduler_task = asyncio.create_task(run_m3_reporting_points_scheduler_forever())
+        reporting_points_auto_scheduler_task = asyncio.create_task(run_reporting_points_auto_scheduler_forever())
         meetings_report_scheduler_task = asyncio.create_task(run_meetings_report_scheduler_forever())
         after_break_report_scheduler_task = asyncio.create_task(run_after_break_report_scheduler_forever())
         end_week_bz_report_scheduler_task = asyncio.create_task(run_end_week_bz_report_scheduler_forever())
@@ -101,8 +105,16 @@ async def _startup() -> None:
 @app.on_event("shutdown")
 async def _shutdown() -> None:
     global m3_reporting_points_scheduler_task
+    global reporting_points_auto_scheduler_task
     global today_print_report_freeze_scheduler_task
     global listener_task, scheduler_task, system_task_daily_reconciliation_task, meetings_report_scheduler_task, after_break_report_scheduler_task, end_week_bz_report_scheduler_task, morning_report_scheduler_task, tomorrow_print_report_scheduler_task, today_print_report_scheduler_task, std_feedback_sync_task, microsoft_calendar_sync_task, meeting_reminder_scheduler_task
+    if reporting_points_auto_scheduler_task is not None:
+        reporting_points_auto_scheduler_task.cancel()
+        try:
+            await reporting_points_auto_scheduler_task
+        except asyncio.CancelledError:
+            pass
+        reporting_points_auto_scheduler_task = None
     if today_print_report_freeze_scheduler_task is not None:
         today_print_report_freeze_scheduler_task.cancel()
         try:

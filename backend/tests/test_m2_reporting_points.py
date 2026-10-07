@@ -17,6 +17,8 @@ from app.api.routers import m2_reporting_points as api
 from app.models.m2_reporting_points import M2ReportingPointsReport
 from app.services import m2_reporting_points as service
 from app.models.enums import UserRole
+from app.services.reporting_points_excel import XLSX_MIME
+from openpyxl import load_workbook
 
 DAY = date(2026, 10, 6)
 
@@ -242,7 +244,7 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
         assert word.tables[0].rows[2].cells[6].text == priority["title"]
         assert word.tables[0].rows[2].cells[7].text == "SOT"
 
-    async def test_email_preparation_uses_full_html_word_and_png_without_real_email(self):
+    async def test_email_preparation_uses_full_html_word_png_and_excel_without_real_email(self):
         fixture = complete_export_fixture()
         row = M2ReportingPointsReport(id=uuid.uuid4(), report_date=DAY, manual_answers=fixture["manual_answers"], data=fixture["data"], status="DRAFT")
         gmail = SimpleNamespace(find_exact=AsyncMock(return_value=None), send_verified=AsyncMock(return_value={"id": "mock-message"}))
@@ -252,7 +254,11 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
         args = gmail.send_verified.call_args.args
         attachments = gmail.send_verified.call_args.kwargs["attachments"]
         assert "TOTALI/DËRGUAR: 4/2" in args[2] and "TOTALI/DËRGUAR: 4/2" in args[3]
-        assert {name.rsplit(".", 1)[-1] for name, _, _ in attachments} == {"html", "docx", "png"}
+        assert {name.rsplit(".", 1)[-1] for name, _, _ in attachments} == {"html", "docx", "png", "xlsx"}
+        name, content, mime = next(item for item in attachments if item[0].endswith(".xlsx"))
+        assert name == f"pikat_m2_{DAY.isoformat()}.xlsx" and mime == XLSX_MIME
+        sheet = load_workbook(io.BytesIO(content)).active
+        assert "TOTALI/DËRGUAR: 4/2" in [cell.value for row in sheet for cell in row]
         assert next(content for name, content, _ in attachments if name.endswith(".html")).decode("utf-8") == args[3]
         assert row.status == "SENT" and row.gmail_message_id == "mock-message"
         db.commit.assert_awaited_once()

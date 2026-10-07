@@ -10,9 +10,10 @@ from app.db import engine
 EXPECTED_COLUMNS = {
     *(("m3_reporting_points_reports", column) for column in (
         "id", "report_date", "manual_answers", "data", "realization",
-        "realization_captured_at", "generated_at", "status", "sent_at",
+        "realization_captured_at", "generated_at", "status", "sent_at", "auto_sent_at",
         "gmail_message_id", "last_error", "updated_by", "created_at", "updated_at",
     )),
+    ("m2_reporting_points_reports", "auto_sent_at"),
     ("ga_notes", "knowledge_tester_id"),
     ("knowledge_prompts", "tester_id"),
     ("knowledge_prompts", "test_task_id"),

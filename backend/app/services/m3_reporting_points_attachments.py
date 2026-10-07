@@ -366,6 +366,9 @@ def render_png(report: dict, *, blocks: list[dict] | None = None) -> bytes:
 
 
 def report_attachments(report: dict) -> list[tuple[str, bytes, str]]:
+    from app.services.reporting_points_excel import render_xlsx, XLSX_MIME
+
     filename = f"PrimeFlow-PIKAT-M3-GA-{report['report_date']}"
     return [(filename + ".docx", render_docx(report), DOCX_MIME),
-            (filename + ".png", render_png(report), "image/png")]
+            (filename + ".png", render_png(report), "image/png"),
+            (filename + ".xlsx", render_xlsx(export_blocks(report), sheet_name="PIKAT M3 dhe GA"), XLSX_MIME)]

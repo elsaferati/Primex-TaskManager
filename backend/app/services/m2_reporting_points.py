@@ -76,8 +76,12 @@ async def get_settings(db: AsyncSession) -> AfterBreakReportSettings:
     return row
 
 
-async def locked_report(db: AsyncSession, day: date) -> M2ReportingPointsReport:
-    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": f"m2_reporting_points|{day.isoformat()}"})
+async def locked_report(db: AsyncSession, day: date, *, wait: bool = True) -> M2ReportingPointsReport | None:
+    function = "pg_advisory_xact_lock" if wait else "pg_try_advisory_xact_lock"
+    acquired = (await db.execute(text(f"SELECT {function}(hashtext(:key))"),
+                                {"key": f"m2_reporting_points|{day.isoformat()}"})).scalar()
+    if not wait and not acquired:
+        return None
     row = (await db.execute(select(M2ReportingPointsReport).where(M2ReportingPointsReport.report_date == day))).scalar_one_or_none()
     if row is None:
         row = M2ReportingPointsReport(report_date=day, manual_answers={}, data={}, status="DRAFT")
@@ -86,8 +90,8 @@ async def locked_report(db: AsyncSession, day: date) -> M2ReportingPointsReport:
     return row
 
 
-async def refresh_report(db: AsyncSession, row: M2ReportingPointsReport) -> None:
-    now = datetime.now(report_timezone())
+async def refresh_report(db: AsyncSession, row: M2ReportingPointsReport, now: datetime | None = None) -> None:
+    now = (now or datetime.now(report_timezone())).astimezone(report_timezone())
     if row.report_date != now.date():
         raise ValueError("Raportet historike perdorin te dhenat e ruajtura te asaj dite.")
     row.data = await build_task_data(db, row.report_date)
@@ -224,13 +228,15 @@ def render_plain_text(report):
 
 def report_attachments(report):
     from app.services.m3_reporting_points_attachments import render_docx, render_png, DOCX_MIME
+    from app.services.reporting_points_excel import render_xlsx, XLSX_MIME
     blocks = export_blocks(report)
     stem = f"pikat_m2_{report['report_date']}"
     return [(stem + ".docx", render_docx(report, blocks=blocks), DOCX_MIME),
-            (stem + ".png", render_png(report, blocks=blocks), "image/png")]
+            (stem + ".png", render_png(report, blocks=blocks), "image/png"),
+            (stem + ".xlsx", render_xlsx(blocks, sheet_name="PIKAT M2"), XLSX_MIME)]
 
 
-async def send_report(db, row, recipients):
+async def send_report(db, row, recipients, *, automatic: bool = False):
     recipients = normalize_recipients(recipients)
     if not recipients["to"]:
         raise ValueError("Shto te pakten nje marres To ne konfigurimin e M2.")
@@ -248,4 +254,6 @@ async def send_report(db, row, recipients):
         raise
     row.status, row.sent_at = "SENT", datetime.now(report_timezone())
     row.gmail_message_id, row.last_error = message.get("id"), None
+    if automatic:
+        row.auto_sent_at = row.sent_at
     await db.commit()

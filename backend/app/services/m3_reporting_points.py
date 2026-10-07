@@ -521,7 +521,7 @@ def render_plain_text(report: dict) -> str:
     return "\n\n".join(lines)
 
 
-async def send_report(db: AsyncSession, row: M3ReportingPointsReport, recipients: dict) -> None:
+async def send_report(db: AsyncSession, row: M3ReportingPointsReport, recipients: dict, *, automatic: bool = False) -> None:
     recipients = normalize_recipients(recipients)
     if not recipients["to"]:
         raise ValueError("Shto te pakten nje marres To perpara dergimit.")
@@ -543,4 +543,6 @@ async def send_report(db: AsyncSession, row: M3ReportingPointsReport, recipients
         raise
     row.status, row.sent_at = "SENT", datetime.now(report_timezone())
     row.gmail_message_id, row.last_error = message.get("id"), None
+    if automatic:
+        row.auto_sent_at = row.sent_at
     await db.commit()
