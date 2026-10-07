@@ -8,6 +8,9 @@ from app.db import engine
 
 
 EXPECTED_COLUMNS = {
+    *(("reporting_points_settings", column) for column in (
+        "report_type", "is_active", "send_time", "weekdays", "recipients", "manual_recipients", "updated_by", "updated_at",
+    )),
     *(("m3_reporting_points_reports", column) for column in (
         "id", "report_date", "manual_answers", "data", "realization",
         "realization_captured_at", "generated_at", "status", "sent_at", "auto_sent_at",

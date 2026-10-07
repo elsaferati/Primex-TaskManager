@@ -7,7 +7,6 @@ from datetime import date, datetime
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.after_break_report_settings import AfterBreakReportSettings
 from app.models.m2_reporting_points import M2ReportingPointsReport
 from app.services.after_break_report import UNFINISHED_PRIORITY_TABLE_LABEL, build_unfinished_priority_task_rows
 from app.services.daily_realization_events import semantic_local_day
@@ -69,11 +68,11 @@ async def build_task_data(db: AsyncSession, day: date) -> dict:
     return data
 
 
-async def get_settings(db: AsyncSession) -> AfterBreakReportSettings:
-    row = (await db.execute(select(AfterBreakReportSettings).order_by(AfterBreakReportSettings.created_at))).scalars().first()
-    if row is None:
-        raise ValueError("Konfiguro marresit e raportit M2 perpara dergimit.")
-    return row
+async def get_settings(db: AsyncSession):
+    from types import SimpleNamespace
+    from app.services.reporting_points_settings import get_delivery_settings, manual_recipients
+    settings = await get_delivery_settings(db, "M2")
+    return SimpleNamespace(recipients=await manual_recipients(db, "M2", settings))
 
 
 async def locked_report(db: AsyncSession, day: date, *, wait: bool = True) -> M2ReportingPointsReport | None:

@@ -6,13 +6,20 @@ generate, preview and browse history. ADMIN, MANAGER and the existing designated
 report manager can also edit the four manual answers and send it.
 The sidebar lists it under Reports > Meetings and in GA's report shortcuts.
 
-M3 is sent automatically at **16:20 Monday–Friday** in the report timezone
+M3 defaults to automatic delivery at **16:20 Monday–Friday** in the report timezone
 (`PRIMEFLOW_REPORT_TIMEZONE`, default Europe/Tirane), to **ga@primexeu.com** and
 **info@primexeu.com**. The shared reporting-points delivery loop starts only when
 `REPORT_SCHEDULERS_ENABLED` is true. It generates today's report even if nobody
 opened the page, refreshes its task tables and post-16:15 realization, and retains
 saved manual answers. Unanswered questions keep their existing missing-answer text.
 The capture-only 16:15 loop remains separate and still sends no email.
+The toolbar, metadata and email configuration sit inside a **+ / −** management
+panel, collapsed by default. Report managers can save automatic enablement, time,
+weekdays and To/Cc/Bcc recipients, plus separate manual recipients. M3 automatic
+times cannot be earlier than 16:15, because the send must include realization.
+`GET/PUT /m3-reporting-points/settings` stores a dedicated M3 configuration in
+`reporting_points_settings`, independent of M2 and the original Meetings report.
+The scheduler reads the saved configuration on each tick, including custom weekdays.
 
 The daily database lock covers refresh and delivery across API processes.
 Successful automatic delivery commits `auto_sent_at` with the send result;
@@ -21,7 +28,8 @@ automatic send, even if a user subsequently edits or regenerates the report.
 After downtime, the loop catches up only today's due report, never historical days.
 
 Manual sending remains available after the day's realization capture exists,
-including after the automatic send, and reads current M3 recipient settings.
+including after the automatic send, and uses the manual recipients in this panel.
+Until the first settings save, manual recipients retain the previous M3 settings.
 Each manual click sends again, refreshes today's data and retains the automatic
 marker. Manual sends before 16:20 do not cancel the scheduled automatic delivery.
 Emails include the complete HTML report as an attachment, preserving all TODO
@@ -132,10 +140,10 @@ departments without active staff or daily tasks. Departments without a metric
 denominator remain unavailable; they are never shown as zero. Older
 captures without department breakdowns are not retroactively recomputed.
 
-Apply migration `0144_reporting_points_auto_send` through normal deployment before
-restarting the backend. It adds nullable automatic-send timestamps to M2 and M3
-without changing existing reports or answers. Existing SMTP credentials are reused;
-automatic recipients are fixed separately from the manual recipient settings.
+Apply migration `0145_reporting_points_settings` through normal deployment before
+restarting the backend. It seeds the existing automatic defaults without changing
+reports, answers or the legacy manual recipient configurations. Existing SMTP
+credentials are reused. Future edits apply to this reporting-points report only.
 
 Validation:
 

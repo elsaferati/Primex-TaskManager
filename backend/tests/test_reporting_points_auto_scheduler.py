@@ -14,6 +14,7 @@ from app.models.m2_reporting_points import M2ReportingPointsReport
 from app.models.m3_reporting_points import M3ReportingPointsReport
 from app.services import m2_reporting_points as m2, m3_reporting_points as m3
 from app.services import reporting_points_auto_scheduler as scheduler
+from app.services.reporting_points_settings import default_settings
 from tests.test_migration_graph import migration_scripts
 
 DAY = date(2026, 10, 5)
@@ -33,6 +34,10 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         context.__aenter__ = AsyncMock(return_value=self.db)
         context.__aexit__ = AsyncMock(return_value=False)
         self.session = stack.enter_context(patch.object(scheduler, "SessionLocal", return_value=context))
+        self.settings = {name: default_settings(name) for name in ("M2", "M3")}
+        async def configured(db, name, **kwargs):
+            return self.settings[name]
+        self.get_settings = stack.enter_context(patch.object(scheduler, "get_delivery_settings", new=AsyncMock(side_effect=configured)))
         self.locks, self.refreshes, self.sends = {}, {}, {}
         for service in (m2, m3):
             self.locks[service] = stack.enter_context(patch.object(service, "locked_report", new=AsyncMock(return_value=self.rows[service])))
@@ -60,8 +65,6 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await scheduler.run_reporting_points_auto_scheduler_once(datetime.fromisoformat(stamp)), any(expected))
                 for service, due in zip((m2, m3), expected):
                     self.assertEqual(self.sends[service].await_count, int(due))
-                if not any(expected):
-                    self.session.assert_not_called()
 
     async def test_refreshes_even_after_manual_send_and_uses_exact_automatic_recipients(self):
         with ExitStack() as stack:
@@ -136,6 +139,29 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
             for service in (m2, m3):
                 self.assertEqual(self.sends[service].await_count, 2)
 
+    async def test_saved_settings_change_time_recipients_days_and_enablement(self):
+        with ExitStack() as stack:
+            self.setup_scheduler(stack)
+            settings = self.settings["M2"]
+            settings.send_time = datetime.strptime("14:00", "%H:%M").time()
+            settings.weekdays = [5]
+            settings.recipients = {"to": ["changed@example.com"], "cc": ["copy@example.com"], "bcc": ["hidden@example.com"]}
+            self.settings["M3"].is_active = False
+            self.assertFalse(await scheduler.run_reporting_points_auto_scheduler_once(datetime.fromisoformat("2026-10-05T16:20:00+02:00")))
+            self.assertFalse(await scheduler.run_reporting_points_auto_scheduler_once(datetime.fromisoformat("2026-10-03T13:59:00+02:00")))
+            self.assertTrue(await scheduler.run_reporting_points_auto_scheduler_once(datetime.fromisoformat("2026-10-03T14:00:00+02:00")))
+            self.assertEqual(self.sends[m2].await_args.args[2], settings.recipients)
+            self.sends[m3].assert_not_awaited()
+
+    async def test_busy_configuration_lock_skips_sending(self):
+        with ExitStack() as stack:
+            self.setup_scheduler(stack)
+            self.get_settings.side_effect = None
+            self.get_settings.return_value = None
+            self.assertFalse(await scheduler.run_reporting_points_auto_scheduler_once(datetime.fromisoformat("2026-10-05T16:20:00+02:00")))
+            for service in (m2, m3):
+                self.locks[service].assert_not_awaited()
+
 
 @pytest.mark.parametrize("service,model,export_path", [
     (m2, M2ReportingPointsReport, "app.services.m2_reporting_points.report_attachments"),
@@ -153,9 +179,9 @@ def test_auto_marker_commits_with_success_and_manual_send_remains_independent(se
         gmail = SimpleNamespace(send_verified=AsyncMock(side_effect=[RuntimeError("SMTP failure"), {"id": "auto"}, {"id": "manual"}]))
         with patch.object(service, "GmailService", return_value=gmail), patch(export_path, return_value=[]):
             with pytest.raises(RuntimeError, match="SMTP failure"):
-                await service.send_report(db, row, {"to": list(scheduler.AUTO_RECIPIENTS)}, automatic=True)
+                await service.send_report(db, row, default_settings("M2").recipients, automatic=True)
             assert row.auto_sent_at is None and row.sent_at == previous_manual
-            await service.send_report(db, row, {"to": list(scheduler.AUTO_RECIPIENTS)}, automatic=True)
+            await service.send_report(db, row, default_settings("M2").recipients, automatic=True)
             automatic_time = row.auto_sent_at
             assert automatic_time == row.sent_at
             # Manual sends remain available, using their configured recipients.

@@ -18,12 +18,26 @@ from app.models.user import User
 from app.services.audit import add_audit_log
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import report_timezone
+from app.services.reporting_points_settings import DeliverySettingsPayload, read_settings, save_settings
 from app.services.m2_reporting_points import (
     MANUAL_POINTS, get_settings, locked_report, refresh_report, render_html,
     render_plain_text, report_payload, send_report, report_attachments,
 )
 
 router = APIRouter()
+
+@router.get("/settings")
+async def delivery_settings(db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)) -> dict:
+    return await read_settings(db, "M2")
+
+
+@router.put("/settings")
+async def update_delivery_settings(payload: DeliverySettingsPayload, db: AsyncSession = Depends(get_db),
+                                   user: User = Depends(require_report_manager)) -> dict:
+    try:
+        return await save_settings(db, "M2", payload, user.id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 class ManualAnswersPayload(BaseModel):
@@ -64,7 +78,7 @@ async def recipients(db: AsyncSession = Depends(get_db), _: User = Depends(requi
         settings = await get_settings(db)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-    return {"recipients": normalize_recipients(settings.recipients), "delivery": "MANUAL_ONLY"}
+    return {"recipients": normalize_recipients(settings.recipients), "delivery": "MANUAL_AVAILABLE"}
 
 
 @router.get("/history")

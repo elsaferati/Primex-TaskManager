@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { clearSavedManualDraft, readManualDraft, writeManualDraft } from "@/lib/m3-reporting-points-draft"
+import { ReportingPointsManagement } from "@/components/reporting-points-management"
 import { M3ReportingPointsView, MANUAL_POINTS, reportDate, reportTime, type ManualAnswers, type ManualKey, type ReportingPointsReport } from "@/components/m3-reporting-points-view"
 
 const API = "/m3-reporting-points"
@@ -193,6 +194,7 @@ export default function M3ReportingPointsPage() {
     <Tabs value={tab} onValueChange={(value) => { setTab(value); if (value === "history") void loadHistory() }} className="gap-5">
       <div className="flex flex-wrap items-center gap-2"><TabsList className="h-10 rounded-md"><TabsTrigger value="report"><Pencil />Raporti</TabsTrigger><TabsTrigger value="history"><History />Historiku</TabsTrigger></TabsList>{tab === "report" ? <Button variant={gaOnly ? "default" : "outline"} className={gaOnly ? "border-violet-700 bg-violet-700 text-white hover:bg-violet-800" : "border-violet-300 bg-violet-100 text-violet-900 hover:bg-violet-200"} aria-pressed={gaOnly} onClick={() => setGaOnly((value) => !value)}>GA</Button> : null}</div>
       <TabsContent value="report" className="space-y-5">
+        <ReportingPointsManagement api={API} reportType="M3" canManage={canManage} onRecipientsChange={setRecipients}>
         <div className="grid gap-4 border-y bg-slate-50/70 px-4 py-4 lg:grid-cols-[190px_minmax(320px,1fr)_auto]">
           <div><Label htmlFor="report-day">Data e raportit</Label><input className="mt-1 h-9 w-full rounded-md border border-input bg-white px-3 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" id="report-day" type="date" value={day} max={today()} disabled={!!busy || savingAnswers}
             onChange={(event) => { if (dirty) toast.error("Prit ruajtjen e përgjigjeve përpara ndryshimit të datës."); else if (event.target.value) setDay(event.target.value) }} /></div>
@@ -217,6 +219,7 @@ export default function M3ReportingPointsPage() {
             </div>
           })}
         </div> : null}
+        </ReportingPointsManagement>
         {canManage && report ? <p role="status" className={`text-xs ${saveError ? "text-red-700" : "text-muted-foreground"}`}>
           {saveError ? `Ruajtja automatike dështoi: ${saveError} Provo Ruaj përgjigjet.` : savingAnswers || dirty ? "Duke ruajtur përgjigjet…" : "Përgjigjet ruhen automatikisht për datën e këtij raporti."}
         </p> : null}

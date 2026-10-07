@@ -370,11 +370,11 @@ class ReportPersistenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_m2_recipient_configuration_is_used(self):
         db = AsyncMock()
         result = MagicMock()
-        result.scalars.return_value.first.return_value = SimpleNamespace(recipients={"to": ["m2@example.com"]})
+        result.scalars.return_value.first.return_value = SimpleNamespace(manual_recipients={"to": ["m2@example.com"]})
         db.execute.return_value = result
         response = await api.recipients(db, SimpleNamespace())
         assert response["recipients"]["to"] == ["m2@example.com"]
-        assert "after_break_report_settings" in str(db.execute.call_args.args[0])
+        assert "reporting_points_settings" in str(db.execute.call_args.args[0])
 
 
 def test_staff_can_read_but_cannot_edit_send_or_read_recipients():

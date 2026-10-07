@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { clearSavedManualDraft, readManualDraft, writeManualDraft } from "@/lib/m2-reporting-points-draft"
 import { reportResponseJson as responseJson } from "@/lib/report-response"
+import { ReportingPointsManagement } from "@/components/reporting-points-management"
 import { M2ReportingPointsView, reportDate, reportTime, type ManualAnswers, type ManualKey, type ReportingPointsReport } from "@/components/m2-reporting-points-view"
 
 const API = "/m2-reporting-points"
@@ -197,6 +198,7 @@ export default function M2ReportingPointsPage() {
     <Tabs value={tab} onValueChange={(value) => { setTab(value); if (value === "history") void loadHistory() }} className="gap-5">
       <div className="flex flex-wrap items-center gap-2"><TabsList className="h-10 rounded-md"><TabsTrigger value="report"><Pencil />Raporti</TabsTrigger><TabsTrigger value="history"><History />Historiku</TabsTrigger></TabsList></div>
       <TabsContent value="report" className="space-y-5">
+        <ReportingPointsManagement api={API} reportType="M2" canManage={canManage} onRecipientsChange={setRecipients}>
         <div className="grid gap-4 border-y bg-slate-50/70 px-4 py-4 lg:grid-cols-[190px_minmax(320px,1fr)_auto]">
           <div><Label htmlFor="report-day">Data e raportit</Label><input className="mt-1 h-9 w-full rounded-md border border-input bg-white px-3 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" id="report-day" type="date" value={day} max={today()} disabled={!!busy || savingAnswers}
             onChange={(event) => { if (dirty) toast.error("Prit ruajtjen e përgjigjeve përpara ndryshimit të datës."); else if (event.target.value) setDay(event.target.value) }} /></div>
@@ -221,6 +223,7 @@ export default function M2ReportingPointsPage() {
             </div>
           })}
         </div> : null}
+        </ReportingPointsManagement>
         {canManage && report ? <p role="status" className={`text-xs ${saveError ? "text-red-700" : "text-muted-foreground"}`}>
           {saveError ? `Ruajtja automatike dështoi: ${saveError} Provo Ruaj përgjigjet.` : savingAnswers || dirty ? "Duke ruajtur përgjigjet…" : "Përgjigjet ruhen automatikisht për datën e këtij raporti."}
         </p> : null}

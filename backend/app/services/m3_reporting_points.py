@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.audit_log import AuditLog
 from app.models.department import Department
 from app.models.m3_reporting_points import M3ReportingPointsReport
-from app.models.meetings_report_settings import MeetingsReportSettings
 from app.models.project import Project
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
@@ -273,11 +272,11 @@ def realization_comment(percent: float | None) -> str:
     return f"Jemi {'mbi' if percent > 50 else 'nen'} 50% me {abs(percent - 50):g} pike perqindjeje."
 
 
-async def get_settings(db: AsyncSession) -> MeetingsReportSettings:
-    row = (await db.execute(select(MeetingsReportSettings).order_by(MeetingsReportSettings.created_at))).scalars().first()
-    if row is None:
-        raise ValueError("Konfiguro marresit e raportit ekzistues M3 perpara dergimit.")
-    return row
+async def get_settings(db: AsyncSession):
+    from types import SimpleNamespace
+    from app.services.reporting_points_settings import get_delivery_settings, manual_recipients
+    settings = await get_delivery_settings(db, "M3")
+    return SimpleNamespace(recipients=await manual_recipients(db, "M3", settings))
 
 
 async def locked_report(db: AsyncSession, day: date, *, wait: bool = True) -> M3ReportingPointsReport | None:

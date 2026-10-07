@@ -34,6 +34,7 @@ from app.models.meetings_report_draft import MeetingsReportDraft
 from app.models.meetings_report_settings import MeetingsReportSettings
 from app.models.m3_reporting_points import M3ReportingPointsReport
 from app.models.m2_reporting_points import M2ReportingPointsReport
+from app.models.reporting_points_settings import ReportingPointsSettings
 from app.models.after_break_report_draft import AfterBreakReportDraft
 from app.models.after_break_report_settings import AfterBreakReportSettings
 from app.models.end_week_bz_report_draft import EndWeekBzReportDraft
@@ -110,6 +111,7 @@ from app.models.weekly_planning_audit import (
 )
 
 __all__ = [
+    "ReportingPointsSettings",
     "AttendanceLog",
     "AuditLog",
     "Board",

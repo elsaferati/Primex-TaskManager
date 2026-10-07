@@ -1,29 +1,29 @@
-"""Weekday delivery of the separate reporting-points M2 and M3 reports."""
+"""Deliver M2 and M3 reporting points using their saved email settings."""
 from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, time
+from datetime import datetime
 
 from app.db import SessionLocal
 from app.services import m2_reporting_points as m2, m3_reporting_points as m3
 from app.services.primeflow_report import report_timezone
+from app.services.reporting_points_settings import get_delivery_settings
 
 logger = logging.getLogger(__name__)
-AUTO_RECIPIENTS = ("ga@primexeu.com", "info@primexeu.com")
-AUTO_SEND_TIMES = (("M2", time(12, 15), m2), ("M3", time(16, 20), m3))
+REPORT_SERVICES = (("M2", m2), ("M3", m3))
 
 
 async def run_reporting_points_auto_scheduler_once(now: datetime | None = None) -> bool:
     local = (now or datetime.now(report_timezone())).astimezone(report_timezone())
-    if local.weekday() >= 5:
-        return False
     sent = False
-    for name, scheduled_time, service in AUTO_SEND_TIMES:
-        if local.time().replace(tzinfo=None) < scheduled_time:
-            continue
+    for name, service in REPORT_SERVICES:
         try:
             async with SessionLocal() as db:
+                settings = await get_delivery_settings(db, name, lock=True, wait=False)
+                if (settings is None or not settings.is_active or local.weekday() not in settings.weekdays
+                        or local.time().replace(tzinfo=None) < settings.send_time):
+                    continue
                 # Use the same daily lock as manual saves, capture and sends.
                 # Keep it through refresh, SMTP delivery and the marker commit.
                 row = await service.locked_report(db, local.date(), wait=False)
@@ -37,9 +37,9 @@ async def run_reporting_points_auto_scheduler_once(now: datetime | None = None) 
                     row.status, row.last_error = "FAILED", str(exc)[:2000]
                     await db.commit()
                     raise
-                await service.send_report(db, row, {"to": list(AUTO_RECIPIENTS), "cc": [], "bcc": []}, automatic=True)
+                await service.send_report(db, row, settings.recipients, automatic=True)
                 sent = True
-                logger.info("reporting_points_auto_sent report=%s day=%s slot=%s", name, local.date(), scheduled_time)
+                logger.info("reporting_points_auto_sent report=%s day=%s slot=%s", name, local.date(), settings.send_time)
         except asyncio.CancelledError:
             raise
         except Exception:
