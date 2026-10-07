@@ -10,6 +10,7 @@ from app import main
 REPORT_LOOPS = (
     "meetings_report",
     "m3_reporting_points",
+    "reporting_points_auto",
     "after_break_report",
     "end_week_bz_report",
     "morning_report",

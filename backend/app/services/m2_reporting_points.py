@@ -7,8 +7,8 @@ from datetime import date, datetime
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.after_break_report_settings import AfterBreakReportSettings
 from app.models.m2_reporting_points import M2ReportingPointsReport
+from app.services.after_break_report import UNFINISHED_PRIORITY_TABLE_LABEL, build_unfinished_priority_task_rows
 from app.services.daily_realization_events import semantic_local_day
 from app.services import m3_reporting_points as m3
 from app.services.meetings_report import _clean_task_title, _m3_am_pm_label, _m3_task_type_label
@@ -19,8 +19,9 @@ from app.services.task_marker import active_one_h_marker, active_one_h_marker_by
 TITLE = "PIKAT PER RAPORTIM M2"
 MANUAL_POINTS = {"reorganization": "1. RIORGANIZIM? (PARA PAUZES)- PAS PAUZES ,TAKIM INT, NDARJE E DET?"}
 AUTO_TITLES = {
-    "postponed": "2. A KA DET QE SHTYHEN (SOT/SOT) OSE DEADLINE?",
-    "delivery": "3. A JANE DORZUAR TE GJITHA CKA ESHTE DASHUR M2?",
+    "unfinished_priority": f"2. {UNFINISHED_PRIORITY_TABLE_LABEL}",
+    "postponed": "3. A KA DET QE SHTYHEN (SOT/SOT) OSE DEADLINE?",
+    "delivery": "4. A JANE DORZUAR TE GJITHA CKA ESHTE DASHUR M2?",
 }
 DELIVERY_MARKERS = {"M2", "M2_M3"}
 
@@ -56,18 +57,30 @@ def select_task_sections(tasks, events, day: date) -> dict:
 
 
 async def build_task_data(db: AsyncSession, day: date) -> dict:
-    return await m3.build_task_data(db, day, section_selector=select_task_sections)
+    data = await m3.build_task_data(db, day, section_selector=select_task_sections)
+    rows = await build_unfinished_priority_task_rows(db, day)
+    data["unfinished_priority"] = [
+        {"assignees": row[1], "department": row[2], "am_pm": row[3], "status": row[4],
+         "priority": row[5], "task_type": row[6], "title": row[7], "due_label": row[8],
+         "deadline_important": "DEADLINE" in row[5], "eight_am": "08:00" in row[5]}
+        for row in rows
+    ]
+    return data
 
 
-async def get_settings(db: AsyncSession) -> AfterBreakReportSettings:
-    row = (await db.execute(select(AfterBreakReportSettings).order_by(AfterBreakReportSettings.created_at))).scalars().first()
-    if row is None:
-        raise ValueError("Konfiguro marresit e raportit M2 perpara dergimit.")
-    return row
+async def get_settings(db: AsyncSession):
+    from types import SimpleNamespace
+    from app.services.reporting_points_settings import get_delivery_settings, manual_recipients
+    settings = await get_delivery_settings(db, "M2")
+    return SimpleNamespace(recipients=await manual_recipients(db, "M2", settings))
 
 
-async def locked_report(db: AsyncSession, day: date) -> M2ReportingPointsReport:
-    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": f"m2_reporting_points|{day.isoformat()}"})
+async def locked_report(db: AsyncSession, day: date, *, wait: bool = True) -> M2ReportingPointsReport | None:
+    function = "pg_advisory_xact_lock" if wait else "pg_try_advisory_xact_lock"
+    acquired = (await db.execute(text(f"SELECT {function}(hashtext(:key))"),
+                                {"key": f"m2_reporting_points|{day.isoformat()}"})).scalar()
+    if not wait and not acquired:
+        return None
     row = (await db.execute(select(M2ReportingPointsReport).where(M2ReportingPointsReport.report_date == day))).scalar_one_or_none()
     if row is None:
         row = M2ReportingPointsReport(report_date=day, manual_answers={}, data={}, status="DRAFT")
@@ -76,8 +89,8 @@ async def locked_report(db: AsyncSession, day: date) -> M2ReportingPointsReport:
     return row
 
 
-async def refresh_report(db: AsyncSession, row: M2ReportingPointsReport) -> None:
-    now = datetime.now(report_timezone())
+async def refresh_report(db: AsyncSession, row: M2ReportingPointsReport, now: datetime | None = None) -> None:
+    now = (now or datetime.now(report_timezone())).astimezone(report_timezone())
     if row.report_date != now.date():
         raise ValueError("Raportet historike perdorin te dhenat e ruajtura te asaj dite.")
     row.data = await build_task_data(db, row.report_date)
@@ -96,6 +109,10 @@ def table_groups(report, key):
 
 
 def table_columns(key, movement=""):
+    if key == "unfinished_priority":
+        return [("nr", "NR", 28), ("assignees", "KUSH", 72), ("department", "DEP", 44),
+                ("am_pm", "AM/PM", 60), ("priority", "LLOJI", 120), ("task_type", "TIPI", 48),
+                ("title", "TITULLI", 450), ("due_label", "DUE DATE", 80)]
     if key == "postponed":
         return [(field, label, 60 if field == "am_pm" else width) for field, label, width in m3.report_table_columns("ga_postponed", movement)
                 if field not in {"reason", "comment", "category"}] + [("manual_comment", "KOMENT MANUAL", 220)]
@@ -210,31 +227,32 @@ def render_plain_text(report):
 
 def report_attachments(report):
     from app.services.m3_reporting_points_attachments import render_docx, render_png, DOCX_MIME
+    from app.services.reporting_points_excel import render_xlsx, XLSX_MIME
     blocks = export_blocks(report)
     stem = f"pikat_m2_{report['report_date']}"
     return [(stem + ".docx", render_docx(report, blocks=blocks), DOCX_MIME),
-            (stem + ".png", render_png(report, blocks=blocks), "image/png")]
+            (stem + ".png", render_png(report, blocks=blocks), "image/png"),
+            (stem + ".xlsx", render_xlsx(blocks, sheet_name="PIKAT M2"), XLSX_MIME)]
 
 
-async def send_report(db, row, recipients):
-    if row.status == "SENT":
-        return
+async def send_report(db, row, recipients, *, automatic: bool = False):
     recipients = normalize_recipients(recipients)
     if not recipients["to"]:
         raise ValueError("Shto te pakten nje marres To ne konfigurimin e M2.")
     report = report_payload(row)
     try:
         gmail = GmailService()
-        message = await gmail.find_exact(report["subject"], recipients)
-        if not message:
-            html_body = render_html(report)
-            attachments = await asyncio.to_thread(report_attachments, report)
-            message = await gmail.send_verified(report["subject"], recipients, render_plain_text(report), html_body,
-                attachments=[(f"pikat_m2_{row.report_date.isoformat()}.html", html_body.encode("utf-8"), "text/html"), *attachments])
+        html_body = render_html(report)
+        attachments = await asyncio.to_thread(report_attachments, report)
+        # Every manual send is a new delivery, including an unchanged report.
+        message = await gmail.send_verified(report["subject"], recipients, render_plain_text(report), html_body,
+            attachments=[(f"pikat_m2_{row.report_date.isoformat()}.html", html_body.encode("utf-8"), "text/html"), *attachments])
     except Exception as exc:
         row.status, row.last_error = "FAILED", str(exc)[:2000]
         await db.commit()
         raise
     row.status, row.sent_at = "SENT", datetime.now(report_timezone())
     row.gmail_message_id, row.last_error = message.get("id"), None
+    if automatic:
+        row.auto_sent_at = row.sent_at
     await db.commit()

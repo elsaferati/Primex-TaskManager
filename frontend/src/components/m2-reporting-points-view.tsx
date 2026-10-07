@@ -9,9 +9,14 @@ export { reportDate, reportTime } from "@/components/m3-reporting-points-view"
 export const MANUAL_POINTS = { reorganization: "1. RIORGANIZIM? (PARA PAUZES)- PAS PAUZES ,TAKIM INT, NDARJE E DET?" } as const
 export type ManualKey = "reorganization" | `delivery:${string}` | `delivery_choice:${string}` | `postponed_comment:${string}`
 export type ManualAnswers = Partial<Record<ManualKey, string>>
+export type UnfinishedPriorityRow = {
+  assignees: string; department: string; am_pm: string; status: string
+  priority: string; task_type: string; title: string; due_label: string
+  deadline_important: boolean; eight_am: boolean
+}
 export type ReportingPointsReport = {
   id: string; report_date: string; subject: string; status: string
-  manual_answers: ManualAnswers; data: { postponed?: TaskRow[]; delivery?: TaskRow[] }
+  manual_answers: ManualAnswers; data: { unfinished_priority?: UnfinishedPriorityRow[]; postponed?: TaskRow[]; delivery?: TaskRow[] }
   generated_at: string | null; sent_at: string | null; last_error: string | null
 }
 
@@ -28,6 +33,11 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
   onAnswerChange: (key: ManualKey, value: string) => void
 }) {
   const deliveryRows = report.data.delivery || []
+  const unfinishedRows = report.data.unfinished_priority || []
+  const unfinishedColumns: [keyof UnfinishedPriorityRow, string][] = [
+    ["assignees", "KUSH"], ["department", "DEP"], ["am_pm", "AM/PM"], ["priority", "LLOJI"],
+    ["task_type", "TIPI"], ["title", "TITULLI"], ["due_label", "DUE DATE"],
+  ]
   const deliveredCount = deliveryRows.filter((row) => answers[`delivery_choice:${row.task_id}`] === "PO").length
   const common: [keyof TaskRow, string][] = [["assignees", "KUSH"], ["department", "DEP"], ["project", "PRJK"], ["am_pm", "AM/PM"], ["task_type", "LLOJI"]]
   const renderTable = (rows: TaskRow[], delivery: boolean) => <div className="overflow-x-auto border">
@@ -68,12 +78,30 @@ export function M2ReportingPointsView({ report, answers, disabled, onAnswerChang
     <section className="space-y-3" aria-labelledby="m2-reorganization"><Label id="m2-reorganization" htmlFor="reorganization" className="text-lg font-bold">{MANUAL_POINTS.reorganization}</Label>
       <Textarea id="reorganization" value={answers.reorganization || ""} disabled={disabled} maxLength={10000} className="min-h-28" placeholder="Shëno përgjigjjen për riorganizimin." onChange={(event) => onAnswerChange("reorganization", event.target.value)} />
     </section>
-    <section className="space-y-3" aria-labelledby="m2-postponed"><h2 id="m2-postponed" className="text-lg font-bold">2. A KA DET QË SHTYHEN (SOT/SOT) OSE DEADLINE?</h2>
+    <section className="space-y-3" aria-labelledby="m2-unfinished-priority"><h2 id="m2-unfinished-priority" className="text-lg font-bold">2. DET TE PAKRYERA, 08:00/DEADLINE</h2>
+      <div className="overflow-x-auto border">
+        <table className="w-full min-w-[900px] border-collapse text-xs">
+          <thead className="bg-slate-100"><tr>{["NR", ...unfinishedColumns.map(([, title]) => title)].map((title) => <th key={title} className="border px-2 py-2 text-left">{title}</th>)}</tr></thead>
+          <tbody>{unfinishedRows.map((row, index) => {
+            const cells = [String(index + 1), ...unfinishedColumns.map(([field]) => String(row[field] || "—"))]
+            return <tr key={index} style={{ background: row.deadline_important ? "#dc2626" : row.status === "IN_PROGRESS" ? "#FFFF00" : "#FFC4ED", color: row.deadline_important ? "white" : "black" }}>
+              {cells.map((value, columnIndex) => <td key={columnIndex} className={`border p-2 align-top ${columnIndex === 6 ? "min-w-[280px]" : "w-px whitespace-nowrap"}`} style={row.eight_am ? {
+                borderTop: "3px solid #dc2626", borderBottom: "3px solid #dc2626",
+                ...(columnIndex === 0 ? { borderLeft: "3px solid #dc2626" } : {}),
+                ...(columnIndex === cells.length - 1 ? { borderRight: "3px solid #dc2626" } : {}),
+              } : undefined}>{value}</td>)}
+            </tr>
+          })}</tbody>
+        </table>
+        {!unfinishedRows.length ? <p className="p-5 text-sm text-muted-foreground">Asnjë detyrë.</p> : null}
+      </div>
+    </section>
+    <section className="space-y-3" aria-labelledby="m2-postponed"><h2 id="m2-postponed" className="text-lg font-bold">3. A KA DET QË SHTYHEN (SOT/SOT) OSE DEADLINE?</h2>
       <p className="text-sm text-muted-foreground">Shtyrjet e bëra sot për detyrat Deadline Important ose të krijuara, filluara dhe planifikuara për sot.</p>
       <p className="text-sm font-bold">Shtyrjet e bëra gjatë ditës. <span className="rounded bg-green-100 px-1 py-0.5 text-green-900">Brenda javës: OK.</span>{" "}<span className="rounded bg-red-100 px-1 py-0.5 text-red-900">Për të premten ose javën tjetër: RREZIK.</span></p>
       {[["start_due", "SHTYRË START DHE DUE DATE"], ["due", "SHTYRË DUE DATE"], ["start", "SHTYRË START DATE"]].map(([kind, title]) => <div key={kind} className="space-y-2"><h3 className="text-sm font-semibold">{title}</h3>{renderTable((report.data.postponed || []).filter((row) => row.postponement_kind === kind), false)}</div>)}
     </section>
-    <section className="space-y-3" aria-labelledby="m2-delivery"><div className="flex flex-wrap items-center gap-3"><h2 id="m2-delivery" className="text-lg font-bold">3. A JANË DORËZUAR TË GJITHA ÇKA ËSHTË DASHUR M2?</h2>
+    <section className="space-y-3" aria-labelledby="m2-delivery"><div className="flex flex-wrap items-center gap-3"><h2 id="m2-delivery" className="text-lg font-bold">4. A JANË DORËZUAR TË GJITHA ÇKA ËSHTË DASHUR M2?</h2>
       <span className="inline-flex items-center gap-2 rounded bg-slate-100 px-2 py-1 text-sm font-bold text-slate-900" aria-live="polite">TOTALI/DËRGUAR: <span className="text-2xl font-extrabold tabular-nums">{deliveryRows.length}/{deliveredCount}</span></span></div>
       <p className="text-sm text-muted-foreground">Detyrat me simbolet M2 dhe M2/3, kur data e raportit është brenda intervalit start–due. Përgjigju për secilën detyrë në kolonën e fundit.</p>
       {renderTable(deliveryRows, true)}

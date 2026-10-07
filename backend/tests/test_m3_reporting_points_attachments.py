@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from app.services import m3_reporting_points as report_service
 from app.services import m3_reporting_points_attachments as exports
+from app.services.reporting_points_excel import XLSX_MIME
 
 
 def sample_report():
@@ -29,7 +30,9 @@ def sample_report():
                      "ga_postponed": [{**base, "title": "DEADLINE IMPORTANT për GA", "status": "WAITING_CLIENT", "category": "Deadline Important"}]},
             "realization": {"percent": 62, "comment": "Jemi mbi 50%", "departments": [
                 {"department_id": "dev", "code": "DEV", "name": "Development", "percent": 75, "employees": 5, "comment": "Jemi mbi 50%"},
-                {"department_id": "gd", "code": "GD", "name": "Graphic Design", "percent": 25, "employees": 2, "comment": "Jemi nen 50%"}]},
+                {"department_id": "gd", "code": "GD", "name": "Graphic Design", "percent": 25, "employees": 2, "comment": "Jemi nen 50%"},
+                {"department_id": "ga", "code": "GA", "percent": None, "comment": "Hidden GA comment"},
+                {"department_id": "hr", "code": "HR", "percent": None, "comment": "Hidden HR comment"}]},
             "realization_captured_at": "2026-10-02T16:15:00+02:00"}
 
 
@@ -101,6 +104,12 @@ class ReportingPointsAttachmentTests(unittest.TestCase):
         self.assertIn("DET FT DHE PRJK PA PROGRES:", paragraphs)
         self.assertIn("75%", table_text)
         self.assertIn("25%", table_text)
+        self.assertNotIn("Hidden GA comment", table_text)
+        self.assertNotIn("Hidden HR comment", table_text)
+        self.assertEqual(len(report["realization"]["departments"]), 4)
+        for rendered in (report_service.render_html(report), report_service.render_plain_text(report)):
+            self.assertNotIn("Hidden GA comment", rendered)
+            self.assertNotIn("Hidden HR comment", rendered)
         self.assertIn("👁 Detyrë me status TODO", table_text)
         self.assertIn("! Detyrë me status IN_PROGRESS", table_text)
         self.assertIn("START: 02.10.2026\nDUE: 02.10.2026", table_text)
@@ -157,7 +166,8 @@ class ReportingPointsAttachmentTests(unittest.TestCase):
 
     def test_attachment_formats_and_names(self):
         attachments = exports.report_attachments(sample_report())
-        self.assertEqual([item[2] for item in attachments], [exports.DOCX_MIME, "image/png"])
-        self.assertEqual([item[0] for item in attachments], ["PrimeFlow-PIKAT-M3-GA-2026-10-02.docx", "PrimeFlow-PIKAT-M3-GA-2026-10-02.png"])
+        self.assertEqual([item[2] for item in attachments], [exports.DOCX_MIME, "image/png", XLSX_MIME])
+        self.assertEqual([item[0] for item in attachments], ["PrimeFlow-PIKAT-M3-GA-2026-10-02.docx", "PrimeFlow-PIKAT-M3-GA-2026-10-02.png", "PrimeFlow-PIKAT-M3-GA-2026-10-02.xlsx"])
         self.assertTrue(attachments[0][1].startswith(b"PK"))
         self.assertTrue(attachments[1][1].startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertTrue(attachments[2][1].startswith(b"PK"))

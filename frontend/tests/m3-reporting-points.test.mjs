@@ -85,12 +85,15 @@ test("realization includes saved department percentages and missing data", () =>
     { department_id: "dev", code: "DEV", percent: 75, comment: "Above 50" },
     { department_id: "gd", code: "GD", percent: 25, comment: "Below 50" },
     { department_id: "pcm", code: "PCM", percent: null, comment: "Missing baseline" },
+    { department_id: "ga", code: "GA", percent: null, comment: "Hidden GA comment" },
+    { department_id: "hr", code: "HR", percent: null, comment: "Hidden HR comment" },
   ] } })
   assert.match(html, /62%/)
   assert.match(html, /75%/)
   assert.match(html, /25%/)
   assert.match(html, /Pa të dhëna/)
-  assert.match(html, /DEPARTAMENTI/)
+  assert.match(html, />DEP<\/th>/)
+  assert.doesNotMatch(html, /Hidden GA comment|Hidden HR comment|>GA<\/td>|>HR<\/td>/)
 })
 
 test("postponement cells carry risk colors and My View comments while status stays implicit", () => {
@@ -209,7 +212,7 @@ test("the stored realization is displayed and missing data never becomes zero", 
   assert.match(render(), /Nuk ka ende një vlerë të ruajtur/)
 })
 
-test("sent report answers are read-only", () => {
+test("view-only reports keep manual fields disabled", () => {
   const html = render({ status: "SENT" }, {}, true)
   assert.equal((html.match(/<textarea[^>]*disabled=""/g) || []).length, 4)
 })
@@ -270,14 +273,21 @@ function mountPage(storage, apiFetch) {
       clearTimeout: (id) => timers.delete(id), setInterval: () => -1, clearInterval: () => {},
     },
   })
-  const findView = (node) => {
+  const findNode = (node, predicate) => {
     if (!node || typeof node !== "object") return null
-    if (node.type === M3ReportingPointsView) return node
+    if (predicate(node)) return node
     for (const child of React.Children.toArray(node.props?.children)) {
-      const found = findView(child)
+      const found = findNode(child, predicate)
       if (found) return found
     }
     return null
+  }
+  const findView = (node) => findNode(node, (item) => item.type === M3ReportingPointsView)
+  const content = (node) => typeof node === "string" ? node : React.Children.toArray(node?.props?.children).map(content).join("")
+  const button = (label) => {
+    const node = findNode(tree, (item) => item.props?.onClick && content(item) === label)
+    assert.ok(node, `Button missing: ${label}`)
+    return node
   }
   return {
     async flush() {
@@ -289,6 +299,9 @@ function mountPage(storage, apiFetch) {
     },
     edit(key, value) { findView(tree).props.onAnswerChange(key, value) },
     answers() { return findView(tree).props.answers },
+    viewDisabled() { return findView(tree).props.disabled },
+    buttonDisabled(label) { return !!button(label).props.disabled },
+    click(label) { const node = button(label); assert.ok(!node.props.disabled); return node.props.onClick() },
     fireSave() {
       assert.equal(timers.size, 1)
       const [id, callback] = timers.entries().next().value
@@ -298,6 +311,86 @@ function mountPage(storage, apiFetch) {
     unmount() { for (const effect of effects) effect?.cleanup?.() },
   }
 }
+
+test("sent reports remain editable, regenerate, autosave and send repeatedly", async () => {
+  const values = new Map()
+  const storage = { getItem: (key) => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) }
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Tirane", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+  let server = { ...report, report_date: day, status: "SENT", sent_at: new Date().toISOString(), generated_at: new Date().toISOString(), realization_captured_at: new Date().toISOString() }
+  let sends = 0, generations = 0
+  const api = async (url, options) => {
+    if (options?.method === "PUT") server = { ...server, status: "DRAFT", manual_answers: JSON.parse(options.body).manual_answers }
+    if (url.includes("/generate?")) { generations++; server = { ...server, status: "DRAFT" } }
+    if (url.endsWith("/send")) { sends++; server = { ...server, status: "SENT", sent_at: new Date().toISOString() } }
+    return { ok: true, status: 200, json: async () => url.endsWith("/recipients") ? { recipients: { to: ["test@example.com"], cc: [], bcc: [] } } : { ...server } }
+  }
+  const page = mountPage(storage, api)
+  await page.flush()
+  assert.equal(page.viewDisabled(), false)
+  assert.equal(page.buttonDisabled("Gjenero raportin"), false)
+  assert.equal(page.buttonDisabled("Dërgo sërish"), false)
+  await page.click("Gjenero raportin")
+  await page.flush()
+  assert.equal(generations, 1)
+  for (let i = 0; i < 3; i++) {
+    page.edit("underload", `Përgjigjja ${i}`)
+    await page.flush()
+    await page.fireSave()
+    await page.flush()
+    assert.equal(server.manual_answers["underload"], `Përgjigjja ${i}`)
+    assert.equal(page.buttonDisabled("Dërgo sërish"), false)
+    page.click("Dërgo sërish")
+    await page.flush()
+    await page.click("Dërgo raportin")
+    await page.flush()
+    assert.equal(page.viewDisabled(), false)
+    assert.equal(page.buttonDisabled("Gjenero raportin"), false)
+  }
+  assert.equal(sends, 3)
+  page.unmount()
+})
+
+test("send waits for realization capture while answers remain editable", async () => {
+  const storage = { getItem: () => null, setItem: () => {}, removeItem: () => {} }
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Tirane", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+  let server = { ...report, report_date: day, generated_at: new Date().toISOString() }
+  const api = async (url) => {
+    if (url.includes("/generate?")) server = { ...server, realization_captured_at: new Date().toISOString() }
+    return { ok: true, status: 200, json: async () => url.endsWith("/recipients") ? { recipients: { to: ["test@example.com"], cc: [], bcc: [] } } : { ...server } }
+  }
+  const page = mountPage(storage, api)
+  await page.flush()
+  assert.equal(page.viewDisabled(), false)
+  assert.equal(page.buttonDisabled("Dërgo"), true)
+  await page.click("Gjenero raportin")
+  await page.flush()
+  assert.equal(page.buttonDisabled("Dërgo"), false)
+  page.unmount()
+})
+
+test("sent reports restore and autosave local edits after reload", async () => {
+  const values = new Map()
+  const storage = { getItem: (key) => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) }
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Tirane", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+  let server = { ...report, report_date: day, status: "SENT", sent_at: new Date().toISOString() }
+  const api = async (url, options) => {
+    if (options?.method === "PUT") server = { ...server, status: "DRAFT", manual_answers: JSON.parse(options.body).manual_answers }
+    return { ok: true, status: 200, json: async () => url.endsWith("/recipients") ? { recipients: { to: [], cc: [], bcc: [] } } : { ...server } }
+  }
+  const first = mountPage(storage, api)
+  await first.flush()
+  first.edit("underload", "Ndryshim pas dërgimit")
+  await first.flush()
+  first.unmount()
+  const reloaded = mountPage(storage, api)
+  await reloaded.flush()
+  assert.equal(reloaded.answers()["underload"], "Ndryshim pas dërgimit")
+  await reloaded.fireSave()
+  await reloaded.flush()
+  assert.equal(server.manual_answers["underload"], "Ndryshim pas dërgimit")
+  assert.equal(values.size, 0)
+  reloaded.unmount()
+})
 
 test("answers survive immediate reload and automatically persist without pressing Save", async () => {
   const values = new Map()

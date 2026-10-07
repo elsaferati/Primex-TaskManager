@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.audit_log import AuditLog
 from app.models.department import Department
 from app.models.m3_reporting_points import M3ReportingPointsReport
-from app.models.meetings_report_settings import MeetingsReportSettings
 from app.models.project import Project
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
@@ -22,7 +21,7 @@ from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.user import User
 from app.services.daily_realization_events import semantic_local_day
 from app.services.daily_realization_live import build_live_daily_realization
-from app.services.daily_realization_metrics import calculate_daily_metrics
+from app.services.daily_realization_metrics import combine_daily_metrics
 from app.services.daily_rlz_compliance import REASON_LABELS
 from app.services.meetings_report import (
     _clean_task_title, _initials, _local_time, _m3_am_pm_label, _m3_department_label,
@@ -221,37 +220,48 @@ async def build_realization_capture(db: AsyncSession, day: date) -> dict:
     users = list((await db.execute(select(User).where(User.is_active.is_(True),
         User.department_id.is_not(None)))).scalars().all())
     department_by_id = {item.id: item for item in (await db.execute(select(Department))).scalars().all()}
-    rows, people, missing, departments = [], [], [], []
+    people, missing, departments = [], [], []
     for department_id in sorted(department_by_id, key=lambda value: (
         {"DEV": 0, "GD": 1, "PCM": 2}.get(getattr(department_by_id.get(value), "code", ""), 3),
         getattr(department_by_id.get(value), "code", str(value)),
     )):
         live = await build_live_daily_realization(db, department_id=department_id, day=day)
-        department_rows = []
         if not live.get("baseline_available"):
             missing.append(str(department_id))
         for person in live.get("people", []):
             # Use the same complete live population as the Realization page,
             # including managers and historical assignees retained by its engine.
-            department_rows.extend(person.get("tasks") or [])
             people.append({"user_id": str(person["user_id"]), "name": person.get("user_name"),
                            "percent": (person.get("metrics") or {}).get("raw_plan_realization")})
-        rows.extend(department_rows)
-        department_metrics = calculate_daily_metrics(department_rows)
+        department_metrics = live["metrics"]
         department_percent = department_metrics["raw_plan_realization"]
         department = department_by_id.get(department_id)
         departments.append({"department_id": str(department_id), "code": getattr(department, "code", str(department_id)),
                             "name": getattr(department, "name", ""), "percent": department_percent,
                             "employees": sum(user.department_id == department_id for user in users),
                             "baseline_available": bool(live.get("baseline_available")), "metrics": department_metrics,
-                            "comment": realization_comment(department_percent)})
-    metrics = calculate_daily_metrics(rows)
+                            "comment": realization_department_comment(department_percent)})
+    metrics = combine_daily_metrics(item["metrics"] for item in departments)
     # Missing baselines are metadata, not a reason to hide PLAN RLZ: the daily
-    # dashboard also calculates its weighted total from the available live rows.
+    # dashboard also shows the total from the available department metrics.
     percent = metrics["raw_plan_realization"]
     return {"percent": percent, "employees": len(users), "people": people, "metrics": metrics,
             "baseline_available": not missing and bool(users), "missing_departments": missing,
             "comment": realization_comment(percent), "departments": departments}
+
+
+def realization_department_rows(realization: dict | None) -> list[dict]:
+    return [{**item, "comment": realization_department_comment(item.get("percent"))}
+            for item in (realization or {}).get("departments", [])
+            if str(item.get("code") or "").strip().upper() not in {"GA", "HR"}]
+
+
+def realization_department_comment(percent: float | None) -> str:
+    if percent is None:
+        return realization_comment(percent)
+    if percent == 50:
+        return "Jemi në 50%"
+    return f"Jemi {'mbi' if percent > 50 else 'nën'} 50%"
 
 
 def realization_comment(percent: float | None) -> str:
@@ -262,11 +272,11 @@ def realization_comment(percent: float | None) -> str:
     return f"Jemi {'mbi' if percent > 50 else 'nen'} 50% me {abs(percent - 50):g} pike perqindjeje."
 
 
-async def get_settings(db: AsyncSession) -> MeetingsReportSettings:
-    row = (await db.execute(select(MeetingsReportSettings).order_by(MeetingsReportSettings.created_at))).scalars().first()
-    if row is None:
-        raise ValueError("Konfiguro marresit e raportit ekzistues M3 perpara dergimit.")
-    return row
+async def get_settings(db: AsyncSession):
+    from types import SimpleNamespace
+    from app.services.reporting_points_settings import get_delivery_settings, manual_recipients
+    settings = await get_delivery_settings(db, "M3")
+    return SimpleNamespace(recipients=await manual_recipients(db, "M3", settings))
 
 
 async def locked_report(db: AsyncSession, day: date, *, wait: bool = True) -> M3ReportingPointsReport | None:
@@ -301,10 +311,13 @@ async def refresh_report(db: AsyncSession, row: M3ReportingPointsReport, now: da
 
 
 def report_payload(row: M3ReportingPointsReport) -> dict:
+    realization = row.realization
+    if realization and "departments" in realization:
+        realization = {**realization, "departments": realization_department_rows(realization)}
     return {"id": str(row.id), "report_date": row.report_date.isoformat(), "subject": subject_for(row.report_date),
             "manual_answers": row.manual_answers or {},
             "data": {key: [item for item in rows if item.get("status") != "DONE"] if key == "same_day" else rows
-                     for key, rows in (row.data or {}).items()}, "realization": row.realization,
+                     for key, rows in (row.data or {}).items()}, "realization": realization,
             "realization_captured_at": row.realization_captured_at.isoformat() if row.realization_captured_at else None,
             "generated_at": row.generated_at.isoformat() if row.generated_at else None, "status": row.status,
             "sent_at": row.sent_at.isoformat() if row.sent_at else None, "last_error": row.last_error}
@@ -456,14 +469,16 @@ def render_html(report: dict) -> str:
         percent = realization.get("percent")
         summary = f"{percent:g}%" if percent is not None else "Pa te dhena"
         realization_html = f"<p><strong>{summary}</strong> — {_cell(realization['comment'])}</p><p>Marrë në: {_cell(report.get('realization_captured_at'))}</p>"
-        if realization.get("departments"):
-            realization_html += "<table width='100%' border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;border:1px solid #000'><tr>"
-            realization_html += "".join(f"<th bgcolor='#e2e8f0' style='{cell_style};background-color:#e2e8f0'>{label}</th>" for label in ("DEPARTAMENTI", "REALIZIMI", "VLERËSIMI")) + "</tr>"
-            for item in realization["departments"]:
+        department_rows = realization_department_rows(realization)
+        if department_rows:
+            realization_html += "<table border='1' cellpadding='6' cellspacing='0' style='width:auto;border-collapse:collapse;border:1px solid #000'><tr>"
+            compact_style = ";white-space:nowrap"
+            realization_html += "".join(f"<th bgcolor='#e2e8f0' style='{cell_style};background-color:#e2e8f0{compact_style}'>{label}</th>" for label in ("DEP", "REALIZIMI", "VLERËSIMI")) + "</tr>"
+            for item in department_rows:
                 value = item.get("percent")
                 fill = "#e2e8f0" if value is None else "#fee2e2" if value < 50 else "#dcfce7"
-                realization_html += (f"<tr><td style='{cell_style}'>{_cell(item['code'])}</td>"
-                                     f"<td bgcolor='{fill}' style='{cell_style};background-color:{fill};font-weight:700'>{f'{value:g}%' if value is not None else 'Pa të dhëna'}</td>"
+                realization_html += (f"<tr><td style='{cell_style}{compact_style}'>{_cell(item['code'])}</td>"
+                                     f"<td bgcolor='{fill}' style='{cell_style}{compact_style};background-color:{fill};font-weight:700'>{f'{value:g}%' if value is not None else 'Pa të dhëna'}</td>"
                                      f"<td style='{cell_style}'>{_cell(item['comment'])}</td></tr>")
             realization_html += "</table>"
     else:
@@ -490,7 +505,7 @@ def render_plain_text(report: dict) -> str:
             realization = report.get("realization")
             lines.append(f"{realization.get('percent')}% - {realization['comment']}" if realization and realization.get("percent") is not None
                          else "Pa te dhena te ruajtura ne 16:15.")
-            for item in (realization or {}).get("departments", []):
+            for item in realization_department_rows(realization):
                 value = item.get("percent")
                 lines.append(f"{item['code']}: " + (f"{value:g}%" if value is not None else "Pa të dhëna") + f" - {item['comment']}")
             continue
@@ -505,30 +520,28 @@ def render_plain_text(report: dict) -> str:
     return "\n\n".join(lines)
 
 
-async def send_report(db: AsyncSession, row: M3ReportingPointsReport, recipients: dict) -> None:
-    if row.status == "SENT":
-        return
+async def send_report(db: AsyncSession, row: M3ReportingPointsReport, recipients: dict, *, automatic: bool = False) -> None:
     recipients = normalize_recipients(recipients)
     if not recipients["to"]:
         raise ValueError("Shto te pakten nje marres To perpara dergimit.")
     report = report_payload(row)
     try:
         gmail = GmailService()
-        message = await gmail.find_exact(report["subject"], recipients)
-        if not message:
-            html_body = render_html(report)
-            from app.services.m3_reporting_points_attachments import report_attachments
-            attachments = await asyncio.to_thread(report_attachments, report)
-            # A full TODO list can exceed an email client's inline display limit.
-            # Keep every row in a standalone copy as well as in the email body.
-            message = await gmail.send_verified(report["subject"], recipients,
-                                                 render_plain_text(report), html_body,
-                                                 attachments=[(f"pikat_m3_ga_{row.report_date.isoformat()}.html",
-                                                               html_body.encode("utf-8"), "text/html"), *attachments])
+        html_body = render_html(report)
+        from app.services.m3_reporting_points_attachments import report_attachments
+        attachments = await asyncio.to_thread(report_attachments, report)
+        # Every manual send is a new delivery, including an unchanged report.
+        # Keep every row in a standalone copy as well as in the email body.
+        message = await gmail.send_verified(report["subject"], recipients,
+                                             render_plain_text(report), html_body,
+                                             attachments=[(f"pikat_m3_ga_{row.report_date.isoformat()}.html",
+                                                           html_body.encode("utf-8"), "text/html"), *attachments])
     except Exception as exc:
         row.status, row.last_error = "FAILED", str(exc)[:2000]
         await db.commit()
         raise
     row.status, row.sent_at = "SENT", datetime.now(report_timezone())
     row.gmail_message_id, row.last_error = message.get("id"), None
+    if automatic:
+        row.auto_sent_at = row.sent_at
     await db.commit()

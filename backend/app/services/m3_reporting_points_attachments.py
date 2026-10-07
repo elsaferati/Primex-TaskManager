@@ -55,7 +55,7 @@ def _text(value: Any) -> str:
 def export_blocks(report: dict) -> list[dict]:
     from app.services.m3_reporting_points import (
         AUTO_TITLES, GA_TITLE, M3_TITLE, MANUAL_POINTS,
-        report_table_columns, report_table_value, task_table_groups, task_row_appearance,
+        report_table_columns, report_table_value, task_table_groups, task_row_appearance, realization_department_rows,
     )
 
     blocks: list[dict] = []
@@ -112,9 +112,10 @@ def export_blocks(report: dict) -> list[dict]:
         percent = realization.get("percent")
         text((f"{percent:g}%" if percent is not None else "Pa te dhena") + " — " + str(realization.get("comment") or ""))
         text(f"Marrë në: {report.get('realization_captured_at') or '16:15'}")
-        if realization.get("departments"):
+        department_rows = realization_department_rows(realization)
+        if department_rows:
             departments = []
-            for item in realization["departments"]:
+            for item in department_rows:
                 value = item.get("percent")
                 fill = "#e2e8f0" if value is None else RED if value < 50 else GREEN
                 departments.append([
@@ -122,7 +123,7 @@ def export_blocks(report: dict) -> list[dict]:
                     {"text": f"{value:g}%" if value is not None else "Pa të dhëna", "fill": fill, "color": "#000000", "bold": True, "divider": False},
                     {"text": _text(item["comment"]), "fill": "#ffffff", "color": "#000000", "bold": False, "divider": False},
                 ])
-            blocks.append({"kind": "table", "columns": [("code", "DEPARTAMENTI", 124), ("percent", "REALIZIMI", 96), ("comment", "VLERËSIMI", 360)], "rows": departments})
+            blocks.append({"kind": "table", "compact": True, "columns": [("code", "DEP", 48), ("percent", "REALIZIMI", 88), ("comment", "VLERËSIMI", 136)], "rows": departments})
     else:
         text("Vlera e realizimit merret ne 16:15. Nuk ka vlere te ruajtur per kete date.")
     text(GA_TITLE, 1)
@@ -218,10 +219,15 @@ def render_docx(report: dict, *, blocks: list[dict] | None = None) -> bytes:
         else:
             columns = block["columns"]
             total = sum(column[2] for column in columns)
-            widths = [int(available * column[2] / total) for column in columns]
-            widths[-1] += available - sum(widths)
+            table_width = min(available, total * 15) if block.get("compact") else available
+            widths = [int(table_width * column[2] / total) for column in columns]
+            widths[-1] += table_width - sum(widths)
             table = document.add_table(rows=1, cols=len(columns))
             table.autofit = False
+            if block.get("compact"):
+                table_size = table._tbl.tblPr.find(qn("w:tblW"))
+                table_size.set(qn("w:type"), "dxa")
+                table_size.set(qn("w:w"), str(table_width))
             for index, width in enumerate(widths):
                 table.columns[index].width = Twips(width)
             repeat = OxmlElement("w:tblHeader")
@@ -293,8 +299,9 @@ def render_png(report: dict, *, blocks: list[dict] | None = None) -> bytes:
                                "height": len(lines) * 25 + 6, "fill": fill, "color": color})
         else:
             total = sum(c[2] for c in block["columns"])
-            widths = [round(content_width * c[2] / total) for c in block["columns"]]
-            widths[-1] += content_width - sum(widths)
+            table_width = min(content_width, round(total * scale)) if block.get("compact") else content_width
+            widths = [round(table_width * c[2] / total) for c in block["columns"]]
+            widths[-1] += table_width - sum(widths)
             header = [{"text": label, "fill": "#e2e8f0", "color": "#000000", "bold": True, "divider": False}
                       for _, label, _ in block["columns"]]
             for values in [header, *block["rows"]]:
@@ -359,6 +366,9 @@ def render_png(report: dict, *, blocks: list[dict] | None = None) -> bytes:
 
 
 def report_attachments(report: dict) -> list[tuple[str, bytes, str]]:
+    from app.services.reporting_points_excel import render_xlsx, XLSX_MIME
+
     filename = f"PrimeFlow-PIKAT-M3-GA-{report['report_date']}"
     return [(filename + ".docx", render_docx(report), DOCX_MIME),
-            (filename + ".png", render_png(report), "image/png")]
+            (filename + ".png", render_png(report), "image/png"),
+            (filename + ".xlsx", render_xlsx(export_blocks(report), sheet_name="PIKAT M3 dhe GA"), XLSX_MIME)]

@@ -18,12 +18,26 @@ from app.models.user import User
 from app.services.audit import add_audit_log
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import report_timezone
+from app.services.reporting_points_settings import DeliverySettingsPayload, read_settings, save_settings
 from app.services.m2_reporting_points import (
     MANUAL_POINTS, get_settings, locked_report, refresh_report, render_html,
     render_plain_text, report_payload, send_report, report_attachments,
 )
 
 router = APIRouter()
+
+@router.get("/settings")
+async def delivery_settings(db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)) -> dict:
+    return await read_settings(db, "M2")
+
+
+@router.put("/settings")
+async def update_delivery_settings(payload: DeliverySettingsPayload, db: AsyncSession = Depends(get_db),
+                                   user: User = Depends(require_report_manager)) -> dict:
+    try:
+        return await save_settings(db, "M2", payload, user.id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 class ManualAnswersPayload(BaseModel):
@@ -64,7 +78,7 @@ async def recipients(db: AsyncSession = Depends(get_db), _: User = Depends(requi
         settings = await get_settings(db)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-    return {"recipients": normalize_recipients(settings.recipients), "delivery": "MANUAL_ONLY"}
+    return {"recipients": normalize_recipients(settings.recipients), "delivery": "MANUAL_AVAILABLE"}
 
 
 @router.get("/history")
@@ -95,9 +109,8 @@ async def generate(report_date: date, db: AsyncSession = Depends(get_db),
     if report_date != today:
         return await get_report(report_date, db, user)
     row = await locked_report(db, report_date)
-    if row.status == "SENT":
-        raise HTTPException(409, "Raporti i derguar ruhet ne historik dhe nuk rigjenerohet.")
     await refresh_report(db, row)
+    row.status, row.last_error = "DRAFT", None
     row.updated_by = user.id
     add_audit_log(db=db, actor_user_id=user.id, entity_type="m2_reporting_points", entity_id=row.id,
                   action="GENERATE", after={"report_date": report_date.isoformat()})
@@ -111,8 +124,6 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
     existing = await _by_id(db, report_id)
     row = await locked_report(db, existing.report_date)
     await db.refresh(row)
-    if row.status == "SENT":
-        raise HTTPException(409, "Raporti i derguar nuk ndryshohet.")
     before = dict(row.manual_answers or {})
     valid_keys = {f"{prefix}:{item['task_id']}" for item in (row.data or {}).get("delivery", [])
                   for prefix in ("delivery", "delivery_choice")}
@@ -120,6 +131,7 @@ async def save_answers(report_id: uuid.UUID, payload: ManualAnswersPayload,
     if any(key not in MANUAL_POINTS and key not in valid_keys and key not in before for key in payload.manual_answers):
         raise HTTPException(422, "Detyra nuk gjendet ne kete raport.")
     row.manual_answers = {**before, **payload.manual_answers}
+    row.status, row.last_error = "DRAFT", None
     row.updated_by = user.id
     add_audit_log(db=db, actor_user_id=user.id, entity_type="m2_reporting_points", entity_id=row.id,
                   action="SAVE_ANSWERS", before=before, after=row.manual_answers)
@@ -147,11 +159,10 @@ async def send(report_id: uuid.UUID, db: AsyncSession = Depends(get_db),
         recipients = normalize_recipients(settings.recipients)
         if not recipients["to"]:
             raise ValueError("Shto marresit To ne konfigurimin e raportit M2.")
-        if row.status != "SENT":
-            if row.report_date == datetime.now(report_timezone()).date():
-                await refresh_report(db, row)
-            add_audit_log(db=db, actor_user_id=user.id, entity_type="m2_reporting_points", entity_id=row.id,
-                          action="MANUAL_SEND", after={"report_date": row.report_date.isoformat(), "recipients": recipients})
+        if row.report_date == datetime.now(report_timezone()).date():
+            await refresh_report(db, row)
+        add_audit_log(db=db, actor_user_id=user.id, entity_type="m2_reporting_points", entity_id=row.id,
+                      action="MANUAL_SEND", after={"report_date": row.report_date.isoformat(), "recipients": recipients})
         await send_report(db, row, recipients)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc

@@ -6,14 +6,43 @@ generate, preview and browse history. ADMIN, MANAGER and the existing designated
 report manager can also edit the four manual answers and send it.
 The sidebar lists it under Reports > Meetings and in GA's report shortcuts.
 
-Email is manual only and reads the recipients from the current M3 settings at send
-time. It never sends an email from a background scheduler. Sending is available
-after that day's 16:15 Realization capture exists. The send operation refreshes
-today's task tables and realization, retains the manual answers, and records the sent
-copy. A repeat click returns the same sent copy rather than sending it twice.
+M3 defaults to automatic delivery at **16:20 Monday–Friday** in the report timezone
+(`PRIMEFLOW_REPORT_TIMEZONE`, default Europe/Tirane), to **ga@primexeu.com** and
+**info@primexeu.com**. The shared reporting-points delivery loop starts only when
+`REPORT_SCHEDULERS_ENABLED` is true. It generates today's report even if nobody
+opened the page, refreshes its task tables and post-16:15 realization, and retains
+saved manual answers. Unanswered questions keep their existing missing-answer text.
+The capture-only 16:15 loop remains separate and still sends no email.
+The toolbar, metadata and email configuration sit inside a **+ / −** management
+panel, collapsed by default. Report managers can save automatic enablement, time,
+weekdays and To/Cc/Bcc recipients, plus separate manual recipients. M3 automatic
+times cannot be earlier than 16:15, because the send must include realization.
+`GET/PUT /m3-reporting-points/settings` stores a dedicated M3 configuration in
+`reporting_points_settings`, independent of M2 and the original Meetings report.
+The scheduler reads the saved configuration on each tick, including custom weekdays.
+
+The daily database lock covers refresh and delivery across API processes.
+Successful automatic delivery commits `auto_sent_at` with the send result;
+failed sends remain due for retry. Later ticks and restarts skip that completed
+automatic send, even if a user subsequently edits or regenerates the report.
+After downtime, the loop catches up only today's due report, never historical days.
+
+Manual sending remains available after the day's realization capture exists,
+including after the automatic send, and uses the manual recipients in this panel.
+Until the first settings save, manual recipients retain the previous M3 settings.
+Each manual click sends again, refreshes today's data and retains the automatic
+marker. Manual sends before 16:20 do not cancel the scheduled automatic delivery.
 Emails include the complete HTML report as an attachment, preserving all TODO
 rows even when an email client clips a long inline body.
-The same send also attaches a complete PNG and an editable Word (.docx) report,
+The same send also attaches a complete PNG, an editable Word (.docx) report and
+an Excel (.xlsx) copy of the full M3 and GA view. Excel uses the existing
+openpyxl dependency and the same export blocks as the other attachments,
+preserving all sections, task groups, manual answers, reasons/comments,
+realization and department breakdowns, status/risk colors and 08:00 outlines.
+Each table keeps its column proportions; combined START/DUE changes have
+separate stacked cells with a black divider. All content stays in one continuous
+worksheet with landscape printing, wrapping and sufficient height for long text.
+The Word and PNG exports continue
 using python-docx and Pillow as M2/M3 do. Both exports include M3 and GA, all
 manual answers, all task rows, My View reasons/comments and the stored realization.
 They reuse the email's table columns, grouping and values, including non-DONE
@@ -21,8 +50,8 @@ same-day tasks, exact status/risk colors, black gridlines and thick START/DUE di
 PNG height grows with the complete content, including wrapped titles and long
 comments. Word uses A3 landscape pages with repeating table headers; content
 flows onto further pages rather than being cut off. Rendering runs in a worker
-thread during manual send. Export failure fails the send rather than emailing
-incomplete attachments. No new dependency or automatic send is introduced.
+thread for manual and automatic sends. Export failure fails the send rather than
+emailing incomplete attachments. No new dependency is introduced.
 
 ## Selection rules
 
@@ -111,8 +140,10 @@ departments without active staff or daily tasks. Departments without a metric
 denominator remain unavailable; they are never shown as zero. Older
 captures without department breakdowns are not retroactively recomputed.
 
-Apply migration `0142_m3_reporting_points` through the normal deployment before
-starting the new backend. No SMTP credentials or recipient changes are needed.
+Apply migration `0145_reporting_points_settings` through normal deployment before
+restarting the backend. It seeds the existing automatic defaults without changing
+reports, answers or the legacy manual recipient configurations. Existing SMTP
+credentials are reused. Future edits apply to this reporting-points report only.
 
 Validation:
 
