@@ -122,6 +122,48 @@ def realization_percent(
     return math.floor(max(0.0, base - penalty) * 10 + 0.5) / 10
 
 
+def combine_daily_metrics(departments: Iterable[Mapping[str, object]]) -> dict[str, object]:
+    """Combine authoritative department metrics as the Realization dashboard does.
+
+    Preserve the department's credit and extra-task weights; flattening its tasks
+    and calculating again changes the total. Matches combineDailyRealization.
+    """
+    reports = list(departments)
+    if not reports:
+        return calculate_daily_metrics([])
+    if len(reports) == 1:
+        return dict(reports[0])
+    derived = {
+        "raw_plan_realization", "adjusted_plan_realization", "deadline_compliance_percentage",
+        "daily_control_state", "deadline_tasks", "realization_items",
+    }
+    metrics = {
+        key: sum(report.get(key) or 0 for report in reports)
+        for key in reports[0] if key not in derived
+    }
+    for key in ("deadline_tasks", "realization_items"):
+        metrics[key] = [item for report in reports for item in (report.get(key) or [])]
+    extra = metrics["additional_count"]
+    metrics["raw_plan_realization"] = realization_percent(
+        metrics["realization_credit"], metrics["realization_plan_weight"], extra,
+        metrics["realization_penalty_points"], metrics["original_planned_count"] or extra,
+    )
+    metrics["adjusted_plan_realization"] = realization_percent(
+        metrics["realization_credit"], metrics["adjusted_realization_plan_weight"], extra,
+        metrics["adjusted_realization_penalty_points"], metrics["adjusted_denominator"] or extra,
+    )
+    deadlines = metrics["deadlines_today_count"]
+    metrics["deadline_compliance_percentage"] = (
+        min(100, math.floor(metrics["deadlines_completed_count"] * 1000 / deadlines + 0.5) / 10)
+        if deadlines else None
+    )
+    metrics["daily_control_state"] = (
+        "ACTION_REQUIRED" if any(report.get("daily_control_state") == "ACTION_REQUIRED" for report in reports)
+        else "CLEAN_DAY"
+    )
+    return metrics
+
+
 def _realization_item(row: Mapping[str, object], *, extra_weight: float) -> dict:
     """How one row moved the daily percent, for the Plan RLZ explanation."""
     classification = str(row.get("classification") or "")

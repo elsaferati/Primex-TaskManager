@@ -22,7 +22,7 @@ from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.user import User
 from app.services.daily_realization_events import semantic_local_day
 from app.services.daily_realization_live import build_live_daily_realization
-from app.services.daily_realization_metrics import calculate_daily_metrics
+from app.services.daily_realization_metrics import combine_daily_metrics
 from app.services.daily_rlz_compliance import REASON_LABELS
 from app.services.meetings_report import (
     _clean_task_title, _initials, _local_time, _m3_am_pm_label, _m3_department_label,
@@ -221,33 +221,30 @@ async def build_realization_capture(db: AsyncSession, day: date) -> dict:
     users = list((await db.execute(select(User).where(User.is_active.is_(True),
         User.department_id.is_not(None)))).scalars().all())
     department_by_id = {item.id: item for item in (await db.execute(select(Department))).scalars().all()}
-    rows, people, missing, departments = [], [], [], []
+    people, missing, departments = [], [], []
     for department_id in sorted(department_by_id, key=lambda value: (
         {"DEV": 0, "GD": 1, "PCM": 2}.get(getattr(department_by_id.get(value), "code", ""), 3),
         getattr(department_by_id.get(value), "code", str(value)),
     )):
         live = await build_live_daily_realization(db, department_id=department_id, day=day)
-        department_rows = []
         if not live.get("baseline_available"):
             missing.append(str(department_id))
         for person in live.get("people", []):
             # Use the same complete live population as the Realization page,
             # including managers and historical assignees retained by its engine.
-            department_rows.extend(person.get("tasks") or [])
             people.append({"user_id": str(person["user_id"]), "name": person.get("user_name"),
                            "percent": (person.get("metrics") or {}).get("raw_plan_realization")})
-        rows.extend(department_rows)
-        department_metrics = calculate_daily_metrics(department_rows)
+        department_metrics = live["metrics"]
         department_percent = department_metrics["raw_plan_realization"]
         department = department_by_id.get(department_id)
         departments.append({"department_id": str(department_id), "code": getattr(department, "code", str(department_id)),
                             "name": getattr(department, "name", ""), "percent": department_percent,
                             "employees": sum(user.department_id == department_id for user in users),
                             "baseline_available": bool(live.get("baseline_available")), "metrics": department_metrics,
-                            "comment": realization_comment(department_percent)})
-    metrics = calculate_daily_metrics(rows)
+                            "comment": realization_department_comment(department_percent)})
+    metrics = combine_daily_metrics(item["metrics"] for item in departments)
     # Missing baselines are metadata, not a reason to hide PLAN RLZ: the daily
-    # dashboard also calculates its weighted total from the available live rows.
+    # dashboard also shows the total from the available department metrics.
     percent = metrics["raw_plan_realization"]
     return {"percent": percent, "employees": len(users), "people": people, "metrics": metrics,
             "baseline_available": not missing and bool(users), "missing_departments": missing,
@@ -255,8 +252,17 @@ async def build_realization_capture(db: AsyncSession, day: date) -> dict:
 
 
 def realization_department_rows(realization: dict | None) -> list[dict]:
-    return [item for item in (realization or {}).get("departments", [])
+    return [{**item, "comment": realization_department_comment(item.get("percent"))}
+            for item in (realization or {}).get("departments", [])
             if str(item.get("code") or "").strip().upper() not in {"GA", "HR"}]
+
+
+def realization_department_comment(percent: float | None) -> str:
+    if percent is None:
+        return realization_comment(percent)
+    if percent == 50:
+        return "Jemi në 50%"
+    return f"Jemi {'mbi' if percent > 50 else 'nën'} 50%"
 
 
 def realization_comment(percent: float | None) -> str:
@@ -466,13 +472,14 @@ def render_html(report: dict) -> str:
         realization_html = f"<p><strong>{summary}</strong> — {_cell(realization['comment'])}</p><p>Marrë në: {_cell(report.get('realization_captured_at'))}</p>"
         department_rows = realization_department_rows(realization)
         if department_rows:
-            realization_html += "<table width='100%' border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;border:1px solid #000'><tr>"
-            realization_html += "".join(f"<th bgcolor='#e2e8f0' style='{cell_style};background-color:#e2e8f0'>{label}</th>" for label in ("DEPARTAMENTI", "REALIZIMI", "VLERËSIMI")) + "</tr>"
+            realization_html += "<table border='1' cellpadding='6' cellspacing='0' style='width:auto;border-collapse:collapse;border:1px solid #000'><tr>"
+            compact_style = ";white-space:nowrap"
+            realization_html += "".join(f"<th bgcolor='#e2e8f0' style='{cell_style};background-color:#e2e8f0{compact_style}'>{label}</th>" for label in ("DEP", "REALIZIMI", "VLERËSIMI")) + "</tr>"
             for item in department_rows:
                 value = item.get("percent")
                 fill = "#e2e8f0" if value is None else "#fee2e2" if value < 50 else "#dcfce7"
-                realization_html += (f"<tr><td style='{cell_style}'>{_cell(item['code'])}</td>"
-                                     f"<td bgcolor='{fill}' style='{cell_style};background-color:{fill};font-weight:700'>{f'{value:g}%' if value is not None else 'Pa të dhëna'}</td>"
+                realization_html += (f"<tr><td style='{cell_style}{compact_style}'>{_cell(item['code'])}</td>"
+                                     f"<td bgcolor='{fill}' style='{cell_style}{compact_style};background-color:{fill};font-weight:700'>{f'{value:g}%' if value is not None else 'Pa të dhëna'}</td>"
                                      f"<td style='{cell_style}'>{_cell(item['comment'])}</td></tr>")
             realization_html += "</table>"
     else:

@@ -123,7 +123,7 @@ def export_blocks(report: dict) -> list[dict]:
                     {"text": f"{value:g}%" if value is not None else "Pa të dhëna", "fill": fill, "color": "#000000", "bold": True, "divider": False},
                     {"text": _text(item["comment"]), "fill": "#ffffff", "color": "#000000", "bold": False, "divider": False},
                 ])
-            blocks.append({"kind": "table", "columns": [("code", "DEPARTAMENTI", 124), ("percent", "REALIZIMI", 96), ("comment", "VLERËSIMI", 360)], "rows": departments})
+            blocks.append({"kind": "table", "compact": True, "columns": [("code", "DEP", 48), ("percent", "REALIZIMI", 88), ("comment", "VLERËSIMI", 136)], "rows": departments})
     else:
         text("Vlera e realizimit merret ne 16:15. Nuk ka vlere te ruajtur per kete date.")
     text(GA_TITLE, 1)
@@ -219,10 +219,15 @@ def render_docx(report: dict, *, blocks: list[dict] | None = None) -> bytes:
         else:
             columns = block["columns"]
             total = sum(column[2] for column in columns)
-            widths = [int(available * column[2] / total) for column in columns]
-            widths[-1] += available - sum(widths)
+            table_width = min(available, total * 15) if block.get("compact") else available
+            widths = [int(table_width * column[2] / total) for column in columns]
+            widths[-1] += table_width - sum(widths)
             table = document.add_table(rows=1, cols=len(columns))
             table.autofit = False
+            if block.get("compact"):
+                table_size = table._tbl.tblPr.find(qn("w:tblW"))
+                table_size.set(qn("w:type"), "dxa")
+                table_size.set(qn("w:w"), str(table_width))
             for index, width in enumerate(widths):
                 table.columns[index].width = Twips(width)
             repeat = OxmlElement("w:tblHeader")
@@ -294,8 +299,9 @@ def render_png(report: dict, *, blocks: list[dict] | None = None) -> bytes:
                                "height": len(lines) * 25 + 6, "fill": fill, "color": color})
         else:
             total = sum(c[2] for c in block["columns"])
-            widths = [round(content_width * c[2] / total) for c in block["columns"]]
-            widths[-1] += content_width - sum(widths)
+            table_width = min(content_width, round(total * scale)) if block.get("compact") else content_width
+            widths = [round(table_width * c[2] / total) for c in block["columns"]]
+            widths[-1] += table_width - sum(widths)
             header = [{"text": label, "fill": "#e2e8f0", "color": "#000000", "bold": True, "divider": False}
                       for _, label, _ in block["columns"]]
             for values in [header, *block["rows"]]:

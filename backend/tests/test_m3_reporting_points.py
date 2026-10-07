@@ -20,6 +20,7 @@ from app.models.enums import UserRole
 from app.models.m3_reporting_points import M3ReportingPointsReport
 from app.services import m3_reporting_points as service
 from app.services import m3_reporting_points_scheduler as scheduler
+from app.services.daily_realization_metrics import calculate_daily_metrics
 from app.services.primeflow_report import GmailService, REPORT_SENDER_EMAIL
 from tests.test_migration_graph import migration_scripts
 
@@ -187,7 +188,7 @@ class RenderingTests(unittest.TestCase):
         self.assertIn("👁</strong>", html)
         self.assertIn("!!!</strong>", html)
         self.assertIn("75%", html)
-        self.assertIn("DEV: 75% - Mbi 50%", service.render_plain_text(report))
+        self.assertIn("DEV: 75% - Jemi mbi 50%", service.render_plain_text(report))
         self.assertIn("👁 08:00 Task SYS", service.render_plain_text(report))
 
     def report(self):
@@ -380,7 +381,7 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row.manual_answers, {"underload": "Pergjigje e ruajtur"})
         self.assertEqual(row.realization, {"percent": 62})
 
-    async def test_staff_percentage_is_weighted_by_the_existing_realization_metric(self):
+    async def test_capture_copies_authoritative_realization_without_recalculating_tasks(self):
         department = uuid.uuid4()
         ids = [uuid.uuid4(), uuid.uuid4()]
         users = [SimpleNamespace(id=user_id, department_id=department) for user_id in ids]
@@ -390,20 +391,23 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         department_result.scalars.return_value.all.return_value = [SimpleNamespace(id=department, code="DEV", name="Development")]
         db = AsyncMock()
         db.execute.side_effect = [result, department_result]
-        # One person realizes 1/1, the other 0/3: staff result pools the tasks (25% base,
-        # minus 3 untouched * 25 / 4) rather than averaging the people's 100% and 0%.
+        # The source's percent must be copied even when task details are absent.
         people = [{"user_id": str(ids[0]), "user_name": "A", "tasks": [{"in_original_plan": True, "classification": "REALIZED_AS_PLANNED"}], "metrics": {"raw_plan_realization": 100}},
                   {"user_id": str(ids[1]), "user_name": "B", "tasks": [{"in_original_plan": True, "classification": "NO_PROGRESS"}] * 3, "metrics": {"raw_plan_realization": 0}}]
-        with patch.object(service, "build_live_daily_realization", new=AsyncMock(return_value={"baseline_available": True, "people": people})):
+        metrics = {**calculate_daily_metrics([]), "raw_plan_realization": 37.1}
+        for person in people:
+            person.pop("tasks")
+        with patch.object(service, "build_live_daily_realization", new=AsyncMock(return_value={"baseline_available": True, "people": people, "metrics": metrics})):
             capture = await service.build_realization_capture(db, DAY)
-        self.assertEqual(capture["percent"], 6.3)
+        self.assertEqual(capture["percent"], 37.1)
+        self.assertEqual(capture["metrics"], metrics)
         self.assertEqual(capture["departments"][0]["code"], "DEV")
-        self.assertEqual(capture["departments"][0]["percent"], 6.3)
+        self.assertEqual(capture["departments"][0]["percent"], 37.1)
         db.execute.side_effect = [result, department_result]
-        with patch.object(service, "build_live_daily_realization", new=AsyncMock(return_value={"baseline_available": False, "people": people})):
+        with patch.object(service, "build_live_daily_realization", new=AsyncMock(return_value={"baseline_available": False, "people": people, "metrics": metrics})):
             capture = await service.build_realization_capture(db, DAY)
-        self.assertEqual(capture["percent"], 25)
-        self.assertEqual(capture["departments"][0]["percent"], 25)
+        self.assertEqual(capture["percent"], 37.1)
+        self.assertEqual(capture["departments"][0]["percent"], 37.1)
         self.assertFalse(capture["baseline_available"])
 
     async def test_departments_have_separate_weighted_percentages_and_saved_order(self):
@@ -418,12 +422,16 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         live = {dev.id: {"baseline_available": True, "people": [{"user_id": str(users[0].id), "tasks": [{"in_original_plan": True, "classification": "REALIZED_AS_PLANNED"}], "metrics": {}}]},
                 gd.id: {"baseline_available": True, "people": [{"user_id": str(users[1].id), "tasks": [{"in_original_plan": True, "classification": "NO_PROGRESS"}] * 3, "metrics": {}}]},
                 pcm.id: {"baseline_available": False, "people": []}}
+        for report in live.values():
+            report["metrics"] = calculate_daily_metrics(
+                row for person in report["people"] for row in person["tasks"]
+            )
         async def build(_, department_id, day):
             return live[department_id]
         with patch.object(service, "build_live_daily_realization", new=build):
             capture = await service.build_realization_capture(db, DAY)
         self.assertEqual([(item["code"], item["percent"]) for item in capture["departments"]], [("DEV", 100), ("GD", 0), ("PCM", None)])
-        self.assertEqual(capture["percent"], 25)
+        self.assertEqual(capture["percent"], 6.3)
         self.assertEqual([item["employees"] for item in capture["departments"]], [1, 1, 1])
 
     async def test_realization_includes_all_departments_and_the_complete_live_population(self):
@@ -441,18 +449,18 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
             tasks = ([{"in_original_plan": True, "classification": "REALIZED_AS_PLANNED"},
                       {"in_original_plan": True, "classification": "NO_PROGRESS"}]
                      if department_id == departments[1].id else [])
-            return {"baseline_available": False, "people": [
+            return {"baseline_available": False, "metrics": calculate_daily_metrics(tasks), "people": [
                 {"user_id": str(uuid.uuid4()), "user_name": "Manager", "tasks": tasks,
-                 "metrics": service.calculate_daily_metrics(tasks)}] if tasks else []}
+                 "metrics": calculate_daily_metrics(tasks)}] if tasks else []}
         with patch.object(service, "build_live_daily_realization", new=AsyncMock(side_effect=build)) as live:
             capture = await service.build_realization_capture(db, DAY)
         self.assertEqual(live.await_count, 6)
         self.assertEqual({item["code"] for item in capture["departments"]},
                          {"DEV", "FIN", "GA", "GD", "HR", "PCM"})
-        self.assertEqual(capture["percent"], 50)
+        self.assertEqual(capture["percent"], 37.5)
         self.assertEqual(capture["metrics"]["original_planned_count"], 2)
         self.assertEqual(capture["metrics"]["total_completed_today_count"], 1)
-        self.assertEqual(next(item for item in capture["departments"] if item["code"] == "FIN")["percent"], 50)
+        self.assertEqual(next(item for item in capture["departments"] if item["code"] == "FIN")["percent"], 37.5)
         self.assertIsNone(next(item for item in capture["departments"] if item["code"] == "GA")["percent"])
         report = {"report_date": DAY.isoformat(), "subject": "M3", "manual_answers": {},
                   "data": {}, "realization": capture, "realization_captured_at": None}
@@ -461,7 +469,7 @@ class CaptureAndWorkflowTests(unittest.IsolatedAsyncioTestCase):
         department_table = next(block for block in blocks if block.get("kind") == "table"
                                 and block["columns"][0][0] == "code")
         self.assertEqual(len(department_table["rows"]), 4)
-        self.assertIn("50%", service.render_plain_text(report))
+        self.assertIn("37.5%", service.render_plain_text(report))
         html = service.render_html(report)
         for department in departments:
             if department.code not in {"GA", "HR"}:

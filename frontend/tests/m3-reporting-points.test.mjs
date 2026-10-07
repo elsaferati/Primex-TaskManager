@@ -92,7 +92,7 @@ test("realization includes saved department percentages and missing data", () =>
   assert.match(html, /75%/)
   assert.match(html, /25%/)
   assert.match(html, /Pa të dhëna/)
-  assert.match(html, /DEPARTAMENTI/)
+  assert.match(html, />DEP<\/th>/)
   assert.doesNotMatch(html, /Hidden GA comment|Hidden HR comment|>GA<\/td>|>HR<\/td>/)
 })
 

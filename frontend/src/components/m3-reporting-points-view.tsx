@@ -209,7 +209,14 @@ export function M3ReportingPointsView({ report, answers, onAnswerChange, disable
           </div>
           <div><p className="font-medium">{realization.comment}</p><p className="mt-1 text-xs text-muted-foreground">{realization.employees} persona · {report.realization_captured_at ? `Marrë në ${reportTime(report.realization_captured_at)}` : <><span className="rounded bg-blue-100 px-1 py-0.5 font-semibold text-blue-800">LIVE</span> në {reportTime(report.generated_at)} · ende pa u ruajtur, ruhet pas 16:15</>}</p></div>
         </div> : <p className="mt-5 rounded-lg bg-muted px-4 py-3 text-sm">Nuk ka ende një vlerë të ruajtur për orën 16:15 të kësaj date.</p>}
-        {realizationDepartments.length ? <div className="mt-5 overflow-x-auto"><table className="w-full border-collapse text-sm"><thead className="bg-slate-200"><tr>{["DEPARTAMENTI", "REALIZIMI", "VLERËSIMI"].map((label) => <th key={label} className="border border-black p-2 text-left">{label}</th>)}</tr></thead><tbody>{realizationDepartments.map((item) => <tr key={item.department_id}><td className="border border-black p-2 font-semibold">{item.code}</td><td className={`border border-black p-2 font-bold ${item.percent == null ? "bg-muted" : item.percent < 50 ? "bg-red-100 text-red-900" : "bg-green-100 text-green-900"}`}>{item.percent == null ? "Pa të dhëna" : `${item.percent}%`}</td><td className="border border-black p-2">{item.comment}</td></tr>)}</tbody></table></div> : realization ? <p className="mt-4 text-sm text-muted-foreground">Nuk ka ndarje sipas departamentit të ruajtur për këtë datë.</p> : null}
+        {realizationDepartments.length ? <div className="mt-5 overflow-x-auto"><table className="w-auto border-collapse text-sm">
+          <thead className="bg-slate-200"><tr>{["DEP", "REALIZIMI", "VLERËSIMI"].map((label) => <th key={label} className="whitespace-nowrap border border-black p-2 text-left">{label}</th>)}</tr></thead>
+          <tbody>{realizationDepartments.map((item) => <tr key={item.department_id}>
+            <td className="whitespace-nowrap border border-black p-2 font-semibold">{item.code}</td>
+            <td className={`whitespace-nowrap border border-black p-2 font-bold ${item.percent == null ? "bg-muted" : item.percent < 50 ? "bg-red-100 text-red-900" : "bg-green-100 text-green-900"}`}>{item.percent == null ? "Pa të dhëna" : `${item.percent}%`}</td>
+            <td className="border border-black p-2">{item.percent == null ? item.comment : item.percent === 50 ? "Jemi në 50%" : `Jemi ${item.percent < 50 ? "nën" : "mbi"} 50%`}</td>
+          </tr>)}</tbody>
+        </table></div> : realization ? <p className="mt-4 text-sm text-muted-foreground">Nuk ka ndarje sipas departamentit të ruajtur për këtë datë.</p> : null}
       </section>
     </section> : null}
     <section className="space-y-5" aria-labelledby="ga-points-title">
