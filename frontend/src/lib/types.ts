@@ -905,7 +905,7 @@ export interface RealizationDeadlineTask {
   person?: string
 }
 
-export type RealizationItemKind = "COMPLETED" | "IN_PROGRESS" | "POSTPONED" | "NO_PROGRESS" | "REASSIGNED_OUT" | "EXTRA_COMPLETED" | "EXTRA_OPEN"
+export type RealizationItemKind = "COMPLETED" | "IN_PROGRESS" | "POSTPONED" | "NO_PROGRESS" | "REASSIGNED_OUT" | "EXTRA_COMPLETED" | "EXTRA_OPEN" | "WFE" | "EXTRA_WFE"
 
 /** How one task moved a person's Plan RLZ for the day. */
 export interface RealizationItem {
@@ -1150,6 +1150,7 @@ export interface RealizationPersonResult {
     weekly_postponed_task_count?: number
     /** Points deducted for plan tasks still unfinished at week end (25 postponed, 40/60 postponed with deadline, 50/70 missed deadline). */
     weekly_penalty_points?: number
+    weekly_wfe_count?: number
     weekly_no_progress_task_count?: number
     weekly_quantity_task_count?: number
     weekly_quantity_planned_count?: number

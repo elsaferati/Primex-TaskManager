@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 
 from app.services.daily_realization_metrics import (
+    WFE_CREDIT,
     deadline_task_card,
     extra_task_penalty,
     plan_task_penalty,
@@ -117,6 +118,8 @@ def build_weekly_task_metrics(
     states: dict[str, dict] = {}
     quantity_occurrences: dict[tuple[str, str], dict] = {}
     deadline_occurrences: dict[tuple[str, str], dict] = {}
+    # Whether each task was waiting for the client (WFE) on the last day it appeared.
+    latest_wfe: dict[str, tuple[str, bool]] = {}
 
     def collect(task: dict) -> str | None:
         identity = _identity(task)
@@ -139,6 +142,8 @@ def build_weekly_task_metrics(
         completed_today: set[str] = set()
         for task in timeline_item.get("tasks") or []:
             identity = collect(task)
+            if identity is not None and "wfe" in task and day >= latest_wfe.get(identity, ("", False))[0]:
+                latest_wfe[identity] = (day, bool(task["wfe"]))
             if identity is not None and isinstance(task.get("quantity"), dict):
                 quantity_occurrences[(day, identity)] = task["quantity"]
             if identity is not None and task.get("deadline_was_today"):
@@ -182,6 +187,11 @@ def build_weekly_task_metrics(
     }
     additional_todo = additional_keys - additional_completed - additional_postponed - additional_in_progress
 
+    # WFE work is done on our side: 90% credit and no penalty for the week.
+    wfe_keys = {
+        key for key, (_day, wfe) in latest_wfe.items()
+        if wfe and key not in completed_keys and (key in planned_keys or key in additional_keys)
+    }
     pending_planned = planned_keys - planned_completed
     planned_postponed = {key for key in pending_planned if _is_postponed(states[key])}
     planned_in_progress = {
@@ -245,7 +255,7 @@ def build_weekly_task_metrics(
             completed=False,
             no_progress=key in planned_no_progress,
         )
-        for key in pending_planned
+        for key in pending_planned - wfe_keys
     ) + sum(
         extra_task_penalty(
             postponed=key in additional_postponed,
@@ -253,11 +263,13 @@ def build_weekly_task_metrics(
             critical=key in critical_keys,
             completed=False,
         )
-        for key in additional_keys - additional_completed
+        for key in additional_keys - additional_completed - wfe_keys
     )
+    metrics["weekly_wfe_count"] = len(wfe_keys)
     metrics["weekly_penalty_points"] = penalty_points
     metrics["weekly_progress_percent"] = realization_percent(
-        len(planned_completed | additional_completed), len(planned_keys), len(additional_keys),
+        len(planned_completed | additional_completed) + WFE_CREDIT * len(wfe_keys),
+        len(planned_keys), len(additional_keys),
         penalty_points, len(planned_keys) or len(additional_keys),
     ) or 0.0
     return metrics

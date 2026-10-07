@@ -3463,8 +3463,9 @@ async def update_task(
                 else:
                     task.completed_at = None
 
-        # Per-day progress logging: touches the record for the task's due_date (today/past only).
-        # If due_date is in the future, skip logging; if due_date is None, fall back to today.
+        # Per-day progress logging: overdue tasks touch the record for their due_date.
+        # Tasks due today, later or without a due date are logged on today, so work
+        # done ahead of a deadline is credited to the day it actually happened.
         if total is not None and total > 0:
             made_progress = completed > old_completed
             became_done_today = completed >= total and old_completed < total
@@ -3477,9 +3478,7 @@ async def update_task(
                 if task.due_date is not None:
                     due_dt = task.due_date
                     due_day = due_dt.astimezone(timezone.utc).date() if due_dt.tzinfo else due_dt.date()
-                    if due_day > today:
-                        progress_day = None
-                    else:
+                    if due_day < today:
                         progress_day = due_day
 
                 if progress_day is not None:

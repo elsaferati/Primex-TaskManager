@@ -6,6 +6,7 @@ from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
 from app.config import settings
+from app.services.daily_realization_events import semantic_local_day
 from app.services.task_product_counts import task_product_counts
 from app.services.task_strike_events import CHECKLIST_ITEM, DONE_BLOCK, TECHNICAL_TAGS, count_struck_points_for_day
 
@@ -34,6 +35,7 @@ def _local_day(value: datetime | None) -> date | None:
 def daily_task_quantity(
     task: Any, *, day: date, baseline: dict | None = None,
     progress: Any = None, strike_events: Iterable[Any] = (), done_for_day: bool = False,
+    previous_progress: Any = None,
 ) -> dict | None:
     title = getattr(task, "title", None) or (baseline or {}).get("title")
     planned = title_planned_quantity(title)
@@ -68,15 +70,29 @@ def daily_task_quantity(
     counts = task_product_counts(task)
     if counts is None:
         return None
-    planned, done = counts
+    total, done_by_end = counts
+    # Product counts are cumulative across days; the day only owns what was
+    # added since the last snapshot before it.
+    done_before = max(0, int(getattr(previous_progress, "completed_value", 0) or 0)) if previous_progress is not None else 0
     if progress is not None and (getattr(progress, "total_value", 0) or 0) > 0:
-        planned = int(progress.total_value)
-        done = max(0, int(progress.completed_value or 0))
+        total = int(progress.total_value)
+        done_by_end = max(0, int(progress.completed_value or 0))
     elif day not in {_local_day(getattr(task, "due_date", None)), _local_day(getattr(task, "completed_at", None))}:
         # Live cumulative notes must not leak work into a different report day.
-        done = 0
+        done_by_end = done_before
     progress_done = progress is not None and str(getattr(progress, "daily_status", "") or "").upper() == "DONE"
     completed_on_day = _local_day(getattr(task, "completed_at", None)) == day
     if done_for_day or progress_done or completed_on_day:
-        done = planned
+        done_by_end = max(done_by_end, total)
+    remaining = max(0, total - done_before)
+    done = max(0, done_by_end - done_before)
+    # Before its deadline a product task is not a quantity obligation for the
+    # day; work done ahead still counts as produced.
+    deadlines = [
+        value for value in (
+            _local_day(getattr(task, "due_date", None)),
+            semantic_local_day((baseline or {}).get("planned_due_date")),
+        ) if value is not None
+    ]
+    planned = 0 if deadlines and min(deadlines) > day else remaining
     return {"source": "products", "planned": planned, "completed": done, "delta": done - planned}

@@ -38,11 +38,12 @@ export function weeklyMetrics(person: RealizationPersonResult) {
   const criticalDeadlines = facts.weekly_critical_deadline_count ?? 0
   const criticalDeadlinesCompleted = facts.weekly_critical_deadline_completed_count ?? 0
   const deadlineTasks = facts.weekly_deadline_tasks ?? []
+  const wfe = facts.weekly_wfe_count ?? 0
   return {
     planned, completed, extra, extraCompleted, extraProgress, extraPostponed, extraTodo, extraDeferred,
     progress, postponed, penaltyPoints, noProgress, quantityTasks, quantityPlanned, quantityCompleted, quantityDelta,
-    deadlines, deadlinesCompleted, deadlinesPostponed, deadlinesInProgress, deadlinesNoProgress, criticalDeadlines, criticalDeadlinesCompleted, deadlineTasks,
-    percent: weeklyRealizationPercent(planned, completed, extra, penaltyPoints),
+    deadlines, deadlinesCompleted, deadlinesPostponed, deadlinesInProgress, deadlinesNoProgress, criticalDeadlines, criticalDeadlinesCompleted, deadlineTasks, wfe,
+    percent: weeklyRealizationPercent(planned, completed, extra, penaltyPoints, wfe),
   }
 }
 
@@ -85,13 +86,13 @@ export function WeeklyRealizationTable({ reports, personId, onSelect, loading, o
 
   const total = rows.reduce((sum, { person }) => {
     const value = weeklyMetrics(person)
-    for (const key of ["planned", "completed", "extra", "extraCompleted", "extraProgress", "extraPostponed", "extraTodo", "extraDeferred", "progress", "postponed", "penaltyPoints", "noProgress", "quantityTasks", "quantityPlanned", "quantityCompleted", "quantityDelta", "deadlines", "deadlinesCompleted", "deadlinesPostponed", "deadlinesInProgress", "deadlinesNoProgress", "criticalDeadlines", "criticalDeadlinesCompleted"] as const) sum[key] += value[key]
+    for (const key of ["planned", "completed", "extra", "extraCompleted", "extraProgress", "extraPostponed", "extraTodo", "extraDeferred", "progress", "postponed", "penaltyPoints", "noProgress", "quantityTasks", "quantityPlanned", "quantityCompleted", "quantityDelta", "deadlines", "deadlinesCompleted", "deadlinesPostponed", "deadlinesInProgress", "deadlinesNoProgress", "criticalDeadlines", "criticalDeadlinesCompleted", "wfe"] as const) sum[key] += value[key]
     // Pooled deadlines lose their owner, so the name is carried along.
     sum.deadlineTasks.push(...value.deadlineTasks.map((task) => ({ ...task, person: person.user_name })))
     return sum
-  }, { planned: 0, completed: 0, extra: 0, extraCompleted: 0, extraProgress: 0, extraPostponed: 0, extraTodo: 0, extraDeferred: 0, progress: 0, postponed: 0, penaltyPoints: 0, noProgress: 0, quantityTasks: 0, quantityPlanned: 0, quantityCompleted: 0, quantityDelta: 0, deadlines: 0, deadlinesCompleted: 0, deadlinesPostponed: 0, deadlinesInProgress: 0, deadlinesNoProgress: 0, criticalDeadlines: 0, criticalDeadlinesCompleted: 0, deadlineTasks: [] as RealizationDeadlineTask[] })
+  }, { planned: 0, completed: 0, extra: 0, extraCompleted: 0, extraProgress: 0, extraPostponed: 0, extraTodo: 0, extraDeferred: 0, progress: 0, postponed: 0, penaltyPoints: 0, noProgress: 0, quantityTasks: 0, quantityPlanned: 0, quantityCompleted: 0, quantityDelta: 0, deadlines: 0, deadlinesCompleted: 0, deadlinesPostponed: 0, deadlinesInProgress: 0, deadlinesNoProgress: 0, criticalDeadlines: 0, criticalDeadlinesCompleted: 0, wfe: 0, deadlineTasks: [] as RealizationDeadlineTask[] })
   total.deadlineTasks = sortDeadlineTasks(total.deadlineTasks)
-  const totalPercent = weeklyRealizationPercent(total.planned, total.completed, total.extra, total.penaltyPoints)
+  const totalPercent = weeklyRealizationPercent(total.planned, total.completed, total.extra, total.penaltyPoints, total.wfe)
 
   const planCell = (value: ReturnType<typeof weeklyMetrics> | typeof total) => <>
     <p className={cn(metricHeadline, "font-semibold text-slate-900")}><span className="tabular-nums">Plan {value.planned}</span> <span className="text-slate-400">+</span> <span className="tabular-nums text-blue-800">Ekstra {value.extra}</span> <span className="text-slate-400">=</span> <span className="text-base font-bold tabular-nums">{value.planned + value.extra} total</span></p>

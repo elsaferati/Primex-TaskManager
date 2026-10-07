@@ -379,6 +379,25 @@ async def build_live_daily_realization(
         TaskDailyProgress.task_id.in_(task_ids), TaskDailyProgress.day_date == day,
     ))).scalars().all() if task_ids else []
     progress = {row.task_id: row for row in progress_rows}
+    # Latest snapshot before the day, so cumulative product counts become the day's own work.
+    previous_progress: dict[uuid.UUID, TaskDailyProgress] = {}
+    if task_ids:
+        for row in (await db.execute(select(TaskDailyProgress).where(
+            TaskDailyProgress.task_id.in_(task_ids), TaskDailyProgress.day_date < day,
+        ).order_by(TaskDailyProgress.task_id, TaskDailyProgress.day_date.desc()).distinct(
+            TaskDailyProgress.task_id,
+        ))).scalars().all():
+            previous_progress[row.task_id] = row
+    # A later status change tells what the status was when the day ended (WFE credit).
+    status_after_day: dict[uuid.UUID, str] = {}
+    if task_ids:
+        for event in (await db.execute(select(AuditLog).where(
+            AuditLog.entity_type == "task",
+            AuditLog.entity_id.in_(task_ids),
+            AuditLog.action.in_(("task.status_changed", "task.reopened")),
+            AuditLog.created_at > end_utc,
+        ).order_by(AuditLog.entity_id, AuditLog.created_at.asc()).distinct(AuditLog.entity_id))).scalars().all():
+            status_after_day[event.entity_id] = str((event.before or {}).get("value") or "").upper()
     strike_rows = (await db.execute(select(TaskStrikeEvent).where(
         TaskStrikeEvent.task_id.in_(task_ids),
     ))).scalars().all() if task_ids else []
@@ -501,6 +520,7 @@ async def build_live_daily_realization(
                 task, day=day, baseline=original, progress=progress.get(task_id),
                 strike_events=strikes_by_task.get(task_id, []),
                 done_for_day=completion_credited,
+                previous_progress=previous_progress.get(task_id),
             )
             current_due = local_day(task.due_date) if task else None
             created_day = local_day(task.created_at) if task else None
@@ -581,6 +601,9 @@ async def build_live_daily_realization(
                 "baseline_due_date": original_due.isoformat() if original_due else None,
                 "current_due_date": current_due.isoformat() if current_due else None,
                 "current_status": task.status if task else "DELETED",
+                "wfe": bool(task) and not completion_credited and status_after_day.get(
+                    task_id, str(getattr(task.status, "value", task.status) if task else "").upper(),
+                ) == "WAITING_CLIENT",
                 "classification": classification, "in_original_plan": bool(original),
                 "created_date": created_day.isoformat() if created_day else None,
                 "completion_credited": completion_credited,

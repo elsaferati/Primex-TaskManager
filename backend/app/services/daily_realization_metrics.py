@@ -6,6 +6,8 @@ from datetime import date, timedelta
 from typing import Iterable, Mapping
 
 COMPLETED_CLASSIFICATIONS = {"ADDITIONAL_COMPLETED", "COMPLETED_LATE", "COMPLETED_EARLY"}
+# A task waiting for the client (WFE) is done on our side except for the client's answer.
+WFE_CREDIT = 0.9
 
 
 def row_has_progress(row: Mapping[str, object]) -> bool:
@@ -131,7 +133,11 @@ def _realization_item(row: Mapping[str, object], *, extra_weight: float) -> dict
     completed = classification in {"REALIZED_AS_PLANNED", *COMPLETED_CLASSIFICATIONS}
     deadline = bool(row.get("deadline_was_today"))
     critical = bool(row.get("deadline_critical"))
-    if not planned:
+    wfe = bool(row.get("wfe")) and not completed and not postponed and classification != "REASSIGNED_OUT"
+    if wfe:
+        kind = "WFE" if planned else "EXTRA_WFE"
+        credit = share * WFE_CREDIT
+    elif not planned:
         kind = "EXTRA_COMPLETED" if completed else "EXTRA_OPEN"
         credit = share if completed else 0.0
     elif completed:
@@ -146,10 +152,10 @@ def _realization_item(row: Mapping[str, object], *, extra_weight: float) -> dict
         kind, credit = "REASSIGNED_OUT", 0.0
     else:
         kind, credit = "NO_PROGRESS", 0.0
-    if not planned:
-        penalty = extra_task_penalty(postponed=postponed, deadline=deadline, critical=critical, completed=completed)
-    elif classification == "REASSIGNED_OUT":
+    if wfe or classification == "REASSIGNED_OUT":
         penalty = 0.0
+    elif not planned:
+        penalty = extra_task_penalty(postponed=postponed, deadline=deadline, critical=critical, completed=completed)
     else:
         penalty = plan_task_penalty(
             postponed=postponed, deadline=deadline, critical=critical, completed=completed,

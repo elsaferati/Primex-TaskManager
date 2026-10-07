@@ -259,3 +259,66 @@ def test_metrics_sum_quantities_separately_and_exclude_transferred_obligations()
     assert metrics["quantity_delta"] == 0
     assert metrics["original_planned_count"] == 3
     assert metrics["total_completed_today_count"] == 0
+
+
+def product_task(**values):
+    return task(**(dict(title="TT-PIM IMG: PROD", project_id=uuid.uuid4(), phase="PRODUCT", daily_products=48) | values))
+
+
+def test_product_quantity_counts_only_work_added_on_the_day():
+    # 31 were done on 06.10; finishing to 48 on 07.10 adds only 17.
+    result = daily_task_quantity(
+        product_task(internal_notes="completed_products=48", completed_at=datetime(2026, 9, 17, 10, tzinfo=timezone.utc)),
+        day=DAY,
+        progress=SimpleNamespace(total_value=48, completed_value=48, daily_status="DONE"),
+        previous_progress=SimpleNamespace(total_value=48, completed_value=31, daily_status="IN_PROGRESS"),
+        done_for_day=True,
+    )
+    assert result == dict(source="products", planned=17, completed=17, delta=0)
+
+
+def test_product_work_ahead_of_deadline_counts_without_a_daily_obligation():
+    result = daily_task_quantity(
+        product_task(internal_notes="completed_products=31", due_date=datetime(2026, 9, 18, 14, tzinfo=timezone.utc)),
+        day=DAY,
+        progress=SimpleNamespace(total_value=48, completed_value=31, daily_status="IN_PROGRESS"),
+    )
+    assert result == dict(source="products", planned=0, completed=31, delta=31)
+
+
+def test_product_postponed_from_the_day_keeps_its_plan():
+    result = daily_task_quantity(
+        product_task(due_date=datetime(2026, 9, 18, 14, tzinfo=timezone.utc)),
+        day=DAY,
+        baseline={"planned_due_date": "2026-09-17T14:00:00+00:00"},
+    )
+    assert result == dict(source="products", planned=48, completed=0, delta=-48)
+
+
+def test_product_day_without_snapshot_carries_previous_progress():
+    result = daily_task_quantity(
+        product_task(internal_notes="completed_products=40", due_date=datetime(2026, 9, 16, 14, tzinfo=timezone.utc)),
+        day=DAY,
+        previous_progress=SimpleNamespace(total_value=48, completed_value=31, daily_status="IN_PROGRESS"),
+    )
+    assert result == dict(source="products", planned=17, completed=0, delta=-17)
+
+
+def _plan_row(**values):
+    return dict(task_id=str(uuid.uuid4()), title="Detyre", in_original_plan=True, daily_share=1.0) | values
+
+
+def test_wfe_plan_task_counts_as_ninety_percent_without_penalty():
+    metrics = calculate_daily_metrics([
+        _plan_row(classification="NO_PROGRESS", current_status="WAITING_CLIENT", wfe=True, deadline_was_today=True),
+        _plan_row(classification="REALIZED_AS_PLANNED", current_status="DONE"),
+    ])
+    item = next(item for item in metrics["realization_items"] if item["kind"] == "WFE")
+    assert item["credit"] == 0.9 and item["penalty"] == 0
+    assert metrics["raw_plan_realization"] == 95.0
+
+
+def test_wfe_flag_is_ignored_once_the_task_is_completed():
+    metrics = calculate_daily_metrics([_plan_row(classification="REALIZED_AS_PLANNED", wfe=True)])
+    assert metrics["realization_items"][0]["kind"] == "COMPLETED"
+    assert metrics["raw_plan_realization"] == 100.0
