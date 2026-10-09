@@ -82,12 +82,12 @@ export function ConfirmDialogProvider({ children }: { children: React.ReactNode 
           if (!open) closeDialog(false)
         }}
       >
-        <DialogContent showCloseButton={false} className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{state?.title ?? DEFAULT_OPTIONS.title}</DialogTitle>
-            <DialogDescription>{state?.description}</DialogDescription>
+        <DialogContent showCloseButton={false} className="flex flex-col overflow-hidden sm:max-w-md">
+          <DialogHeader className="min-h-0 flex-1">
+            <DialogTitle className="shrink-0 break-words">{state?.title ?? DEFAULT_OPTIONS.title}</DialogTitle>
+            <DialogDescription className="min-h-0 overflow-y-auto overscroll-contain whitespace-pre-wrap [overflow-wrap:anywhere] pr-2">{state?.description}</DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <Button variant="outline" onClick={() => closeDialog(false)}>
               {state?.cancelLabel ?? DEFAULT_OPTIONS.cancelLabel}
             </Button>

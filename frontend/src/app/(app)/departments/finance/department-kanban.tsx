@@ -1030,14 +1030,14 @@ export default function DepartmentKanban() {
           if (!open) setViewingDescriptionTask(null)
         }}
       >
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
+        <DialogContent className="flex flex-col overflow-hidden sm:max-w-lg">
+          <DialogHeader className="min-h-0 shrink overflow-y-auto overscroll-contain pr-6 [overflow-wrap:anywhere]">
             <DialogTitle>{viewingDescriptionTask?.title || "Task Description"}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-2">
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-2">
             <Label>Description</Label>
             {viewingDescriptionTask?.description && viewingDescriptionTask.description.trim().length > 0 ? (
-              <div className="max-h-[60vh] overflow-auto rounded-md border border-slate-200 bg-slate-50 p-3 text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">
+              <div className=" rounded-md border border-slate-200 bg-slate-50 p-3 text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">
                 {viewingDescriptionTask.description}
               </div>
             ) : (
@@ -1046,7 +1046,7 @@ export default function DepartmentKanban() {
               </div>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <Button type="button" variant="outline" onClick={() => setViewingDescriptionTask(null)}>
               Close
             </Button>

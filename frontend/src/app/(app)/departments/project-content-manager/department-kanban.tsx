@@ -8006,11 +8006,11 @@ export default function DepartmentKanban() {
               </Card>
 
               <Dialog open={Boolean(allTodayEditingTaskId)} onOpenChange={(open) => { if (!open) cancelAllTodayTaskEdit() }}>
-                <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl">
-                    <DialogHeader>
+                <DialogContent className="flex flex-col overflow-hidden sm:max-w-lg bg-white border-slate-200 rounded-2xl">
+                    <DialogHeader className="shrink-0">
                       <DialogTitle className="text-slate-800">Edit Task</DialogTitle>
                     </DialogHeader>
-                    <div className="space-y-4">
+                    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-2">
                     {allTodayEditingTask?.ga_note_origin_id || allTodayEditingTask?.plan_note_origin_id ? (
                       <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
                         This is your independent note task copy. Edit its status and scheduling here; shared details are managed in {allTodayEditingTask?.plan_note_origin_id ? "PX JAV" : "GA Notes"}.
@@ -8157,7 +8157,8 @@ export default function DepartmentKanban() {
                       />
                       <span className="text-sm font-medium text-slate-700">Deadline important</span>
                     </label>
-                    <div className="flex justify-end gap-2">
+                    </div>
+                    <div className="flex shrink-0 justify-end gap-2 border-t pt-4">
                       <Button variant="outline" onClick={cancelAllTodayTaskEdit} className="rounded-xl border-slate-200">
                         Cancel
                       </Button>
@@ -8175,7 +8176,6 @@ export default function DepartmentKanban() {
                         {allTodayUpdating ? "Updating..." : "Update"}
                       </Button>
                     </div>
-                  </div>
                 </DialogContent>
               </Dialog>
 
@@ -8383,11 +8383,11 @@ export default function DepartmentKanban() {
         ) : null}
 
         <Dialog open={closeTaskDialogOpen} onOpenChange={setCloseTaskDialogOpen}>
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader>
+          <DialogContent className="flex flex-col overflow-hidden sm:max-w-lg">
+            <DialogHeader className="shrink-0">
               <DialogTitle>Close System Task</DialogTitle>
             </DialogHeader>
-            <div className="space-y-4">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-2">
               <div className="space-y-2">
                 <Label htmlFor="close-task-comment">Employee Comment</Label>
                 <Textarea
@@ -8395,10 +8395,11 @@ export default function DepartmentKanban() {
                   placeholder="Describe what was done in this task..."
                   value={closeTaskComment}
                   onChange={(e) => setCloseTaskComment(e.target.value)}
-                  className="min-h-[120px]"
+                  className="h-32 min-h-32 max-h-32 resize-none overflow-y-auto"
                 />
               </div>
-              <div className="flex justify-end gap-2">
+            </div>
+              <div className="flex shrink-0 justify-end gap-2 border-t pt-4">
                 <Button variant="outline" onClick={() => setCloseTaskDialogOpen(false)}>
                   Cancel
                 </Button>
@@ -8406,7 +8407,7 @@ export default function DepartmentKanban() {
                   {closingTask ? "Updating..." : "Close Task"}
                 </Button>
               </div>
-            </div>
+
           </DialogContent>
         </Dialog>
 
@@ -8496,11 +8497,11 @@ export default function DepartmentKanban() {
                       + Add Task
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl z-[110]">
-                    <DialogHeader>
+                  <DialogContent className="flex flex-col overflow-hidden sm:max-w-lg bg-white border-slate-200 rounded-2xl z-[110]">
+                    <DialogHeader className="shrink-0">
                       <DialogTitle className="text-slate-800">New Task</DialogTitle>
                     </DialogHeader>
-                    <div className="space-y-4">
+                    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-2">
                       <div className="space-y-2">
                         <Label className="text-slate-700">Type</Label>
                         <Select value={noProjectType} onValueChange={(v) => setNoProjectType(v as typeof noProjectType)}>
@@ -8525,7 +8526,7 @@ export default function DepartmentKanban() {
                       </div>
                       <div className="space-y-2">
                         <Label className="text-slate-700">Description</Label>
-                        <BoldOnlyEditor value={noProjectDescription} onChange={setNoProjectDescription} />
+                        <BoldOnlyEditor value={noProjectDescription} onChange={setNoProjectDescription} editorClassName="h-32 min-h-32 max-h-32 overflow-y-auto [overflow-wrap:anywhere]" />
                       </div>
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
@@ -8638,7 +8639,8 @@ export default function DepartmentKanban() {
                         />
                         <span className="text-sm font-medium text-slate-700">Deadline important</span>
                       </label>
-                      <div className="flex justify-end gap-2">
+                    </div>
+                      <div className="flex shrink-0 justify-end gap-2 border-t pt-4">
                         <Button variant="outline" onClick={() => setNoProjectOpen(false)} className="rounded-xl border-slate-200">
                           Cancel
                         </Button>
@@ -8650,7 +8652,7 @@ export default function DepartmentKanban() {
                           {creatingNoProject ? "Creating..." : "Create"}
                         </Button>
                       </div>
-                    </div>
+
                   </DialogContent>
                 </Dialog>
               ) : null}
@@ -8658,11 +8660,11 @@ export default function DepartmentKanban() {
             </div>
             {canOpenNoProjectEditDialog ? (
               <Dialog open={Boolean(editingTaskId)} onOpenChange={(open) => { if (!open) cancelEditTask() }}>
-                <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl z-[110]">
-                  <DialogHeader>
+                <DialogContent className="flex flex-col overflow-hidden sm:max-w-lg bg-white border-slate-200 rounded-2xl z-[110]">
+                  <DialogHeader className="shrink-0">
                     <DialogTitle className="text-slate-800">Edit Task</DialogTitle>
                   </DialogHeader>
-                  <div className="space-y-4">
+                  <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-2">
                     {editingGaTask ? (
                       <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
                           This is an independent note task copy. Edit its status and scheduling here; shared details are managed in {editingPlanTask ? "PX JAV" : "GA Notes"}.
@@ -8678,19 +8680,18 @@ export default function DepartmentKanban() {
                         value={editTaskTitle}
                         disabled={editingGaTask}
                         onChange={(e) => setEditTaskTitle(e.target.value)}
-                        autoResize
                         rows={3}
-                        className="min-h-[88px] resize-none whitespace-pre-wrap [overflow-wrap:anywhere] border-slate-200 focus:border-slate-400 rounded-xl"
+                        className="h-24 min-h-24 max-h-24 overflow-y-auto resize-none whitespace-pre-wrap [overflow-wrap:anywhere] border-slate-200 focus:border-slate-400 rounded-xl"
                       />
                     </div>
                     <div className="space-y-2">
                       <Label className="text-slate-700">Description</Label>
                       {editingGaTask ? (
-                        <div className="min-h-[44px] rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                        <div className="h-32 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
                           {editTaskDescription || "—"}
                         </div>
                       ) : (
-                        <BoldOnlyEditor value={editTaskDescription} onChange={setEditTaskDescription} />
+                        <BoldOnlyEditor value={editTaskDescription} onChange={setEditTaskDescription} editorClassName="h-32 min-h-32 max-h-32 overflow-y-auto [overflow-wrap:anywhere]" />
                       )}
                     </div>
                     <div className={isWaitingConfirmation(editTaskStatus) ? "grid gap-3 sm:grid-cols-[minmax(0,0.6fr)_minmax(0,1.4fr)_minmax(0,1fr)]" : "grid gap-4 md:grid-cols-2"}>
@@ -8860,7 +8861,8 @@ export default function DepartmentKanban() {
                         </DialogContent>
                       </Dialog>
                     </div>
-                    <div className="flex justify-end gap-2">
+                    </div>
+                    <div className="flex shrink-0 justify-end gap-2 border-t pt-4">
                       <Button variant="outline" onClick={cancelEditTask} className="rounded-xl border-slate-200">
                         Cancel
                       </Button>
@@ -8872,7 +8874,6 @@ export default function DepartmentKanban() {
                         {updatingTask ? "Updating..." : "Update"}
                       </Button>
                     </div>
-                  </div>
                 </DialogContent>
               </Dialog>
             ) : null}

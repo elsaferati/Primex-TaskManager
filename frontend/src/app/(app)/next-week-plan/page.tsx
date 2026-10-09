@@ -3980,12 +3980,13 @@ export default function NextWeekPlanPage() {
       </Dialog>
 
       <Dialog open={Boolean(taskDialogNoteId)} onOpenChange={(open) => (!open ? setTaskDialogNoteId(null) : null)}>
-        <DialogContent className="sm:max-w-3xl w-[95vw]">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] w-[95vw] flex-col overflow-hidden sm:max-w-3xl">
+          <DialogHeader className="shrink-0">
             <DialogTitle>Create Task from Note</DialogTitle>
           </DialogHeader>
           {taskDialogNote ? (
-            <div className="space-y-3">
+            <>
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-2">
               {taskDialogNote.planning_brief ? (
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
                   <div className="flex min-w-0 items-center gap-2">
@@ -4006,7 +4007,7 @@ export default function NextWeekPlanPage() {
                 <Textarea
                   value={taskTitle}
                   onChange={(e) => setTaskTitle(e.target.value)}
-                  className="min-h-[72px]"
+                  className="h-24 min-h-24 max-h-24 resize-none overflow-y-auto [overflow-wrap:anywhere]"
                 />
                 <TaskTitleLimitHint title={taskTitle} />
               </div>
@@ -4015,7 +4016,7 @@ export default function NextWeekPlanPage() {
                 <BoldOnlyEditor
                   value={taskDescription}
                   onChange={setTaskDescription}
-                  editorClassName="min-h-[72px] text-sm px-2 py-1"
+                  editorClassName="h-32 min-h-32 max-h-32 overflow-y-auto [overflow-wrap:anywhere] text-sm px-2 py-1"
                 />
               </div>
               <div className="grid gap-2 md:grid-cols-2">
@@ -4221,7 +4222,8 @@ export default function NextWeekPlanPage() {
                   <p className="text-xs text-muted-foreground">Select one or more departments to guide projects (optional).</p>
                 ) : null}
               </div>
-              <div className="flex justify-end gap-2">
+            </div>
+              <div className="flex shrink-0 justify-end gap-2 border-t bg-background pt-3">
                 <Button variant="outline" onClick={() => setTaskDialogNoteId(null)}>
                   Cancel
                 </Button>
@@ -4229,7 +4231,7 @@ export default function NextWeekPlanPage() {
                   {creatingTask ? "Creating..." : "Create task"}
                 </Button>
               </div>
-            </div>
+            </>
           ) : null}
         </DialogContent>
       </Dialog>
@@ -4247,11 +4249,11 @@ export default function NextWeekPlanPage() {
           setEditPlannedHorizon(PLANNED_HORIZON_NONE)
         }
       }}>
-        <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-3xl">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-3xl">
+          <DialogHeader className="shrink-0">
             <DialogTitle>Edit Note</DialogTitle>
           </DialogHeader>
-          <div className="flex-1 space-y-3 overflow-y-auto pr-1">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
             <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <Label>Note text</Label>
@@ -4310,7 +4312,7 @@ export default function NextWeekPlanPage() {
             {editNoteId && noteTaskInfo.get(editNoteId)?.taskId ? (
               <div className="space-y-2">
                 <Label>Description</Label>
-                <BoldOnlyEditor value={editDescription} onChange={setEditDescription} />
+                <BoldOnlyEditor value={editDescription} onChange={setEditDescription} editorClassName="h-32 min-h-32 max-h-32 overflow-y-auto [overflow-wrap:anywhere]" />
               </div>
             ) : null}
             {editNoteId && noteTaskInfo.get(editNoteId)?.taskId ? (
@@ -4363,7 +4365,8 @@ export default function NextWeekPlanPage() {
                 )}
               </div>
             ) : null}
-            <div className="flex justify-end gap-2">
+          </div>
+            <div className="flex shrink-0 justify-end gap-2 border-t bg-background pt-3">
               <Button variant="outline" onClick={() => {
                 setEditNoteId(null)
                 setEditDoneRanges([])
@@ -4380,7 +4383,7 @@ export default function NextWeekPlanPage() {
                 {savingEdit ? "Saving..." : "Save changes"}
               </Button>
             </div>
-          </div>
+
         </DialogContent>
       </Dialog>
     </div>

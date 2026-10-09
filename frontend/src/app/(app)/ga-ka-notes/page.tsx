@@ -4764,13 +4764,13 @@ export default function GaKaNotesPage() {
           </DialogHeader>
           {taskDialogNote ? (
             <>
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-2">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-2">
               <div className="space-y-2">
                 <Label>Title</Label>
                 <Textarea
                   value={taskTitle}
                   onChange={(e) => setTaskTitle(e.target.value)}
-                  className="min-h-[72px]"
+                  className="h-24 min-h-24 max-h-24 resize-none overflow-y-auto [overflow-wrap:anywhere]"
                 />
                 <TaskTitleLimitHint title={taskTitle} />
               </div>
@@ -4779,7 +4779,7 @@ export default function GaKaNotesPage() {
                 <BoldOnlyEditor
                   value={taskDescription}
                   onChange={setTaskDescription}
-                  editorClassName="min-h-[72px] text-sm px-2 py-1"
+                  editorClassName="h-32 min-h-32 max-h-32 overflow-y-auto [overflow-wrap:anywhere] text-sm px-2 py-1"
                 />
               </div>
               <div className={`grid gap-2 ${taskPriority === "1H" ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
@@ -5133,11 +5133,11 @@ export default function GaKaNotesPage() {
           setEditTaskAssigneeStates({})
         }
       }}>
-        <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-3xl">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-3xl">
+          <DialogHeader className="shrink-0">
             <DialogTitle>Edit Note</DialogTitle>
           </DialogHeader>
-          <div className="flex-1 space-y-3 overflow-y-auto pr-1">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
             <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <Label>Note text</Label>
@@ -5260,7 +5260,7 @@ export default function GaKaNotesPage() {
             {editNoteId && noteTaskInfo.get(editNoteId)?.taskId ? (
               <div className="space-y-2">
                 <Label>Description</Label>
-                <BoldOnlyEditor value={editDescription} onChange={setEditDescription} />
+                <BoldOnlyEditor value={editDescription} onChange={setEditDescription} editorClassName="h-32 min-h-32 max-h-32 overflow-y-auto [overflow-wrap:anywhere]" />
               </div>
             ) : null}
             {editNoteId && noteTaskInfo.get(editNoteId)?.taskId ? (
@@ -5529,7 +5529,8 @@ export default function GaKaNotesPage() {
                 )}
               </div>
             ) : null}
-            <div className="flex justify-end gap-2">
+          </div>
+            <div className="flex shrink-0 justify-end gap-2 border-t bg-background pt-3">
               <Button variant="outline" onClick={() => {
                 setEditNoteId(null)
                 setEditDoneRanges([])
@@ -5545,7 +5546,7 @@ export default function GaKaNotesPage() {
                 {savingEdit ? "Saving..." : "Save changes"}
               </Button>
             </div>
-          </div>
+
         </DialogContent>
       </Dialog>
     </div>

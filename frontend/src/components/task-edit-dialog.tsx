@@ -327,15 +327,15 @@ export function TaskEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => (!saving ? onOpenChange(nextOpen) : undefined)}>
-      <DialogContent className="flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden sm:max-w-2xl lg:max-w-4xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-2xl lg:max-w-4xl">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Edit task</DialogTitle>
           <DialogDescription>
             Update the title, type, status, start date, and due date without leaving this table.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1">
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2 md:col-span-2">
               <Label>Symbol</Label>
@@ -347,9 +347,8 @@ export function TaskEditDialog({
                 id="task-edit-title"
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
-                autoResize
                 rows={2}
-                className="min-h-[72px] resize-none whitespace-pre-wrap [overflow-wrap:anywhere]"
+                className="h-24 min-h-24 max-h-24 overflow-y-auto resize-none whitespace-pre-wrap [overflow-wrap:anywhere]"
                 disabled={saving || isNoteOriginTask}
               />
             </div>
