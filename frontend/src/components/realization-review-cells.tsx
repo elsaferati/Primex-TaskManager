@@ -5,7 +5,6 @@ import { ChevronRight, Loader2 } from "lucide-react"
 import { RealizationWeeklyDays } from "@/components/realization-weekly-days"
 import { toast } from "sonner"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
@@ -74,20 +73,24 @@ function automaticAnswer(question: RealizationQuestion): { answer: string; detai
   return { answer: typeof value === "boolean" ? yesNo(value) : "Përmbledhje", detail: typeof value === "boolean" ? "" : automaticValue(value) }
 }
 
-function ManualQuestion({ label, draft, disabled, onChange, onSaveComment }: {
-  label: string; draft: QuestionDraft; disabled: boolean; onChange: (next: QuestionDraft) => void; onSaveComment: () => void
+function ManualQuestion({ number, label, draft, disabled, onChange, onSaveComment }: {
+  number: number; label: string; draft: QuestionDraft; disabled: boolean; onChange: (next: QuestionDraft) => void; onSaveComment: () => void
 }) {
-  return <div className="border-b border-slate-200 px-3 py-2 last:border-b-0">
-    <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-slate-800">{label}</p>
-      </div>
-      <select aria-label={label} disabled={disabled} value={draft.values[0] || ""} onChange={event => onChange({ ...draft, values: event.target.value ? [event.target.value] : [], touched: true })} className="h-8 rounded border bg-white px-2 text-xs">
+  return <tr className="border-b border-slate-200 align-top even:bg-slate-50/50 hover:bg-blue-50/40 focus-within:bg-blue-50/40">
+    <td className="px-2 py-3 text-center text-xs tabular-nums text-slate-500">{number}</td>
+    <th scope="row" className="border-l border-slate-200 px-3 py-3 text-left text-sm font-medium leading-5 text-slate-800">{label}</th>
+    <td className="border-l border-slate-200 px-2 py-2">
+      <select aria-label={label} disabled={disabled} value={draft.values[0] || ""} onChange={event => onChange({ ...draft, values: event.target.value ? [event.target.value] : [], touched: true })} className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-xs focus-visible:outline-2 focus-visible:outline-blue-600 disabled:opacity-60">
         <option value="">E paplotësuar</option><option value="YES">Po</option><option value="NO">Jo</option>
       </select>
-    </div>
-    {draft.values.length ? <div className="mt-2 flex flex-col items-stretch gap-1"><Textarea aria-label={`Komenti për ${label}`} className="min-h-8 resize-y bg-slate-50 px-2 py-1.5 text-xs" rows={1} maxLength={1000} value={draft.comment} disabled={disabled} onChange={(event) => onChange({ ...draft, comment: event.target.value, touched: true })} placeholder="Shto koment (opsional)…" /><Button type="button" size="sm" variant="outline" className="h-7 self-end px-3 text-xs" disabled={disabled} onClick={onSaveComment}>Ruaj përgjigjen</Button></div> : null}
-  </div>
+    </td>
+    <td className="border-l border-slate-200 px-3 py-2">
+      <div className="flex flex-col items-stretch gap-1.5">
+        <Textarea aria-label={`Komenti për ${label}`} className="min-h-9 resize-y bg-white px-2 py-2 text-xs" rows={1} maxLength={1000} value={draft.comment} disabled={disabled} onChange={(event) => onChange({ ...draft, comment: event.target.value, touched: true })} placeholder="Shto koment (opsional)…" />
+        {draft.touched && !disabled ? <Button type="button" size="sm" variant="outline" className="h-7 self-end px-3 text-xs" onClick={onSaveComment}>Ruaj përgjigjen</Button> : null}
+      </div>
+    </td>
+  </tr>
 }
 
 export function RealizationReviewCells({ periodId, userId, userName, result: initialResult, scope = "weekly", locked = false, compactTable = false, onSaved, onPrepareResult, refreshKey, commentCell }: {
@@ -314,51 +317,51 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
         />
         {canEdit && hasUnsavedChanges ? <div className="mt-2 flex items-center justify-end gap-3"><Button type="button" size="sm" onClick={() => void save()} disabled={saving || preparing || Boolean(onPrepareResult && !result)}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Ruaj vlerësimin</Button></div> : null}
       </section> : null}
-      {automaticQuestions.length ? (
-        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label="Përgjigjet automatike">
-          <h3 className="px-4 py-3 text-sm font-semibold text-slate-700">
-            {automaticQuestions.length} përgjigje automatike nga sistemi
-            {scope === "weekly" ? ` · Totali i ${weeklySnapshotDays} ditëve` : ""}
-          </h3>
-          <div className="border-t border-slate-200">
-            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b bg-slate-50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-              <span>Pyetja</span>
-              <span>Përgjigjja</span>
-            </div>
-            {automaticQuestions.map((question) => {
-              const answer = automaticAnswer(question)
-              return <div key={question.key} className="grid grid-cols-1 gap-2 border-b border-slate-200 px-3 py-3 text-sm last:border-b-0 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:gap-4">
-                <p className="font-medium text-slate-800">{question.label}</p>
-                <div><span className="inline-flex rounded-md bg-blue-50 px-2 py-0.5 text-sm font-semibold text-blue-900">{answer.answer}</span>{answer.detail ? <p className="mt-1.5 break-words text-xs leading-5 text-slate-600">{answer.detail}</p> : null}</div>
-              </div>
-            })}
-          </div>
-        </section>
-      ) : null}
       {result ? (
-        <section>
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-bold text-slate-800">Checklist-a</p>
-              <p className="text-xs text-slate-500">{scope === "weekly" ? "Kontrollo 9 përgjigjet dhe ruaji për të marrë propozimin e shkronjës. Përgjigjet nga ditët përfshihen automatikisht; kur mungojnë, formulari nis me Jo." : "Pyetjet pa përgjigje nisin me Jo. Ndrysho në Po kur vlen dhe kliko Ruaj vlerësimin."}</p>
-            </div>
-            <Badge variant="outline">{manualQuestions.length} pyetje</Badge>
+        <section aria-label="Pyetjet dhe përgjigjet">
+          <div className="mb-3">
+            <h3 className="text-sm font-semibold text-slate-800">Pyetjet dhe përgjigjet</h3>
+            <p className="mt-1 text-xs leading-5 text-slate-500">{scope === "weekly" ? "Kontrollo përgjigjet manuale dhe ruaji për të marrë propozimin e shkronjës. Përgjigjet ditore përfshihen automatikisht; kur mungojnë, formulari nis me Jo." : "Pyetjet pa përgjigje nisin me Jo. Ndrysho në Po kur vlen dhe ruaj përgjigjet."} Komentet janë opsionale.</p>
           </div>
-          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b bg-slate-50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-              <span>Pyetja</span>
-              <span className="min-w-16 text-center">Po / Jo</span>
-            </div>
-            {manualQuestions.map((question) => (
-              <ManualQuestion
-                key={question.key}
-                label={questionLabel(question)}
-                draft={drafts[question.key] || { values: [], comment: "", touched: false }}
-                disabled={!canEdit || saving}
-                onChange={(next) => updateQuestionDraft(question.key, next)}
-                onSaveComment={() => void save({ closeDialog: false })}
-              />
-            ))}
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white" role="region" aria-label="Tabela e përgjigjeve automatike dhe manuale" tabIndex={0}>
+            <table className="w-full min-w-[640px] table-fixed border-collapse text-left">
+              <caption className="sr-only">Përgjigjet automatike dhe manuale për {userName}</caption>
+              <colgroup><col className="w-10" /><col className="w-[38%]" /><col className="w-32" /><col /></colgroup>
+              <thead className="bg-slate-100 text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                <tr>
+                  <th scope="col" className="px-2 py-3 text-center">Nr.</th>
+                  <th scope="col" className="border-l border-slate-200 px-3 py-3">Pyetja</th>
+                  <th scope="col" className="border-l border-slate-200 px-2 py-3 text-center">Përgjigjja</th>
+                  <th scope="col" className="border-l border-slate-200 px-3 py-3">Shpjegimi / Komenti</th>
+                </tr>
+              </thead>
+              {automaticQuestions.length ? <tbody>
+                <tr className="border-y border-slate-200 bg-blue-50"><th scope="rowgroup" colSpan={4} className="px-3 py-2 text-xs font-semibold text-blue-900">Automatike · {automaticQuestions.length} pyetje{scope === "weekly" ? ` · Totali i ${weeklySnapshotDays} ditëve` : ""}</th></tr>
+                {automaticQuestions.map((question, index) => {
+                  const answer = automaticAnswer(question)
+                  return <tr key={question.key} className="border-b border-slate-200 align-top even:bg-slate-50/50 hover:bg-blue-50/40">
+                    <td className="px-2 py-3 text-center text-xs tabular-nums text-slate-500">{index + 1}</td>
+                    <th scope="row" className="border-l border-slate-200 px-3 py-3 text-sm font-medium leading-5 text-slate-800">{question.label}</th>
+                    <td className="border-l border-slate-200 px-2 py-2 text-center"><span className="inline-flex min-h-9 items-center justify-center rounded-md bg-blue-50 px-3 text-xs font-semibold text-blue-900">{answer.answer}</span></td>
+                    <td className="border-l border-slate-200 px-3 py-3 text-xs leading-5 text-slate-600">{answer.detail || "—"}</td>
+                  </tr>
+                })}
+              </tbody> : null}
+              <tbody>
+                <tr className="border-y border-slate-200 bg-blue-50"><th scope="rowgroup" colSpan={4} className="px-3 py-2 text-xs font-semibold text-blue-900">Manuale · {manualQuestions.length} pyetje · Plotësohen nga përgjegjësi</th></tr>
+                {manualQuestions.map((question, index) => (
+                  <ManualQuestion
+                    key={question.key}
+                    number={automaticQuestions.length + index + 1}
+                    label={questionLabel(question)}
+                    draft={drafts[question.key] || { values: [], comment: "", touched: false }}
+                    disabled={!canEdit || saving}
+                    onChange={(next) => updateQuestionDraft(question.key, next)}
+                    onSaveComment={() => void save({ closeDialog: false })}
+                  />
+                ))}
+              </tbody>
+            </table>
           </div>
           {scope === "weekly" && canEdit && (!proposalReady || questionsDirty) ? <div className="mt-3 flex justify-end"><Button disabled={saving || preparing || !questionsDirty} onClick={() => void save({ closeDialog: false })}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Ruaj përgjigjet dhe shfaq propozimin</Button></div> : null}
         </section>
