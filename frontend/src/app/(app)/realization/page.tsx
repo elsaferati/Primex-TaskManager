@@ -38,6 +38,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { WeekPicker } from "@/components/ui/week-picker"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -1208,12 +1209,10 @@ function WeeklyRealizationView() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Java (zgjedhja normalizohet në të hënë)</Label>
-              <Input type="date" value={weekStart} onChange={(event) => {
-                if (event.target.value) {
-                  setWeekStart(mondayOf(new Date(`${event.target.value}T12:00:00`)))
-                  setDetailsOpen(false)
-                }
+              <Label htmlFor="realization-week">Java</Label>
+              <WeekPicker id="realization-week" value={weekStart} onChange={(value) => {
+                setWeekStart(value)
+                setDetailsOpen(false)
               }} />
             </div>
             <div className="space-y-1.5">
