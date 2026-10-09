@@ -223,3 +223,25 @@ def test_user_question_route_rejects_staff_without_creating_results():
         with pytest.raises(Exception) as error:
             asyncio.run(save_person_question_answer(period_id=period.id, subject_user_id=uuid.uuid4(), question_key="helped_colleague", payload=RealizationQuestionAnswerCreate(value=False), db=db, user=SimpleNamespace(role=UserRole.STAFF)))
     assert error.value.status_code == 403
+
+
+@pytest.mark.parametrize("value", [True, False])
+@pytest.mark.parametrize("comment", [None, "", "   "])
+def test_boolean_question_can_be_saved_without_comment(value, comment):
+    from app.api.routers.realization import save_question_answer
+
+    period = SimpleNamespace(id=uuid.uuid4(), period_type="WEEKLY", department_id=uuid.uuid4(), status="OPEN")
+    result = SimpleNamespace(id=uuid.uuid4())
+    added = []
+    async def assign_id():
+        added[0].id = uuid.uuid4()
+    db = SimpleNamespace(
+        execute=AsyncMock(side_effect=[SimpleNamespace(scalar_one_or_none=lambda: result), SimpleNamespace(scalar_one_or_none=lambda: None)]),
+        add=added.append, flush=AsyncMock(side_effect=assign_id), commit=AsyncMock(),
+    )
+    actor = SimpleNamespace(id=uuid.uuid4(), role=UserRole.MANAGER, full_name="Manager")
+    with patch("app.api.routers.realization._period", new=AsyncMock(return_value=period)), patch("app.api.routers.realization._weekly_answer_target", new=AsyncMock(return_value=(period, result))), patch("app.api.routers.realization.mark_analysis_stale"), patch("app.api.routers.realization.add_audit_log"):
+        saved = asyncio.run(save_question_answer(period_id=period.id, result_id=result.id, question_key="helped_colleague", payload=RealizationQuestionAnswerCreate(value=value, comment=comment), db=db, user=actor))
+    assert added[0].value_json == {"value": value}
+    assert saved.comment is None
+    db.commit.assert_awaited_once()

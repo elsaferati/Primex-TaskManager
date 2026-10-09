@@ -77,7 +77,6 @@ function automaticAnswer(question: RealizationQuestion): { answer: string; detai
 function ManualQuestion({ label, draft, disabled, onChange, onSaveComment }: {
   label: string; draft: QuestionDraft; disabled: boolean; onChange: (next: QuestionDraft) => void; onSaveComment: () => void
 }) {
-  const checked = draft.values.includes("YES")
   return <div className="border-b border-slate-200 px-3 py-2 last:border-b-0">
     <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
       <div className="min-w-0">
@@ -87,7 +86,7 @@ function ManualQuestion({ label, draft, disabled, onChange, onSaveComment }: {
         <option value="">E paplotësuar</option><option value="YES">Po</option><option value="NO">Jo</option>
       </select>
     </div>
-    {draft.values.length ? <div className="mt-2 flex flex-col items-stretch gap-1"><Textarea aria-label={`Komenti për ${label}`} aria-required={checked} className="min-h-8 resize-y bg-slate-50 px-2 py-1.5 text-xs" rows={1} maxLength={1000} value={draft.comment} disabled={disabled} onChange={(event) => onChange({ ...draft, comment: event.target.value, touched: true })} placeholder={checked ? "Shto koment (i detyrueshëm për Po)…" : "Shto shpjegim…"} /><Button type="button" size="sm" variant="outline" className="h-7 self-end px-3 text-xs" disabled={disabled || (checked && !draft.comment.trim())} onClick={onSaveComment}>Ruaj përgjigjen</Button></div> : null}
+    {draft.values.length ? <div className="mt-2 flex flex-col items-stretch gap-1"><Textarea aria-label={`Komenti për ${label}`} className="min-h-8 resize-y bg-slate-50 px-2 py-1.5 text-xs" rows={1} maxLength={1000} value={draft.comment} disabled={disabled} onChange={(event) => onChange({ ...draft, comment: event.target.value, touched: true })} placeholder="Shto koment (opsional)…" /><Button type="button" size="sm" variant="outline" className="h-7 self-end px-3 text-xs" disabled={disabled} onClick={onSaveComment}>Ruaj përgjigjen</Button></div> : null}
   </div>
 }
 
@@ -164,10 +163,6 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
   React.useEffect(() => {
     if (open && proposalReady) proposalRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
   }, [open, proposalReady])
-  const missingQuestionComments = manualQuestions.some((question) => {
-    const draft = drafts[question.key]
-    return draft?.touched && draft.values.includes("YES") && !draft.comment.trim()
-  })
   const hasUnsavedChanges = reviewDirty || questionsDirty
   const ratingLabel = failed ? "Gabim ngarkimi" : !data ? "Duke ngarkuar…" : scope === "weekly" && !answersComplete ? "Plotëso përgjigjet" : scope === "weekly" && (savedLevel || suggestion?.level) ? `${savedLevel || suggestion?.level} · ${savedLevel ? "Konfirmuar" : "Propozim"}` : savedRating ? RATINGS[savedRating] : "Pa vlerësim"
 
@@ -206,14 +201,6 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
 
   const save = async ({ closeDialog = true, saveQuestions = true, confirmLevel }: { closeDialog?: boolean; saveQuestions?: boolean; confirmLevel?: RealizationLevel } = {}) => {
     if (!hasUnsavedChanges && !confirmLevel) return
-    const missingQuestion = manualQuestions.find((question) => {
-      const draft = drafts[question.key]
-      return draft?.touched && draft.values.includes("YES") && !draft.comment.trim()
-    })
-    if (missingQuestion) {
-      toast.error(`Shto koment për: ${questionLabel(missingQuestion)}`)
-      return
-    }
     setSaving(true)
     try {
       if (saveQuestions) {
@@ -325,7 +312,7 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
           placeholder="Përmbledhja e vlerësimit të përgjegjësit…"
           maxLength={4000}
         />
-        {canEdit && hasUnsavedChanges ? <div className="mt-2 flex items-center justify-end gap-3"><p className="text-[11px] text-amber-700">{missingQuestionComments ? "Plotëso komentet për përgjigjet Po." : null}</p><Button type="button" size="sm" onClick={() => void save()} disabled={saving || preparing || missingQuestionComments || Boolean(onPrepareResult && !result)}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Ruaj vlerësimin</Button></div> : null}
+        {canEdit && hasUnsavedChanges ? <div className="mt-2 flex items-center justify-end gap-3"><Button type="button" size="sm" onClick={() => void save()} disabled={saving || preparing || Boolean(onPrepareResult && !result)}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Ruaj vlerësimin</Button></div> : null}
       </section> : null}
       {automaticQuestions.length ? (
         <section className="overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label="Përgjigjet automatike">
@@ -373,7 +360,7 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
               />
             ))}
           </div>
-          {scope === "weekly" && canEdit && (!proposalReady || questionsDirty) ? <div className="mt-3 flex justify-end"><Button disabled={saving || preparing || missingQuestionComments || !questionsDirty} onClick={() => void save({ closeDialog: false })}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Ruaj përgjigjet dhe shfaq propozimin</Button></div> : null}
+          {scope === "weekly" && canEdit && (!proposalReady || questionsDirty) ? <div className="mt-3 flex justify-end"><Button disabled={saving || preparing || !questionsDirty} onClick={() => void save({ closeDialog: false })}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Ruaj përgjigjet dhe shfaq propozimin</Button></div> : null}
         </section>
       ) : (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">

@@ -2957,8 +2957,6 @@ async def save_question_answer(
     elif question_key in MANUAL_BOOLEAN_QUESTION_KEYS:
         if payload.value is not None and not isinstance(payload.value, bool):
             raise HTTPException(status_code=422, detail="Boolean questions accept Po or Jo")
-        if payload.value is True and not (payload.comment and payload.comment.strip()):
-            raise HTTPException(status_code=422, detail="Përgjigjja Po kërkon koment")
     elif question_key in MANUAL_TEXT_QUESTION_KEYS:
         if not isinstance(payload.value, str) or not payload.value.strip():
             raise HTTPException(status_code=422, detail="This question requires manager text")

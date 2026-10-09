@@ -477,11 +477,11 @@ function QuestionRow({
                 />
                 {draft.value === "YES" ? "Po" : "Jo"}
               </label>
-              <Button size="sm" variant="outline" onClick={onSave} disabled={saving || (draft.value === "YES" && !draft.comment.trim())}>
+              <Button size="sm" variant="outline" onClick={onSave} disabled={saving}>
                 {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCheck2 className="h-3.5 w-3.5" />} Ruaj përgjigjen e javës
               </Button>
             </div>
-            {draft.value === "YES" ? <Textarea rows={2} value={draft.comment} disabled={saving} onChange={(event) => onDraft({ ...draft, comment: event.target.value })} placeholder="Shkruaj komentin e detyrueshëm për përgjigjen Po…" /> : null}
+            {draft.value === "YES" ? <Textarea rows={2} value={draft.comment} disabled={saving} onChange={(event) => onDraft({ ...draft, comment: event.target.value })} placeholder="Shto koment (opsional)…" /> : null}
           </div>
         ) : (
           <p className={cn("text-sm leading-6 whitespace-pre-line", needsConfirmation && finalValue == null ? "font-medium text-amber-700" : "text-slate-700")}>{visibleValue}</p>
