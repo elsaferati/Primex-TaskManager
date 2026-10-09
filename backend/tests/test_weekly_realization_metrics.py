@@ -11,6 +11,22 @@ def task(task_id, attribution, classification="no_progress"):
     return {"task_id": task_id, "attribution": attribution, "classification": classification}
 
 
+def test_weekly_approved_postponements_count_unique_unfinished_plan_tasks():
+    approved = {**task("A", "planned_owner", "POSTPONED_APPROVED"), "adjustment_status": "APPROVED"}
+    pending = {**task("B", "planned_owner", "POSTPONED_UNAPPROVED"), "adjustment_status": "PENDING"}
+    extra = {**task("X", "additional_owner", "POSTPONED_APPROVED"), "adjustment_status": "APPROVED"}
+    metrics = build_weekly_task_metrics([], [
+        {"date": "2026-10-05", "tasks": [approved, pending, extra]},
+        {"date": "2026-10-06", "tasks": [approved, pending, extra]},
+    ])
+    assert metrics["weekly_postponed_task_count"] == 2
+    assert metrics["weekly_approved_postponed_task_count"] == 1
+    metrics = build_weekly_task_metrics([approved], [
+        {"date": "2026-10-06", "tasks": [task("A", "planned_owner", "COMPLETED")]},
+    ])
+    assert metrics["weekly_approved_postponed_task_count"] == 0
+
+
 def test_extra_completions_count_toward_realization_and_open_extras_do_not():
     metrics = build_weekly_task_metrics([
         task("A", "planned_owner", "completed_on_time"),

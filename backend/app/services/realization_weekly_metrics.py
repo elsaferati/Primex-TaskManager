@@ -222,6 +222,11 @@ def build_weekly_task_metrics(
         "weekly_all_completed_count": len(planned_completed | additional_completed),
         "weekly_in_progress_task_count": len(planned_in_progress),
         "weekly_postponed_task_count": len(planned_postponed),
+        "weekly_approved_postponed_task_count": sum(
+            states[key].get("adjustment_status") == "APPROVED"
+            or (not states[key].get("adjustment_status") and _classification(states[key]) == "POSTPONED_APPROVED")
+            for key in planned_postponed
+        ),
         "weekly_no_progress_task_count": len(planned_no_progress),
         "weekly_additional_count": len(additional_keys),
         "weekly_additional_deferred_count": len(additional_deferred),

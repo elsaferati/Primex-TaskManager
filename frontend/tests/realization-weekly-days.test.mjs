@@ -9,9 +9,12 @@ import { renderToStaticMarkup } from "react-dom/server"
 
 const require = createRequire(import.meta.url)
 const source = readFileSync(new URL("../src/components/realization-weekly-days.tsx", import.meta.url), "utf8")
+const markup = { exports: {} }
+const markupSource = readFileSync(new URL("../src/lib/note-markup.tsx", import.meta.url), "utf8")
+vm.runInNewContext(ts.transpileModule(markupSource, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText, { module: markup, exports: markup.exports, require })
 const loaded = { exports: {} }
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } })
-vm.runInNewContext(outputText, { module: loaded, exports: loaded.exports, require: name => name === "@/lib/realization-checklist" ? { weeklyChecklistLabels: { helped_colleague: "Ndihmoi koleg?" } } : require(name) })
+vm.runInNewContext(outputText, { module: loaded, exports: loaded.exports, require: name => name === "@/lib/note-markup" ? markup.exports : name === "@/lib/realization-checklist" ? { weeklyChecklistLabels: { helped_colleague: "Ndihmoi koleg?" } } : require(name) })
 const { RealizationWeeklyDays } = loaded.exports
 
 test("weekly days show exact dated comments, authors and the daily percentage", () => {

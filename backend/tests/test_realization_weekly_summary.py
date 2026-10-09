@@ -140,6 +140,17 @@ def test_one_confirmed_postponement_does_not_approve_all_postponed_tasks():
     assert suggest_weekly_level(facts)["level"] == "B"
 
 
+def test_live_weekly_approvals_replace_stale_snapshot_totals():
+    facts = base_facts(weekly_completed_count=3, weekly_postponed_task_count=2)
+    facts["manual_answers"]["approved_postponement"] = {"value": True}
+    facts["questions"] = [{"key": "approved_postponement", "auto_value": {"approved": 0}}]
+    facts["weekly_approved_postponed_task_count"] = 2
+    assert suggest_weekly_level(facts)["level"] == "B"
+    facts["weekly_approved_postponed_task_count"] = 1
+    facts["questions"][0]["auto_value"]["approved"] = 10
+    assert suggest_weekly_level(facts)["level"] == "D"
+
+
 def test_daily_answers_cannot_edit_locked_parent_week():
     weekly = SimpleNamespace(id=uuid.uuid4(), status="LOCKED")
     with patch("app.api.routers.realization.ensure_weekly_scope_period", new=AsyncMock(return_value=weekly)):

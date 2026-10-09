@@ -826,6 +826,9 @@ export interface RealizationPeriod {
 }
 
 export interface RealizationTaskFact {
+  adjustment_status?: string | null
+  manager_decision?: DailyRealizationManagerDecision | null
+  timeline?: DailyRealizationTimelineEvent[]
   match_key: string
   task_id?: string | null
   title: string

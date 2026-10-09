@@ -92,6 +92,9 @@ def suggest_weekly_level(facts: dict) -> dict:
     complete = planned > 0 and done >= planned
     postponement_facts = next((q.get("auto_value") or {} for q in facts.get("questions", []) if q.get("key") == "approved_postponement"), {})
     approved_count = int(postponement_facts.get("approved") or 0) if isinstance(postponement_facts, dict) else 0
+    # The current weekly plan uses unique tasks, not stale daily snapshot totals.
+    if "weekly_approved_postponed_task_count" in facts:
+        approved_count = int(facts["weekly_approved_postponed_task_count"] or 0)
     accepted = done + postponed >= planned and postponed > 0 and approved_count >= postponed and yes("approved_postponement")
     if not complete and not accepted:
         if not done and not extra and not progress and not wfe:

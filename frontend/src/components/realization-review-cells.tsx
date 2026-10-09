@@ -3,6 +3,7 @@
 import * as React from "react"
 import { ChevronRight, Loader2 } from "lucide-react"
 import { RealizationWeeklyDays } from "@/components/realization-weekly-days"
+import { RealizationWeeklyPostponements, weeklyPostponements } from "@/components/realization-weekly-postponements"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -249,6 +250,48 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
     finally { setSaving(false) }
   }
 
+  const approvePostponement = async (taskId: string, eventId: string, reason: string) => {
+    if (!canEdit || saving || !result) return false
+    const weekStart = result.facts_json.daily_timeline?.[0]?.date
+    if (!weekStart || !result.department_id) {
+      toast.error("Mungon java ose departamenti.")
+      return false
+    }
+    setSaving(true)
+    try {
+      const response = await apiFetch(`/realization/daily/tasks/${taskId}/adjustment`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audit_event_id: eventId, user_id: userId, status: "APPROVED", reason, comment: null }),
+      })
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        throw new Error(error.detail || "Shtyrja nuk u aprovua.")
+      }
+      // Reflect the saved decision even if the subsequent report refresh fails.
+      const decision = await response.json()
+      const savedResult: RealizationPersonResult = {
+        ...result,
+        facts_json: { ...result.facts_json, daily_timeline: result.facts_json.daily_timeline?.map(day => ({
+          ...day, tasks: day.tasks?.map(task => task.task_id === taskId && task.timeline?.some(event => event.id === eventId)
+            ? { ...task, adjustment_status: "APPROVED", manager_decision: decision } : task),
+        })) },
+      }
+      setUpdatedResult(savedResult)
+      setSavedAnswersFor(savedResult)
+      const refreshed = await apiFetch(`/realization/weekly?department_id=${result.department_id}&week_start=${weekStart}`)
+      if (!refreshed.ok) throw new Error("Shtyrja u aprovua, por raporti nuk u rifreskua. Rifresko faqen.")
+      const report = await refreshed.json() as { people: RealizationPersonResult[] }
+      const next = report.people.find(person => person.user_id === userId)
+      if (!next) throw new Error("Shtyrja u aprovua, por raporti i personit nuk u gjet.")
+      setUpdatedResult(next)
+      toast.success("Shtyrja u aprovua dhe propozimi u përditësua.")
+      return true
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Shtyrja nuk u aprovua.")
+      return false
+    } finally { setSaving(false) }
+  }
+
   return <>
     {compactTable ? <td className="p-1" onClick={(event) => event.stopPropagation()}>
       <Button type="button" variant="outline" size="sm" className="h-8 w-full min-w-32 justify-between px-2 text-[13px]" onClick={() => void openReview()} disabled={failed}>{ratingLabel}<ChevronRight className="h-3.5 w-3.5" /></Button>
@@ -275,6 +318,68 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
         {data?.history.some(item => item.level) ? <details className="mt-2 text-xs"><summary className="cursor-pointer">Historiku i shkronjës</summary>{data.history.filter(item => item.dimension === "REALIZATION" && item.level).map(item => <p key={item.id}>{new Date(item.created_at).toLocaleString("sq-AL")} · {item.created_by_name}: {item.level}{item.active ? " · Aktuale" : ""}</p>)}</details> : null}
       </section> : null}
       {scope === "weekly" && result ? <section><p className="mb-2 text-sm font-semibold">Ditët dhe komentet e javës</p><RealizationWeeklyDays result={result} /></section> : null}
+      {result ? (
+        <section aria-label="Pyetjet dhe përgjigjet">
+          <div className="mb-3">
+            <h3 className="text-sm font-semibold text-slate-800">Pyetjet dhe përgjigjet</h3>
+            <p className="mt-1 text-xs leading-5 text-slate-500">{scope === "weekly" ? "Kontrollo përgjigjet manuale dhe ruaji për të marrë propozimin e shkronjës. Përgjigjet ditore përfshihen automatikisht; kur mungojnë, formulari nis me Jo." : "Pyetjet pa përgjigje nisin me Jo. Ndrysho në Po kur vlen dhe ruaj përgjigjet."} Komentet janë opsionale.</p>
+          </div>
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white" role="region" aria-label="Tabela e përgjigjeve automatike dhe manuale" tabIndex={0}>
+            <table className="w-full min-w-[640px] table-fixed border-collapse text-left">
+              <caption className="sr-only">Përgjigjet automatike dhe manuale për {userName}</caption>
+              <colgroup><col className="w-10" /><col className="w-[38%]" /><col className="w-32" /><col /></colgroup>
+              <thead className="bg-slate-100 text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                <tr>
+                  <th scope="col" className="px-2 py-3 text-center">Nr.</th>
+                  <th scope="col" className="border-l border-slate-200 px-3 py-3">Pyetja</th>
+                  <th scope="col" className="border-l border-slate-200 px-2 py-3 text-center">Përgjigjja</th>
+                  <th scope="col" className="border-l border-slate-200 px-3 py-3">Shpjegimi / Komenti</th>
+                </tr>
+              </thead>
+              {automaticQuestions.length ? <tbody>
+                <tr className="border-y border-slate-200 bg-blue-50"><th scope="rowgroup" colSpan={4} className="px-3 py-2 text-xs font-semibold text-blue-900">Automatike · {automaticQuestions.length} pyetje{scope === "weekly" ? ` · Totali i ${weeklySnapshotDays} ditëve` : ""}</th></tr>
+                {automaticQuestions.map((question, index) => {
+                  const answer = automaticAnswer(question)
+                  return <tr key={question.key} className="border-b border-slate-200 align-top even:bg-slate-50/50 hover:bg-blue-50/40">
+                    <td className="px-2 py-3 text-center text-xs tabular-nums text-slate-500">{index + 1}</td>
+                    <th scope="row" className="border-l border-slate-200 px-3 py-3 text-sm font-medium leading-5 text-slate-800">{question.label}</th>
+                    <td className="border-l border-slate-200 px-2 py-2 text-center"><span className="inline-flex min-h-9 items-center justify-center rounded-md bg-blue-50 px-3 text-xs font-semibold text-blue-900">{answer.answer}</span></td>
+                    <td className="border-l border-slate-200 px-3 py-3 text-xs leading-5 text-slate-600">{answer.detail || "—"}</td>
+                  </tr>
+                })}
+              </tbody> : null}
+              <tbody>
+                <tr className="border-y border-slate-200 bg-blue-50"><th scope="rowgroup" colSpan={4} className="px-3 py-2 text-xs font-semibold text-blue-900">Manuale · {manualQuestions.length} pyetje · Plotësohen nga përgjegjësi</th></tr>
+                {manualQuestions.map((question, index) => (
+                  <React.Fragment key={question.key}>
+                  <ManualQuestion
+                    number={automaticQuestions.length + index + 1}
+                    label={questionLabel(question)}
+                    draft={drafts[question.key] || { values: [], comment: "", touched: false }}
+                    disabled={!canEdit || saving}
+                    onChange={(next) => updateQuestionDraft(question.key, next)}
+                    onSaveComment={() => void save({ closeDialog: false })}
+                  />
+                  {scope === "weekly" && question.key === "approved_postponement" && weeklyPostponements(result).length > 0 ? (
+                    <tr className="border-b border-slate-200 bg-blue-50/30">
+                      <td colSpan={4} className="p-3">
+                        <RealizationWeeklyPostponements result={result} canEdit={canEdit} busy={saving || preparing} onDecide={approvePostponement} />
+                      </td>
+                    </tr>
+                  ) : null}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {scope === "weekly" && canEdit && (!proposalReady || questionsDirty) ? <div className="mt-3 flex justify-end"><Button disabled={saving || preparing || !questionsDirty} onClick={() => void save({ closeDialog: false })}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Ruaj përgjigjet dhe shfaq propozimin</Button></div> : null}
+        </section>
+      ) : (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
+          <span>{preparing ? "Duke përgatitur checklistën për këtë person…" : "Checklist-a nuk është përgatitur ende për këtë person."}</span>
+          {preparing ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : onPrepareResult ? <Button type="button" size="sm" variant="outline" onClick={() => void openReview()}>Provo përsëri</Button> : null}
+        </div>
+      )}
       {scope !== "weekly" || proposalReady ? <section className="rounded-lg border border-slate-200 bg-slate-50 p-3">
         <div className="flex flex-wrap items-center gap-2">
           <p className="mr-auto text-[11px] font-bold uppercase tracking-wide text-slate-600">Vlerësimi i përgjegjësit</p>
@@ -317,60 +422,6 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
         />
         {canEdit && hasUnsavedChanges ? <div className="mt-2 flex items-center justify-end gap-3"><Button type="button" size="sm" onClick={() => void save()} disabled={saving || preparing || Boolean(onPrepareResult && !result)}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Ruaj vlerësimin</Button></div> : null}
       </section> : null}
-      {result ? (
-        <section aria-label="Pyetjet dhe përgjigjet">
-          <div className="mb-3">
-            <h3 className="text-sm font-semibold text-slate-800">Pyetjet dhe përgjigjet</h3>
-            <p className="mt-1 text-xs leading-5 text-slate-500">{scope === "weekly" ? "Kontrollo përgjigjet manuale dhe ruaji për të marrë propozimin e shkronjës. Përgjigjet ditore përfshihen automatikisht; kur mungojnë, formulari nis me Jo." : "Pyetjet pa përgjigje nisin me Jo. Ndrysho në Po kur vlen dhe ruaj përgjigjet."} Komentet janë opsionale.</p>
-          </div>
-          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white" role="region" aria-label="Tabela e përgjigjeve automatike dhe manuale" tabIndex={0}>
-            <table className="w-full min-w-[640px] table-fixed border-collapse text-left">
-              <caption className="sr-only">Përgjigjet automatike dhe manuale për {userName}</caption>
-              <colgroup><col className="w-10" /><col className="w-[38%]" /><col className="w-32" /><col /></colgroup>
-              <thead className="bg-slate-100 text-[10px] font-bold uppercase tracking-wide text-slate-600">
-                <tr>
-                  <th scope="col" className="px-2 py-3 text-center">Nr.</th>
-                  <th scope="col" className="border-l border-slate-200 px-3 py-3">Pyetja</th>
-                  <th scope="col" className="border-l border-slate-200 px-2 py-3 text-center">Përgjigjja</th>
-                  <th scope="col" className="border-l border-slate-200 px-3 py-3">Shpjegimi / Komenti</th>
-                </tr>
-              </thead>
-              {automaticQuestions.length ? <tbody>
-                <tr className="border-y border-slate-200 bg-blue-50"><th scope="rowgroup" colSpan={4} className="px-3 py-2 text-xs font-semibold text-blue-900">Automatike · {automaticQuestions.length} pyetje{scope === "weekly" ? ` · Totali i ${weeklySnapshotDays} ditëve` : ""}</th></tr>
-                {automaticQuestions.map((question, index) => {
-                  const answer = automaticAnswer(question)
-                  return <tr key={question.key} className="border-b border-slate-200 align-top even:bg-slate-50/50 hover:bg-blue-50/40">
-                    <td className="px-2 py-3 text-center text-xs tabular-nums text-slate-500">{index + 1}</td>
-                    <th scope="row" className="border-l border-slate-200 px-3 py-3 text-sm font-medium leading-5 text-slate-800">{question.label}</th>
-                    <td className="border-l border-slate-200 px-2 py-2 text-center"><span className="inline-flex min-h-9 items-center justify-center rounded-md bg-blue-50 px-3 text-xs font-semibold text-blue-900">{answer.answer}</span></td>
-                    <td className="border-l border-slate-200 px-3 py-3 text-xs leading-5 text-slate-600">{answer.detail || "—"}</td>
-                  </tr>
-                })}
-              </tbody> : null}
-              <tbody>
-                <tr className="border-y border-slate-200 bg-blue-50"><th scope="rowgroup" colSpan={4} className="px-3 py-2 text-xs font-semibold text-blue-900">Manuale · {manualQuestions.length} pyetje · Plotësohen nga përgjegjësi</th></tr>
-                {manualQuestions.map((question, index) => (
-                  <ManualQuestion
-                    key={question.key}
-                    number={automaticQuestions.length + index + 1}
-                    label={questionLabel(question)}
-                    draft={drafts[question.key] || { values: [], comment: "", touched: false }}
-                    disabled={!canEdit || saving}
-                    onChange={(next) => updateQuestionDraft(question.key, next)}
-                    onSaveComment={() => void save({ closeDialog: false })}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {scope === "weekly" && canEdit && (!proposalReady || questionsDirty) ? <div className="mt-3 flex justify-end"><Button disabled={saving || preparing || !questionsDirty} onClick={() => void save({ closeDialog: false })}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Ruaj përgjigjet dhe shfaq propozimin</Button></div> : null}
-        </section>
-      ) : (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
-          <span>{preparing ? "Duke përgatitur checklistën për këtë person…" : "Checklist-a nuk është përgatitur ende për këtë person."}</span>
-          {preparing ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : onPrepareResult ? <Button type="button" size="sm" variant="outline" onClick={() => void openReview()}>Provo përsëri</Button> : null}
-        </div>
-      )}
       <DialogFooter><Button variant="outline" onClick={() => { setOpen(false); if (updatedResult) onSaved?.() }} disabled={saving || preparing}>Mbyll</Button></DialogFooter>
     </DialogContent></Dialog>
   </>
