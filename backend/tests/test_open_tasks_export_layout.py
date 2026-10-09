@@ -166,11 +166,13 @@ class _FakeResult:
 class _FakeSession:
     def __init__(self, results):
         self.results = iter(results)
+        self.statements = []
         self.added = []
         self.deleted = []
         self.committed = False
 
     async def execute(self, _statement):
+        self.statements.append(_statement)
         return _FakeResult(next(self.results))
 
     def add(self, value):
@@ -300,7 +302,7 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.added[0].status_value, "BLLOK")
         self.assertEqual(db.added[0].comment_value, "Move after customer reply")
 
-    async def test_workbook_excludes_system_tasks_and_keeps_non_system_metadata(self) -> None:
+    async def test_workbook_includes_system_tasks_and_keeps_task_metadata(self) -> None:
         task_id = uuid.uuid4()
         task = SimpleNamespace(
             id=task_id,
@@ -334,11 +336,11 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
         system_task_id = uuid.uuid4()
         system_task_values.update(
             id=system_task_id,
-            title="System task must not be exported",
+            title="System task included in export",
             system_template_origin_id=uuid.uuid4(),
         )
         system_task = SimpleNamespace(**system_task_values)
-        db = _FakeSession([[task, system_task], [], [baseline]])
+        db = _FakeSession([[task, system_task], [], [], [baseline]])
         user = SimpleNamespace(
             id=uuid.uuid4(),
             role=UserRole.ADMIN,
@@ -365,8 +367,12 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([ws.cell(4, column).value for column in range(17, 22)], OPEN_TASK_EXPORT_HEADERS[16:21])
         self.assertEqual(ws.cell(4, 2).value, "TASK ID")
         self.assertEqual(ws.cell(5, 2).value, str(task_id))
-        self.assertEqual(ws.max_row, 5)
+        self.assertEqual(ws.max_row, 6)
         self.assertNotEqual(ws.cell(5, 4).value, "SYSTEM")
+        self.assertEqual(ws.cell(6, 2).value, str(system_task_id))
+        self.assertEqual(ws.cell(6, 4).value, "SYSTEM")
+        self.assertEqual(ws.cell(6, 15).value, system_task.title)
+        self.assertNotIn("tasks.system_template_origin_id IS NULL", str(db.statements[0]))
         self.assertEqual(
             [ws.cell(5, column).value for column in range(17, 22)],
             ["THIS WEEK", "1H", "NEXT WEEK", "1H", "Before planning"],
@@ -379,7 +385,7 @@ class TestOpenTasksExportWorkbook(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(workbook["_PRIMEFLOW"].sheet_state, "veryHidden")
         self.assertEqual(workbook["_PRIMEFLOW"]["B1"].value, "2026-09-14")
         self.assertEqual(workbook["_PRIMEFLOW"]["B3"].value, str(task_id))
-        self.assertNotEqual(workbook["_PRIMEFLOW"]["B3"].value, str(system_task_id))
+        self.assertEqual(workbook["_PRIMEFLOW"]["B4"].value, str(system_task_id))
 
 
 if __name__ == "__main__":

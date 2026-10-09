@@ -2826,7 +2826,6 @@ async def export_open_tasks_xlsx(
         .outerjoin(Project, Task.project_id == Project.id)
         .where(Task.is_active.is_(True))
         .where(func.upper(Task.status) != TaskStatusEnum.DONE.value)
-        .where(Task.system_template_origin_id.is_(None))
         .where(or_(Task.project_id.is_(None), Project.is_template.is_(False)))
         .options(selectinload(Task.assignees))
         .order_by(Task.due_date.asc().nulls_last(), Task.created_at.desc())
@@ -2846,10 +2845,6 @@ async def export_open_tasks_xlsx(
             ensure_department_access(user, department_id)
             task_stmt = task_stmt.where(Task.department_id == department_id)
         tasks = (await db.execute(task_stmt)).scalars().unique().all()
-
-    # Keep this defensive filter in addition to the SQL condition so exported
-    # rows and their hidden task-ID mapping can never contain system tasks.
-    tasks = [task for task in tasks if not task.system_template_origin_id]
 
     project_ids = {task.project_id for task in tasks if task.project_id}
     department_ids = {task.department_id for task in tasks if task.department_id}
