@@ -130,6 +130,23 @@ def _sheet_name(value: str, used: set[str]) -> str:
     return candidate
 
 
+def _weekly_comments(day: dict) -> list[tuple[str, str, str]]:
+    rows = []
+    personal = day.get("person_comment") or {}
+    if personal.get("comment"):
+        rows.append(("Komenti ditor", personal.get("author") or "", personal["comment"]))
+    for key, answer in (day.get("manual_answers") or {}).items():
+        if answer.get("comment"):
+            rows.append((QUESTION_LABELS.get(key, key), answer.get("answered_by_name") or "", answer["comment"]))
+    close = day.get("close_event") or {}
+    if close.get("daily_comment"):
+        rows.append(("Mbyllja ditore", "", close["daily_comment"]))
+    for task in day.get("tasks") or []:
+        if task.get("daily_report_comment"):
+            rows.append((_clean_task_title(task.get("title")), "", task["daily_report_comment"]))
+    return rows
+
+
 def build_realization_workbook(
     *,
     week_start: str,
@@ -168,6 +185,8 @@ def build_realization_workbook(
                 if is_live
                 else person.get("final_level") or person.get("suggested_level") or "—"
             )
+            if "weekly_evaluation" in facts:
+                grade = (person.get("weekly_manager_review") or {}).get("level") or (facts.get("weekly_evaluation") or {}).get("level") or "Plotëso përgjigjet"
             values = [
                 department["name"], person["user_name"], person.get("planned_count", 0),
                 person.get("completed_on_time_count", 0) + person.get("completed_late_count", 0),
@@ -402,7 +421,7 @@ def build_realization_workbook(
             end_row=current_row,
             end_column=width,
         )
-        ws.cell(current_row, 1, "6. SNAPSHOT-ET DITORE")
+        ws.cell(current_row, 1, "6. REALIZIMET DITORE DHE KOMENTET")
         _header(ws.cell(current_row, 1), "1F4E78")
         ws.cell(current_row, 1).alignment = Alignment(horizontal="left", vertical="center")
         current_row += 1
@@ -429,7 +448,9 @@ def build_realization_workbook(
                     None,
                 )
                 if snapshot:
-                    ws.cell(current_row, col, float(snapshot.get("weekly_progress_percent") or 0) / 100)
+                    daily_percent = snapshot.get("daily_progress_percent")
+                    daily_value = "Pushim" if snapshot.get("on_leave") else "Në vijim" if snapshot.get("future") else "Pa të dhëna" if daily_percent is None else float(daily_percent) / 100
+                    ws.cell(current_row, col, daily_value)
                     ws.cell(current_row, col).number_format = "0.0%"
                     attendance = snapshot.get("attendance") or []
                     ws.cell(
@@ -445,6 +466,12 @@ def build_realization_workbook(
                         f"Shtesë sot: {snapshot.get('additional_count', 0)} | "
                         f"Prezenca: {', '.join(str(item.get('type')) for item in attendance) or 'OK'}",
                     )
+                    comments = _weekly_comments(snapshot)
+                    if comments:
+                        ws.cell(current_row, col + 1).value += "\n" + "\n".join(
+                            f"{daily_date} · {label}{' · ' + author if author else ''}: {comment}"
+                            for label, author, comment in comments
+                        )
                 else:
                     ws.cell(current_row, col, "—")
                     ws.cell(current_row, col + 1, "Pa snapshot")
@@ -452,6 +479,7 @@ def build_realization_workbook(
                     target.alignment = Alignment(vertical="top", wrap_text=True)
                     target.border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
             ws.cell(current_row, 1).border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+            ws.row_dimensions[current_row].height = 100
             current_row += 1
 
         project_keys = sorted(
@@ -529,6 +557,8 @@ def build_realization_workbook(
         ws.cell(grade_row, 1).alignment = Alignment(horizontal="left", vertical="center")
 
         def _final_level(person: dict[str, Any]) -> str | None:
+            if "weekly_evaluation" in (person.get("facts_json") or {}):
+                return (person.get("weekly_manager_review") or {}).get("level")
             return person.get("final_level") or person.get("suggested_level")
 
         evaluation_rows = [
@@ -611,7 +641,20 @@ def build_realization_workbook(
             for index, person in enumerate(people):
                 col = 2 + index * 2
                 value = value_builder(person)
+                evaluation = (person.get("facts_json") or {}).get("weekly_evaluation")
+                review = person.get("weekly_manager_review") or {}
+                if evaluation is not None:
+                    if label == "Propozimi për nivelin e vlerësimit":
+                        value = evaluation.get("level") or "Plotëso përgjigjet" if not evaluation.get("answers_complete", True) else evaluation.get("level") or "Pa të dhëna"
+                    elif label == "Vlerësimi final":
+                        value = review.get("level") or "Pa konfirmuar"
+                    elif label == "Komente":
+                        value = review.get("comment") or "—"
                 note = note_builder(person)
+                if evaluation is not None and label == "Propozimi për nivelin e vlerësimit":
+                    note = "\n".join(evaluation.get("reasons") or [])
+                elif evaluation is not None and label == "Vlerësimi final":
+                    note = f"{review.get('created_by_name') or ''} · {review.get('created_at') or ''}" if review.get("level") else "Përgjegjësi ende nuk e ka konfirmuar shkronjën."
                 fill = (
                     LEVEL_COLORS.get(str(value), GRAY)
                     if is_level_row
@@ -1076,7 +1119,31 @@ def build_realization_workbook(
     detailed_guide.column_dimensions["C"].width = 55
     detailed_guide.column_dimensions["D"].width = 16
 
+    comments_sheet = workbook.create_sheet(_sheet_name("Komentet ditore", set(workbook.sheetnames)))
+    _title(comments_sheet, "KOMENTET DHE EVIDENCA DITORE", f"{week_start} — {week_end}", 6)
+    for column, label in enumerate(["Departamenti", "Punonjësi", "Data", "Burimi / Pyetja", "Autori", "Komenti"], 1):
+        _header(comments_sheet.cell(4, column, label))
+    comment_row = 5
+    for department in departments:
+        for person in department.get("people") or []:
+            for day in (person.get("facts_json") or {}).get("daily_timeline") or []:
+                for label, author, comment in _weekly_comments(day):
+                    for column, value in enumerate([department["name"], person["user_name"], day.get("date"), label, author, comment], 1):
+                        cell = comments_sheet.cell(comment_row, column, value)
+                        cell.alignment = Alignment(vertical="top", wrap_text=True)
+                    comments_sheet.row_dimensions[comment_row].height = min(400, max(48, 15 * (len(comment) // 75 + comment.count("\n") + 2)))
+                    comment_row += 1
+    for column, width in enumerate([24, 26, 15, 42, 24, 90], 1):
+        comments_sheet.column_dimensions[get_column_letter(column)].width = width
+    comments_sheet.freeze_panes = "C5"
+    comments_sheet.auto_filter.ref = f"A4:F{max(4, comment_row - 1)}"
+
     for ws in workbook.worksheets:
+        # Treat user comments as text, including comments beginning with '='.
+        for row in ws.iter_rows():
+            for cell in row:
+                if cell.data_type == "f" and isinstance(cell.value, str):
+                    cell.data_type = "s"
         ws.sheet_view.showGridLines = False
         ws.page_setup.orientation = "landscape"
         ws.page_setup.fitToWidth = 1

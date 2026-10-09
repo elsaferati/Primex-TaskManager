@@ -871,6 +871,7 @@ export type RealizationManagerReviewRating = "GOOD" | "VERY_GOOD" | "ACTION_REQU
 export type RealizationManagerReviewMarker = "POSITIVE" | "NEGATIVE"
 
 export interface RealizationManagerReviewItem {
+  level?: RealizationLevel | null
   rating?: RealizationManagerReviewRating | null
   id: string
   dimension: RealizationManagerReviewDimension
@@ -1081,6 +1082,8 @@ export interface RealizationObservationFact {
 }
 
 export interface RealizationQuestion {
+  answer_source?: "DIRECT" | "DAILY_ROLLUP"
+  daily_history?: Array<{ date: string; value: boolean; comment?: string | null; answered_by_name?: string | null }>
   key: string
   label: string
   answer_type: string
@@ -1112,6 +1115,7 @@ export interface RealizationPersonResult {
   user_name: string
   department_id?: string | null
   facts_json: {
+    weekly_evaluation?: { level: RealizationLevel | null; reasons: string[]; provisional: boolean; missing: string[]; rule_version: string }
     availability_status?: "PV" | "MUNGESE" | "PV_MUNGESE" | null
     tasks?: RealizationTaskFact[]
     observations?: RealizationObservationFact[]
@@ -1195,11 +1199,15 @@ export interface RealizationPersonResult {
       close_event?: RealizationDailyCloseEvent | null
     }>
     daily_timeline?: Array<{
+      on_leave?: boolean
+      future?: boolean
+      person_comment?: { comment: string; author?: string | null; updated_at?: string | null }
+      manual_answers?: Record<string, RealizationManualAnswer>
       date: string
       period_id?: string
       result_id?: string
       has_snapshot?: boolean
-      daily_progress_percent: number
+      daily_progress_percent: number | null
       weekly_progress_percent: number
       planned_count: number
       completed_count: number

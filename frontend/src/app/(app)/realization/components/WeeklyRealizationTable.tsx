@@ -1,6 +1,7 @@
 "use client"
 
 import { RealizationReviewCells } from "@/components/realization-review-cells"
+import { RealizationWeeklyDays } from "@/components/realization-weekly-days"
 import { RealizationQuantityDelta, RealizationQuantitySummary } from "@/components/realization-quantity"
 import { RealizationPlanSummary } from "@/components/realization-plan-summary"
 import { RealizationDeadlineStatusGrid, RealizationExtraStatusGrid, RealizationPlanStatusGrid, RealizationStatusLegend, metricBand, metricCell, metricHeadline } from "@/components/realization-plan-status-grid"
@@ -164,19 +165,20 @@ export function WeeklyRealizationTable({ reports, personId, onSelect, loading, o
                 <td className="text-center tabular-nums text-slate-500">{index + 1}</td>
                 <td><span className="block whitespace-nowrap text-[15px] font-bold leading-5 text-slate-800">{person.user_name}</span></td>
                 <td className="text-center text-xs font-bold uppercase text-slate-600" title={report.department_name || undefined}>{realizationDepartmentTag({ name: report.department_name })}</td>
-                <td colSpan={7} className="bg-slate-100/80 text-center"><span className="inline-flex rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-bold text-slate-700">{statusLabel}</span></td>
+                <td colSpan={5} className="bg-slate-100/80 text-center"><span className="inline-flex rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-bold text-slate-700">{statusLabel}</span><RealizationWeeklyDays result={person} compact /></td>
+                <RealizationReviewCells periodId={report.period.id} userId={person.user_id} userName={person.user_name} result={person} refreshKey={person} locked={report.period.status === "LOCKED"} onSaved={onReviewSaved} />
               </tr>
             }
             return <tr key={`${person.period_id}:${person.user_id}`} className="align-middle hover:bg-slate-50/70">
               <td className="text-center tabular-nums text-slate-500">{index + 1}</td>
               <td><button type="button" onClick={() => onSelect(report, person)} className="block max-w-full whitespace-nowrap text-left text-[15px] font-bold leading-5 text-blue-800 hover:underline">{person.user_name}</button></td>
               <td className="text-center text-xs font-bold uppercase text-slate-600" title={report.department_name || undefined}>{realizationDepartmentTag({ name: report.department_name })}</td>
-              <td className={cn(metricCell, value.noProgress > 0 && "bg-rose-50/60")}>{planCell(value)}</td>
+              <td className={cn(metricCell, value.noProgress > 0 && "bg-rose-50/60")}>{planCell(value)}<RealizationWeeklyDays result={person} compact /></td>
               <td className={cn(metricCell, "bg-blue-50/70")}>{extraCell(value)}</td>
               <td className={cn(metricCell, "bg-teal-50/60", value.quantityTasks > 0 && value.quantityDelta < 0 && "bg-rose-50/60")}>{quantityCell(value)}</td>
               <td className={cn(metricCell, "bg-orange-50/70", value.deadlinesNoProgress > 0 && "bg-pink-50/80", deadlineAlarmCount(value.deadlineTasks) > 0 && "!border-2 !border-red-600")}>{deadlineCell(value, person.user_name)}</td>
               <td className={cn(metricCell, "text-center")}>{percentCell(value.percent)}</td>
-              <RealizationReviewCells periodId={person.period_id} userId={person.user_id} userName={person.user_name} result={person} refreshKey={person} locked={report.period.status === "LOCKED"} onSaved={onReviewSaved} />
+              <RealizationReviewCells periodId={report.period.id} userId={person.user_id} userName={person.user_name} result={person} refreshKey={person} locked={report.period.status === "LOCKED"} onSaved={onReviewSaved} />
             </tr>
           }) : <tr><td colSpan={10} className="p-4 text-center text-slate-500">Nuk ka të dhëna për filtrat e zgjedhur.</td></tr>}
         </tbody>

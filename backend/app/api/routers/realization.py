@@ -108,6 +108,7 @@ from app.services.realization_ai import (
     record_analysis_state,
 )
 from app.services.realization_checklist import apply_checklist_answers
+from app.services.realization_weekly_summary import suggest_weekly_level
 from app.services.realization_daily import (
     _daily_classification,
     _local_date,
@@ -194,10 +195,10 @@ def _answer_payload(row: RealizationQuestionAnswer, name: str | None = None) -> 
 async def _weekly_manual_answers(
     db: AsyncSession, *, period: RealizationPeriod, user_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, dict[str, RealizationQuestionAnswer]]:
-    """Manual checklist answers are weekly, so daily views read the same rows."""
+    """Read the opened period; historical weekly answers remain weekly."""
     if not user_ids:
         return {}
-    weekly_period = await find_weekly_scope_period(db, period=period)
+    weekly_period = period if period.period_type == "DAILY" else await find_weekly_scope_period(db, period=period)
     if weekly_period is None:
         return {}
     weekly_results = (await db.execute(
@@ -217,11 +218,13 @@ async def _weekly_answer_target(
     result: RealizationPersonResult,
     actor_id: uuid.UUID,
 ) -> tuple[RealizationPeriod, RealizationPersonResult]:
-    """Resolve where a checklist answer is stored: always the weekly result."""
+    """Keep daily answers dated, while honoring a locked parent week."""
     weekly_period = await ensure_weekly_scope_period(db, period=period, created_by=actor_id)
-    if weekly_period.id == period.id:
-        return period, result
     require_unlocked(weekly_period)
+    if period.period_type == "DAILY":
+        return period, result
+    if weekly_period.id == period.id and result.period_id == period.id:
+        return period, result
     weekly_result = (await db.execute(
         select(RealizationPersonResult).where(
             RealizationPersonResult.period_id == weekly_period.id,
@@ -237,6 +240,60 @@ async def _weekly_answer_target(
         db.add(weekly_result)
         await db.flush()
     return weekly_period, weekly_result
+
+
+async def _attach_weekly_daily_evidence(db, *, period, daily_by_user, user_ids):
+    """Batch-load dated personal comments and latest answers, scoped to this week."""
+    if not user_ids:
+        return
+    scope = (
+        RealizationPeriod.period_type == "DAILY",
+        RealizationPeriod.slot == "ALL",
+        RealizationPeriod.department_id == period.department_id,
+        RealizationPeriod.start_date >= period.start_date,
+        RealizationPeriod.end_date <= period.end_date,
+    )
+    results = (await db.execute(
+        select(RealizationPersonResult, RealizationPeriod)
+        .join(RealizationPeriod, RealizationPersonResult.period_id == RealizationPeriod.id)
+        .where(*scope, RealizationPersonResult.user_id.in_(user_ids))
+    )).all()
+    answers = await _latest_question_answers(db, [row.id for row, _ in results])
+    comments = (await db.execute(
+        select(RealizationDailyPersonComment, RealizationPeriod)
+        .join(RealizationPeriod, RealizationDailyPersonComment.period_id == RealizationPeriod.id)
+        .where(*scope, RealizationDailyPersonComment.user_id.in_(user_ids))
+    )).all()
+    actor_ids = {a.answered_by for items in answers.values() for a in items.values()}
+    actor_ids.update(c.updated_by for c, _ in comments if c.updated_by)
+    names = {u.id: u.full_name for u in (await db.execute(select(User).where(User.id.in_(actor_ids)))).scalars().all()} if actor_ids else {}
+
+    def day_item(user_id, day_period):
+        timeline = daily_by_user.setdefault(user_id, [])
+        item = next((d for d in timeline if d["date"] == day_period.start_date.isoformat()), None)
+        if item is None:
+            item = _empty_timeline_day(day_period.start_date.isoformat())
+            item["daily_progress_percent"] = None
+            timeline.append(item)
+        item["period_id"] = str(day_period.id)
+        return item
+
+    for row, day_period in results:
+        item = day_item(row.user_id, day_period)
+        item["manual_answers"] = {key: _answer_payload(answer, names.get(answer.answered_by)) for key, answer in answers.get(row.id, {}).items()}
+    for comment, day_period in comments:
+        if comment.comment:
+            day_item(comment.user_id, day_period)["person_comment"] = {
+                "comment": comment.comment, "author": names.get(comment.updated_by),
+                "updated_at": comment.updated_at.isoformat() if comment.updated_at else None,
+            }
+    today = datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date().isoformat()
+    for timeline in daily_by_user.values():
+        for item in timeline:
+            item["future"] = item["date"] > today
+            if item.get("future") or item.get("on_leave") or not item.get("has_live_metrics"):
+                item["daily_progress_percent"] = None
+        timeline.sort(key=lambda item: item["date"])
 
 
 def _can_capture_current_week_final(period: RealizationPeriod, *, today: date | None = None) -> bool:
@@ -459,7 +516,7 @@ def _empty_timeline_day(day_key: str) -> dict:
 
 
 def _away_person_result(
-    period: RealizationPeriod, *, user_id: uuid.UUID, status: str
+    period: RealizationPeriod, *, user_id: uuid.UUID, status: str | None
 ) -> RealizationPersonResult:
     """A presentation-only row for someone absent the whole period.
 
@@ -649,7 +706,6 @@ async def _weekly_response(
                 RealizationPeriod.department_id == period.department_id,
                 RealizationPeriod.start_date >= period.start_date,
                 RealizationPeriod.end_date <= period.end_date,
-                RealizationPeriod.status != RealizationPeriodStatus.OPEN.value,
             )
             .order_by(RealizationPeriod.start_date.asc())
         )
@@ -662,6 +718,21 @@ async def _weekly_response(
     for daily_result, daily_period in daily_rows:
         latest_by_user[daily_result.user_id] = (daily_result, daily_period)
     visible_user_ids = {row.user_id for row in visible}
+    comment_user_ids = (await db.execute(
+        select(RealizationDailyPersonComment.user_id).join(
+            RealizationPeriod, RealizationPeriod.id == RealizationDailyPersonComment.period_id
+        ).where(
+            RealizationPeriod.period_type == "DAILY",
+            RealizationPeriod.department_id == period.department_id,
+            RealizationPeriod.start_date >= period.start_date,
+            RealizationPeriod.end_date <= period.end_date,
+            RealizationDailyPersonComment.comment.is_not(None),
+        ).distinct()
+    )).scalars().all()
+    for person_id in comment_user_ids:
+        if person_id in eligible_user_ids and person_id not in visible_user_ids and person_id not in latest_by_user:
+            visible.append(_away_person_result(period, user_id=person_id, status=None))
+            visible_user_ids.add(person_id)
     for person_id, (daily_result, _) in latest_by_user.items():
         if person_id in visible_user_ids or person_id not in eligible_user_ids:
             continue
@@ -768,7 +839,7 @@ async def _weekly_response(
                     live_availability.setdefault(person_id, {})[current_day] = str(live_status)
                     continue
                 live_tasks = [dict(task) for task in person.get("tasks") or []]
-                if person_id not in live_user_ids or not live_tasks:
+                if person_id not in live_user_ids:
                     continue
                 timeline = daily_by_user.setdefault(person_id, [])
                 item = next(
@@ -789,6 +860,12 @@ async def _weekly_response(
                         "tasks": [],
                     }
                     timeline.append(item)
+                metrics = person.get("metrics") or {}
+                item["has_live_metrics"] = True
+                item["daily_progress_percent"] = metrics.get("raw_plan_realization")
+                item["planned_count"] = int(metrics.get("original_planned_count") or 0)
+                item["completed_count"] = int(metrics.get("total_completed_today_count") or 0)
+                item["additional_count"] = int(metrics.get("additional_count") or 0)
                 item["tasks"] = _dedupe_timeline_tasks(
                     [*(item.get("tasks") or []), *live_tasks]
                 )
@@ -1440,6 +1517,9 @@ async def _weekly_response(
     ]
     creation_days = await _task_creation_days(db, weekly_tasks)
     _apply_creation_days(weekly_tasks, creation_days)
+    await _attach_weekly_daily_evidence(
+        db, period=period, daily_by_user=daily_by_user, user_ids=[row.user_id for row in visible]
+    )
     answers_by_user = await _weekly_manual_answers(
         db, period=period, user_ids=[row.user_id for row in visible]
     )
@@ -1524,6 +1604,7 @@ async def _weekly_response(
             if question.get("key") in {"respected_meetings", "approved_postponement"}:
                 question["source_status"] = "MANUAL_UNANSWERED"
         apply_checklist_answers(facts, direct_answers=direct_answers)
+        facts["weekly_evaluation"] = suggest_weekly_level(facts)
         facts["manager_review_comment"] = row.manager_comment
         payload["facts_json"] = facts
         if user.role == UserRole.STAFF:
@@ -1627,239 +1708,33 @@ async def export_realization_excel(
         ).scalars().all():
             if manager_row.department_id is not None:
                 managers_by_department_id[manager_row.department_id] = manager_row.full_name
-    weekly_results = (
-        await db.execute(
-            select(RealizationPersonResult).where(
-                RealizationPersonResult.period_id.in_([period.id for period in periods])
-            )
-        )
-    ).scalars().all()
-    working_days: set[date] = set()
-    current_day = start
-    while current_day <= end:
-        if _is_working_day(current_day):
-            working_days.add(current_day)
-        current_day += timedelta(days=1)
-    eligible_by_period: dict[uuid.UUID, set[uuid.UUID]] = {}
-    eligible_by_department: dict[uuid.UUID, set[uuid.UUID]] = {}
+    export_departments = []
     for period in periods:
-        active_users, common_leave = await load_active_users_and_common_leave(
-            db,
-            department_id=period.department_id,
-            start_date=start,
-            end_date=end,
+        report = await _weekly_response(
+            db, period=period, user=user,
+            department_name=departments_by_id.get(period.department_id),
         )
-        eligible_ids = {active_user.id for active_user in active_users}
-        eligible_by_period[period.id] = eligible_ids
-        eligible_by_department[period.department_id] = eligible_ids
-    weekly_results = [
-        row
-        for row in weekly_results
-        if row.user_id in eligible_by_period.get(row.period_id, set())
-    ]
-    daily_periods = (
-        await db.execute(
-            select(RealizationPeriod).where(
-                RealizationPeriod.period_type == "DAILY",
-                RealizationPeriod.start_date >= start,
-                RealizationPeriod.end_date <= end,
-                RealizationPeriod.department_id.in_(department_ids),
-                RealizationPeriod.status != RealizationPeriodStatus.OPEN.value,
+        people = []
+        for person in report.people:
+            payload = person.model_dump(mode="python")
+            review = await build_manager_review_response(
+                db, period_id=period.id, user_id=person.user_id, can_edit=False,
             )
-        )
-    ).scalars().all() if department_ids else []
-    daily_period_by_id = {period.id: period for period in daily_periods}
-    daily_results = (
-        await db.execute(
-            select(RealizationPersonResult).where(
-                RealizationPersonResult.period_id.in_(list(daily_period_by_id))
-            )
-        )
-    ).scalars().all() if daily_period_by_id else []
-    timeline_by_user_department: dict[tuple[uuid.UUID, uuid.UUID | None], list[dict]] = {}
-    tasks_by_user_department: dict[
-        tuple[uuid.UUID, uuid.UUID | None], dict[str, dict]
-    ] = {}
-    latest_daily_by_user_department: dict[
-        tuple[uuid.UUID, uuid.UUID | None],
-        tuple[RealizationPersonResult, RealizationPeriod],
-    ] = {}
-    for daily in daily_results:
-        daily_period = daily_period_by_id[daily.period_id]
-        if daily.user_id not in eligible_by_department.get(daily.department_id, set()):
-            continue
-        facts = daily.facts_json or {}
-        user_department_key = (daily.user_id, daily.department_id)
-        timeline_by_user_department.setdefault(user_department_key, []).append(
-            {
-                "date": daily_period.start_date.isoformat(),
-                "daily_progress_percent": facts.get("daily_progress_percent", 0),
-                "weekly_progress_percent": facts.get("weekly_progress_percent", 0),
-                "planned_count": facts.get(
-                    "daily_planned_count", daily.planned_count
-                ),
-                "completed_count": facts.get(
-                    "daily_completed_count", daily.completed_on_time_count
-                ),
-                "weekly_planned_count": facts.get("weekly_planned_count", 0),
-                "weekly_completed_count": facts.get("weekly_completed_count", 0),
-                "attendance": facts.get("attendance") or [],
-                "additional_count": daily.additional_count,
-                "weekly_additional_count": facts.get(
-                    "weekly_additional_count", daily.additional_count
-                ),
-            }
-        )
-        for task in facts.get("tasks") or []:
-            task_key = str(task.get("task_id") or task.get("match_key") or "")
-            if task_key:
-                tasks_by_user_department.setdefault(user_department_key, {})[
-                    task_key
-                ] = task
-        latest = latest_daily_by_user_department.get(user_department_key)
-        if latest is None or daily_period.start_date > latest[1].start_date:
-            latest_daily_by_user_department[user_department_key] = (daily, daily_period)
-
-    all_user_ids = {
-        row.user_id for row in weekly_results
-    } | {
-        user_id for user_id, _ in latest_daily_by_user_department
-    }
-    user_names = {
-        row.id: row.full_name
-        for row in (
-            await db.execute(select(User).where(User.id.in_(all_user_ids)))
-        ).scalars().all()
-    } if all_user_ids else {}
-
-    export_observations = (
-        await db.execute(
-            select(RealizationObservation).where(
-                RealizationObservation.period_id.in_([period.id for period in periods]),
-                RealizationObservation.voided_at.is_(None),
-            )
-        )
-    ).scalars().all()
-    export_verified_ids: set[uuid.UUID] = set()
-    for observation in export_observations:
-        evidence = observation.evidence_json or {}
-        if (
-            observation.source_type == "realization_observation_verification"
-            and evidence.get("verified") is True
-        ):
-            try:
-                export_verified_ids.add(
-                    uuid.UUID(str(evidence.get("verification_of") or observation.source_id))
-                )
-            except (TypeError, ValueError):
-                pass
-    export_observations_by_period_user: dict[
-        tuple[uuid.UUID | None, uuid.UUID], list[dict]
-    ] = {}
-    for observation in export_observations:
-        if (
-            observation.source_type == "realization_observation_verification"
-            or observation.source_type == M3_MANAGER_REVIEW_SOURCE
-            or observation.user_id is None
-        ):
-            continue
-        export_observations_by_period_user.setdefault(
-            (observation.period_id, observation.user_id), []
-        ).append(
-            {
-                "id": str(observation.id),
-                "marker": observation.marker,
-                "category": observation.category,
-                "comment": observation.comment,
-                "task_id": str(observation.task_id) if observation.task_id else None,
-                "evidence_json": observation.evidence_json or {},
-                "verified": observation.id in export_verified_ids
-                or (
-                    observation.is_system_generated
-                    and (observation.evidence_json or {}).get("verified") is True
-                ),
-                "visibility": observation.visibility,
-            }
-        )
-
-    results_by_period: dict[uuid.UUID, list[dict]] = {}
-    live_period_ids: set[uuid.UUID] = set()
-    weekly_by_period: dict[uuid.UUID, list[RealizationPersonResult]] = {}
-    for row in weekly_results:
-        weekly_by_period.setdefault(row.period_id, []).append(row)
-
-    for period in periods:
-        selected_rows: list[tuple[RealizationPersonResult, bool]] = [
-            (row, False) for row in weekly_by_period.get(period.id, [])
-        ]
-        selected_user_ids = {row.user_id for row, _ in selected_rows}
-        for (user_id, row_department_id), (daily, _) in latest_daily_by_user_department.items():
-            if (
-                row_department_id == period.department_id
-                and user_id not in selected_user_ids
-            ):
-                selected_rows.append((daily, True))
-                live_period_ids.add(period.id)
-
-        for row, is_live_fallback in selected_rows:
-            payload = RealizationPersonResultOut.model_validate(row).model_dump(mode="python")
-            facts = dict(payload.get("facts_json") or {})
-            facts["daily_timeline"] = sorted(
-                timeline_by_user_department.get((row.user_id, row.department_id), []),
-                key=lambda item: item["date"],
-            )
-            facts["observations"] = export_observations_by_period_user.get(
-                (period.id, row.user_id), []
-            )
-            is_live = is_live_fallback or period.final_snapshot_id is None
-            if is_live:
-                live_period_ids.add(period.id)
-                facts["tasks"] = list(
-                    tasks_by_user_department.get(
-                        (row.user_id, row.department_id), {}
-                    ).values()
-                ) or (facts.get("tasks") or [])
-                payload["planned_count"] = int(
-                    facts.get("weekly_planned_count", payload.get("planned_count", 0))
-                )
-                payload["completed_on_time_count"] = int(
-                    facts.get(
-                        "weekly_completed_count",
-                        payload.get("completed_on_time_count", 0),
-                    )
-                )
-                payload["completed_late_count"] = 0
-                payload["additional_count"] = int(
-                    facts.get(
-                        "weekly_additional_count", payload.get("additional_count", 0)
-                    )
-                )
-                facts["report_mode"] = "LIVE_DAILY"
-                facts["questions"] = build_live_questions(facts)
-            else:
-                facts["report_mode"] = "FINAL_WEEKLY"
-            payload["facts_json"] = facts
-            payload["user_name"] = user_names.get(row.user_id, "Employee")
-            results_by_period.setdefault(period.id, []).append(payload)
-
-    export_departments = [
-        {
+            payload["weekly_manager_review"] = review.get("realization")
+            facts = payload["facts_json"]
+            payload["planned_count"] = facts.get("weekly_planned_count", 0)
+            payload["completed_on_time_count"] = facts.get("weekly_all_completed_count", 0)
+            payload["completed_late_count"] = 0
+            payload["additional_count"] = facts.get("weekly_additional_count", 0)
+            facts["report_mode"] = "FINAL_WEEKLY" if period.final_snapshot_id else "LIVE_DAILY"
+            people.append(payload)
+        export_departments.append({
             "name": departments_by_id.get(period.department_id, "Departamenti"),
             "manager_name": managers_by_department_id.get(period.department_id),
-            "status": (
-                "AKTUAL (SNAPSHOT DITOR)"
-                if period.id in live_period_ids
-                else period.status
-            ),
-            "report_mode": (
-                "LIVE_DAILY" if period.id in live_period_ids else "FINAL_WEEKLY"
-            ),
-            "people": sorted(
-                results_by_period.get(period.id, []), key=lambda item: item["user_name"]
-            ),
-        }
-        for period in periods
-    ]
+            "status": period.status,
+            "report_mode": "FINAL_WEEKLY" if period.final_snapshot_id else "LIVE_DAILY",
+            "people": sorted(people, key=lambda item: item["user_name"]),
+        })
     content = build_realization_workbook(
         week_start=start.isoformat(),
         week_end=end.isoformat(),
@@ -3158,11 +3033,19 @@ async def save_question_answer(
         updated_at=now,
     )
     db.add(answer)
-    # The answer feeds both the day the manager was looking at and the week it
-    # is stored against, so both AI analyses need regenerating.
+    # Invalidate both the dated report and its parent weekly analysis.
     mark_analysis_stale(result)
     if target_result is not result:
         mark_analysis_stale(target_result)
+    if period.period_type == "DAILY":
+        parent = await find_weekly_scope_period(db, period=period)
+        if parent:
+            parent_result = (await db.execute(select(RealizationPersonResult).where(
+                RealizationPersonResult.period_id == parent.id,
+                RealizationPersonResult.user_id == result.user_id,
+            ))).scalar_one_or_none()
+            if parent_result:
+                mark_analysis_stale(parent_result)
     await db.flush()
     add_audit_log(
         db=db,
@@ -3182,6 +3065,37 @@ async def save_question_answer(
             "question_key": question_key,
         }
     )
+
+
+@router.post(
+    "/periods/{period_id}/users/{subject_user_id}/questions/{question_key}",
+    response_model=RealizationQuestionAnswerOut,
+)
+async def save_person_question_answer(
+    period_id: uuid.UUID, subject_user_id: uuid.UUID, question_key: str,
+    payload: RealizationQuestionAnswerCreate,
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+) -> RealizationQuestionAnswerOut:
+    """Allow a weekly override even before the weekly result is calculated."""
+    period = await _period(db, period_id, for_update=True)
+    if not can_review_realization(user, department_id=period.department_id):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        require_unlocked(period)
+    except RealizationWorkflowError as exc:
+        raise _error(exc)
+    subject = (await db.execute(select(User).where(User.id == subject_user_id))).scalar_one_or_none()
+    if subject is None or period.department_id is None or subject.department_id != period.department_id:
+        raise HTTPException(status_code=404, detail="Employee not found in this period")
+    result = (await db.execute(select(RealizationPersonResult).where(
+        RealizationPersonResult.period_id == period.id,
+        RealizationPersonResult.user_id == subject_user_id,
+    ))).scalar_one_or_none()
+    if result is None:
+        result = RealizationPersonResult(period_id=period.id, user_id=subject_user_id, department_id=period.department_id)
+        db.add(result)
+        await db.flush()
+    return await save_question_answer(period_id=period.id, result_id=result.id, question_key=question_key, payload=payload, db=db, user=user)
 
 
 @router.post(
@@ -3214,6 +3128,16 @@ async def review_person_result(
         await _weekly_manual_answers(db, period=period, user_ids=[result.user_id])
     ).get(result.user_id, {})
     review_facts = dict(result.facts_json or {})
+    daily_evidence = {}
+    await _attach_weekly_daily_evidence(db, period=period, daily_by_user=daily_evidence, user_ids=[result.user_id])
+    # Include all applicable days so missing answers cannot become an implicit No.
+    timeline = daily_evidence.setdefault(result.user_id, [])
+    current_day = period.start_date
+    while current_day <= period.end_date:
+        if _is_working_day(current_day) and not any(d["date"] == current_day.isoformat() for d in timeline):
+            timeline.append(_empty_timeline_day(current_day.isoformat()))
+        current_day += timedelta(days=1)
+    review_facts["daily_timeline"] = timeline
     apply_checklist_answers(
         review_facts,
         direct_answers={key: _answer_payload(answer) for key, answer in latest_answers.items()},
@@ -3594,9 +3518,11 @@ async def _manager_review_context(
             period = await ensure_weekly_scope_period(db, period=period, created_by=actor.id)
         else:
             period = await find_weekly_scope_period(db, period=period) or period
+        if editing:
+            require_unlocked(period)
     except RealizationWorkflowError as exc:
         raise _error(exc)
-    return period, subject, can_edit
+    return period, subject, can_edit and period.status != RealizationPeriodStatus.LOCKED.value
 
 
 @router.get(
@@ -3648,6 +3574,11 @@ async def put_manager_review(
         actor=user,
         editing=True,
     )
+    if dimension == "REALIZATION" and payload.level is not None:
+        weekly = await _weekly_response(db, period=period, user=user, department_name=None)
+        person = next((item for item in weekly.people if item.user_id == subject_user_id), None)
+        if person is None or not (person.facts_json.get("manual_question_completeness") or {}).get("complete"):
+            raise HTTPException(status_code=409, detail="Plotëso dhe ruaj 9 përgjigjet para konfirmimit të shkronjës.")
     review = await upsert_manager_review(
         db,
         period_id=period.id,
@@ -3658,6 +3589,8 @@ async def put_manager_review(
         comment=payload.comment,
         actor_id=user.id,
         rating=payload.rating,
+        level=payload.level,
+        update_level="level" in payload.model_fields_set,
     )
     add_audit_log(
         db=db,
@@ -3671,6 +3604,7 @@ async def put_manager_review(
             "dimension": dimension,
             "marker": review.marker,
             "rating": payload.rating,
+            "level": (review.evidence_json or {}).get("review_level"),
         },
     )
     # A qualitative M3 review is evidence only: it intentionally does not

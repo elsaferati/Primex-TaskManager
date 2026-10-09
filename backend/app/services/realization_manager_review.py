@@ -90,6 +90,7 @@ async def build_manager_review_response(
         else:
             rating = "GOOD" if row.marker == "POSITIVE" else "ACTION_REQUIRED"
         return {
+            "level": evidence.get("review_level"),
             "rating": rating,
             "id": row.id,
             "dimension": dimension,
@@ -130,7 +131,11 @@ async def upsert_manager_review(
     comment: str | None,
     actor_id: uuid.UUID,
     rating: str | None = None,
+    level: str | None = None,
+    update_level: bool = False,
 ) -> RealizationObservation:
+    if level is not None and level not in {"A+", "A", "B", "C", "M", "D", "E"}:
+        raise ValueError("Invalid manager review level")
     if rating is not None:
         if rating not in M3_MANAGER_REVIEW_RATINGS:
             raise ValueError("Invalid manager review rating")
@@ -156,6 +161,7 @@ async def upsert_manager_review(
         category=RealizationObservationCategory.QUALITY.value,
         comment=(comment or "").strip(),
         evidence_json={
+            "review_level": level if update_level else (previous.evidence_json or {}).get("review_level") if previous else None,
             "review_dimension": dimension,
             "review_rating": rating,
             "review_source": M3_MANAGER_REVIEW_SOURCE,

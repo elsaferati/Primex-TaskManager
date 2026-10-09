@@ -1,5 +1,41 @@
 # Automatic weekly Realization implementation
 
+## Dated daily summary and suggested letter
+
+Weekly rows include expandable daily percentages, personal comments (with author),
+dated task comments, checklist comments and close comments. Percentages come from
+the live Daily metrics (`raw_plan_realization`); weekly task deduplication never
+recalculates them with a different denominator. Leave, future days and missing
+metrics are displayed explicitly instead of as zero. Weekly percentages continue
+to use unique weekly obligations and the existing penalty/WFE rules.
+
+The weekly review requires all nine saved boolean answers (including dated
+rollups) before showing a proposal. Form defaults are not saved answers. The
+first save keeps the dialog open and refreshes the proposal; a separate action
+accepts it or saves a different letter. Editing answers hides the proposal until
+the updated answers have been saved and the refreshed result received. The API
+also rejects letter confirmation while answers are incomplete.
+
+`facts_json.weekly_evaluation` proposes an advisory letter with its reason,
+missing evidence and rule version. Complete plans start at B; one extra engagement
+category permits A, and two permit A+. Recorded problems, repetition or impact on
+another person's plan cap the suggestion at C. Three delay days or one explicitly
+unexcused absence also cap complete work at C. A missed meeting or incomplete plan
+gives D; a plan with no recorded completion/progress gives E. Two verified
+unexcused absences give E. Approved personal absence with covered work gives M,
+while full annual leave gives B. A missing baseline/report has no suggested letter.
+Free-text comments alone never classify misconduct. Unclassified absences and
+missing checklist answers are marked for review. Suggestions are provisional
+while evidence is incomplete or the week has future days.
+
+Managers can select A+/A/B/C/M/D/E in the weekly review. The selected letter is
+stored as `review_level` in the existing append-only manager-review evidence,
+with author, timestamp and supersession history. An explicit null restores the
+automatic suggestion; omitting the field during a comment edit preserves it.
+Recalculation cannot overwrite the manager selection. Locked weeks reject writes.
+These letters are advisory review evidence and do not change payroll or the
+existing formal approval workflow. No database migration is required.
+
 ## M3 manager review
 
 Weekly M3 includes an optional, qualitative responsible-manager review for the
@@ -27,40 +63,42 @@ their own department, STAFF cannot write reviews, and ADMIN retains broad access
 ## Daily and weekly evaluation checklist
 
 The reference evaluation checklist is represented as 17 explicit questions in
-both Daily and Weekly Realization. Nine answers come from system evidence:
+both Daily and Weekly Realization. Eight answers come from system evidence:
 
 - completion of the plan;
 - tasks with no progress;
 - tasks still in progress;
 - newly added tasks, split into completed, in progress, to do, and postponed;
 - extra-task realization: total, completed, in progress, and without progress;
-- approved or unresolved postponements;
 - closed tasks;
 - attendance tardiness;
 - unexpected absences.
 
-The remaining eight are manager inputs because they require human judgment:
+The remaining nine are manager inputs because they require human judgment:
+confirmed postponements,
 respecting meeting times,
 requested extra tasks, helped a colleague, gave a proposal,
 the week's positive contribution, problems caused, impact on another
 person's plan, and repetition after clarification. Boolean inputs accept Yes,
 No. The manager can edit the final weekly narratives.
 
-These eight inputs are **weekly**: one question has exactly one answer per person
-per week. The manager may record or correct that answer — its tick and its
-comment — from whichever day they have open, and every view reads back the same
-answer. Storage reflects this: a save issued against a DAILY `period_id` resolves
-to the WEEKLY period covering that day and lands on that person's weekly
-`result_id`, creating the weekly period or result when they do not exist yet.
-Answers stay append-only, so each correction supersedes the previous one without
-erasing it, and a locked week rejects edits made from any of its days. Saving
-also marks both the day's and the week's AI analysis as stale.
+New answers entered in Daily are stored against that daily period/result.
+Weekly gathers the latest answer per person, date and question. Existence
+questions use any explicit Yes; a No requires all applicable elapsed days to be
+answered. Meeting compliance uses any explicit No; a Yes requires complete
+coverage. Missing answers are not silently treated as No. Leave and future days
+are excluded from daily-answer coverage. Direct weekly answers override the
+daily rollup without erasing its dated history; clearing an override restores it.
+Legacy weekly answers remain weekly and are never assigned invented daily dates.
+Corrections remain append-only, parent-week locks block daily answers, and saves
+invalidate the daily and weekly AI analyses. The user-based question endpoint can
+create a weekly result before a FINAL snapshot exists.
 
 Daily Realization shows the same checklist after selecting a person. Automatic
 facts still describe the selected day's task counts, extra-task status, and
-attendance evidence; only the eight manual inputs are weekly. Managers fill them
-in from either view, staff can read the result, and weekly completeness simply
-requires all eight answers to be present. Ambiguous postponements or absences are
+attendance evidence; manual inputs describe the selected day. Managers fill them
+in from either view, staff can read the result, and weekly completeness requires
+all nine answers from dated rollups or direct weekly decisions. Ambiguous postponements or absences are
 marked as automatic facts that still need manager confirmation rather than being
 silently treated as resolved. The manual judgment does not change task
 percentages, payroll, or deterministic policy grades.
@@ -268,8 +306,8 @@ and still use the connected PrimeFlow account's normal permissions.
 - The **Vlerësimi** table cell opens one combined person modal. It contains the
   qualitative rating (including **Shumë mirë**), the manager summary, automatic
   facts as read-only context, and the manual checklist answers.
-- Manual checklist rows are compact boolean inputs: unchecked means `Jo`, and
-  managers tick only the answers that are `Po`. Daily rollups and dated history
+- Manual checklist rows offer explicit `E paplotësuar`, `Po`, and `Jo` values.
+  Daily rollups and dated history
   are visible in the modal before a weekly override is saved.
 - MANAGER: review results and verify observations in their department.
 - ADMIN: same access across departments, plus approve and lock.

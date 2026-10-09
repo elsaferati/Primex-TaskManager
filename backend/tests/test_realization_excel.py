@@ -159,7 +159,7 @@ class TestRealizationExcel(unittest.TestCase):
         workbook = load_workbook(io.BytesIO(payload), data_only=False)
         self.assertEqual(
             workbook.sheetnames,
-            ["Përmbledhje", "Development", "Evidenca", "Udhëzuesi", "Udhëzuesi i Vlerësimit"],
+            ["Përmbledhje", "Development", "Evidenca", "Udhëzuesi", "Udhëzuesi i Vlerësimit", "Komentet ditore"],
         )
         values = " ".join(
             str(cell.value or "")
@@ -258,3 +258,23 @@ class TestRealizationExcel(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_export_uses_daily_percent_and_dated_comments_and_confirmed_letter():
+    person = {"user_name": "Rinesa", "weekly_manager_review": {"level": "B", "created_by_name": "Manager", "comment": "Reviewed"},
+              "facts_json": {"weekly_progress_percent": 84.8,
+                             "weekly_evaluation": {"level": "C", "answers_complete": True, "reasons": ["Explanation"]},
+                             "daily_timeline": [{"date": "2026-10-05", "daily_progress_percent": 79.2,
+                                                 "weekly_progress_percent": 20, "person_comment": {"comment": "=not a formula", "author": "Manager"}},
+                                                {"date": "2026-10-06", "on_leave": True, "daily_progress_percent": None}]}}
+    book = load_workbook(io.BytesIO(build_realization_workbook(week_start="2026-10-05", week_end="2026-10-09",
+        departments=[{"name": "DEV", "report_mode": "LIVE_DAILY", "people": [person]}])))
+    rows = {row[0].value: row for row in book["DEV"].iter_rows() if row[0].value}
+    assert rows["Snapshot ditor — 2026-10-05"][1].value == 0.792
+    assert rows["Snapshot ditor — 2026-10-06"][1].value == "Pushim"
+    assert rows["Propozimi për nivelin e vlerësimit"][1].value == "C"
+    assert rows["Vlerësimi final"][1].value == "B"
+    assert book["Komentet ditore"]["C5"].value == "2026-10-05"
+    assert book["Komentet ditore"]["F5"].value == "=not a formula"
+    assert book["Komentet ditore"]["F5"].data_type == "s"
+    assert book["Përmbledhje"]["H5"].value == "B"

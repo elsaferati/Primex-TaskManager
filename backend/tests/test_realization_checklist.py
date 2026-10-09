@@ -141,7 +141,7 @@ class TestWeeklyChecklistLoading(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn("helped_colleague", latest[result_id])
 
-    async def test_a_daily_view_reads_the_weekly_answers_of_each_person(self):
+    async def test_a_daily_view_reads_only_its_dated_answers_of_each_person(self):
         first, second, department = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
         first_result = SimpleNamespace(id=uuid.uuid4(), user_id=first)
         second_result = SimpleNamespace(id=uuid.uuid4(), user_id=second)
@@ -165,9 +165,10 @@ class TestWeeklyChecklistLoading(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((results[second]["respected_meetings"].value_json)["value"])
         statement = db.execute.call_args.args[0]
         self.assertIn("realization_person_results.user_id IN", str(statement))
-        self.assertIn(weekly.id, statement.compile().params.values())
+        self.assertIn(daily.id, statement.compile().params.values())
+        self.assertNotIn(weekly.id, statement.compile().params.values())
 
-    async def test_answering_from_a_day_creates_and_targets_the_weekly_result(self):
+    async def test_answering_from_a_day_keeps_the_dated_result(self):
         department, user_id = uuid.uuid4(), uuid.uuid4()
         daily = SimpleNamespace(id=uuid.uuid4(), period_type="DAILY", start_date=TUESDAY, department_id=department)
         weekly = SimpleNamespace(id=uuid.uuid4(), period_type="WEEKLY", department_id=department, status="OPEN")
@@ -182,15 +183,13 @@ class TestWeeklyChecklistLoading(unittest.IsolatedAsyncioTestCase):
             target_period, target_result = await _weekly_answer_target(
                 db, period=daily, result=daily_result, actor_id=uuid.uuid4()
             )
-        self.assertIs(target_period, weekly)
-        self.assertIsInstance(target_result, RealizationPersonResult)
-        self.assertEqual(target_result.period_id, weekly.id)
-        self.assertEqual(target_result.user_id, user_id)
-        self.assertEqual(added, [target_result])
+        self.assertIs(target_period, daily)
+        self.assertIs(target_result, daily_result)
+        self.assertEqual(added, [])
 
     async def test_answering_from_the_weekly_view_stays_on_its_own_result(self):
         weekly = SimpleNamespace(id=uuid.uuid4(), period_type="WEEKLY", department_id=uuid.uuid4(), status="OPEN")
-        weekly_result = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), department_id=None)
+        weekly_result = SimpleNamespace(id=uuid.uuid4(), period_id=weekly.id, user_id=uuid.uuid4(), department_id=None)
         db = SimpleNamespace(execute=AsyncMock(), add=lambda value: self.fail("no result should be created"), flush=AsyncMock())
         with patch("app.api.routers.realization.ensure_weekly_scope_period", new=AsyncMock(return_value=weekly)):
             target_period, target_result = await _weekly_answer_target(

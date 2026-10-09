@@ -153,12 +153,11 @@ def build_weekly_task_metrics(
             planned_today.add(identity)
             if _is_completed(task):
                 completed_today.add(identity)
-        timeline_item["planned_count"] = len(planned_today)
-        timeline_item["completed_count"] = len(completed_today)
-        timeline_item["daily_progress_percent"] = (
-            round(len(completed_today) * 100.0 / len(planned_today), 1)
-            if planned_today else 0.0
-        )
+        # Daily metrics come from the same report as the Daily table. Weekly
+        # task attribution (creation date) must not rewrite a day's baseline.
+        timeline_item.setdefault("planned_count", len(planned_today))
+        timeline_item.setdefault("completed_count", len(completed_today))
+        timeline_item.setdefault("daily_progress_percent", None)
 
     # A task known to belong to the plan can never also be an extra. Legacy data
     # without either marker is treated as extra only when it was completed.

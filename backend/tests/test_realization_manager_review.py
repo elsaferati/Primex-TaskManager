@@ -36,7 +36,7 @@ class ListResult:
 
 
 def period(department_id: uuid.UUID, period_type: str = "DAILY"):
-    return SimpleNamespace(id=uuid.uuid4(), period_type=period_type, department_id=department_id,
+    return SimpleNamespace(id=uuid.uuid4(), period_type=period_type, department_id=department_id, status="OPEN",
                            start_date=date(2026, 8, 27), end_date=date(2026, 8, 27))
 
 
