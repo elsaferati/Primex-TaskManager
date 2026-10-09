@@ -27,6 +27,29 @@ import type { Department, PlanNote, PlanNoteAttachment, Project, PxJavPlanningBr
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
 
+type OneHMarker = "EXCLAMATION" | "QUESTION" | "KA" | "GENT" | "FLAG" | "F" | "BZ1N1" | "M2" | "M3" | "M2_M3" | "MONITOR" | "CLOSE" | "CLIENT_URGENT" | "SHARE"
+const ONE_H_MARKER_NONE = "__none__"
+const ONE_H_MARKER_OPTIONS: Array<{ value: OneHMarker; label: string }> = [
+  { value: "QUESTION", label: "?" },
+  { value: "EXCLAMATION", label: "!" },
+  { value: "CLIENT_URGENT", label: "!!!" },
+  { value: "SHARE", label: "SHARE" },
+  { value: "MONITOR", label: "👁" },
+  { value: "CLOSE", label: "X" },
+  { value: "M2", label: "M2" },
+  { value: "M3", label: "M3" },
+  { value: "M2_M3", label: "M2/3" },
+  { value: "GENT", label: "GENT" },
+  { value: "KA", label: "KA" },
+  { value: "FLAG", label: "GA" },
+  { value: "F", label: "F" },
+  { value: "BZ1N1", label: "BZ1N1" },
+]
+const oneHMarkerLabel = (value?: OneHMarker | null, byGa = false) => {
+  const label = ONE_H_MARKER_OPTIONS.find((option) => option.value === value)?.label || ""
+  return label && byGa ? `(${label})` : label
+}
+
 const TYPE_BADGE: Record<NoteType, string> = {
   GA: "bg-amber-100 text-amber-800 border-amber-200",
   KA: "bg-cyan-100 text-cyan-800 border-cyan-200",
@@ -49,6 +72,13 @@ const TASK_TYPE_OPTIONS_WITH_PROJECT = ["NORMAL", "HIGH", "1H", "R1", "PERSONAL"
 type TaskTypeOption = typeof TASK_TYPE_OPTIONS_NO_PROJECT[number] | TaskPriority
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
+const ONE_H_REPORT_SLOT_OPTIONS = ["10:00", "11:00", "11:50", "14:20", "16:00"] as const
+type OneHReportSlot = typeof ONE_H_REPORT_SLOT_OPTIONS[number]
+const ONE_H_REPORT_SLOT_NONE_VALUE = "__none__"
+const ONE_H_REPORT_SLOTS_BY_PERIOD: Record<TaskFinishPeriod, readonly OneHReportSlot[]> = {
+  AM: ["10:00", "11:00", "11:50"],
+  PM: ["14:20", "16:00"],
+}
 const TASK_PRIORITY_STYLES: Record<string, string> = {
   HIGH: "bg-rose-50 text-rose-700",
   NORMAL: "bg-blue-50 text-blue-700",
@@ -120,8 +150,60 @@ type NoteTaskInfo = {
   isDeadlineImportant?: boolean | null
 }
 
+type CommonLeaveItem = {
+  entryId?: string
+  person: string
+  startDate: string
+  endDate: string
+  fullDay: boolean
+  isAllUsers?: boolean
+  userId?: string | null
+}
+type CommonViewLeavePayload = {
+  items?: {
+    leave?: CommonLeaveItem[]
+  }
+}
+
 const pad2 = (value: number) => String(value).padStart(2, "0")
 const toISODate = (value: Date) => `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`
+
+const getMonday = (value: Date) => {
+  const date = new Date(value.getFullYear(), value.getMonth(), value.getDate())
+  const day = date.getDay()
+  date.setDate(date.getDate() - (day === 0 ? 6 : day - 1))
+  return date
+}
+
+const addDays = (isoDate: string, days: number) => {
+  const date = new Date(`${isoDate}T12:00:00`)
+  date.setDate(date.getDate() + days)
+  return toISODate(date)
+}
+
+const dateRangeKey = (startIso: string, endIso: string) => {
+  const dates: string[] = []
+  for (let date = startIso; date <= endIso; date = addDays(date, 1)) {
+    dates.push(date)
+  }
+  return dates.join("|")
+}
+
+const formatISODateDMY = (value?: string | null) => {
+  if (!value) return ""
+  const iso = value.slice(0, 10)
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  if (!match) return value
+  return `${match[3]}/${match[2]}/${match[1]}`
+}
+
+function oneHReportSlotsForPeriod(period?: TaskFinishPeriod | null) {
+  return period ? ONE_H_REPORT_SLOTS_BY_PERIOD[period] : ONE_H_REPORT_SLOT_OPTIONS
+}
+
+function finishPeriodForOneHReportSlot(slot: OneHReportSlot): TaskFinishPeriod {
+  return ONE_H_REPORT_SLOTS_BY_PERIOD.AM.includes(slot) ? "AM" : "PM"
+}
 
 function mondayISO(today = new Date()) {
   const d = new Date(today)
@@ -867,6 +949,14 @@ export default function NextWeekPlanPage() {
   const urlProjectId = searchParams.get("project_id")
   const [departmentId, setDepartmentId] = React.useState(urlDepartmentId || "ALL")
   const [projectId, setProjectId] = React.useState(urlProjectId || "NONE")
+  const [noteOneHMarker, setNoteOneHMarker] = React.useState<OneHMarker | typeof ONE_H_MARKER_NONE>(ONE_H_MARKER_NONE)
+  const [noteOneHMarkerComment, setNoteOneHMarkerComment] = React.useState("")
+  const [editOneHMarker, setEditOneHMarker] = React.useState<OneHMarker | typeof ONE_H_MARKER_NONE>(ONE_H_MARKER_NONE)
+  const [editOneHMarkerComment, setEditOneHMarkerComment] = React.useState("")
+  const [taskOneHMarker, setTaskOneHMarker] = React.useState<OneHMarker | typeof ONE_H_MARKER_NONE>(ONE_H_MARKER_NONE)
+  const [taskOneHMarkerComment, setTaskOneHMarkerComment] = React.useState("")
+  const [taskOneHReportSlot, setTaskOneHReportSlot] = React.useState<OneHReportSlot | typeof ONE_H_REPORT_SLOT_NONE_VALUE>(ONE_H_REPORT_SLOT_NONE_VALUE)
+  const [taskDateLeaveItems, setTaskDateLeaveItems] = React.useState<CommonLeaveItem[]>([])
   const [content, setContent] = React.useState("")
   const [plannedHorizonNewNote, setPlannedHorizonNewNote] = React.useState<PlannedHorizonOption>(PLANNED_HORIZON_NONE)
   const [noteType] = React.useState<NoteType>("GA")
@@ -1624,6 +1714,8 @@ export default function NextWeekPlanPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           content: content.trim(),
+          one_h_marker: noteOneHMarker === ONE_H_MARKER_NONE ? null : noteOneHMarker,
+          one_h_marker_comment: noteOneHMarker === ONE_H_MARKER_NONE ? null : noteOneHMarkerComment.trim() || null,
           note_type: noteType,
           priority: priority === "NONE" ? null : priority,
           department_id: finalDepartmentId,
@@ -1647,6 +1739,8 @@ export default function NextWeekPlanPage() {
       const created = (await res.json()) as PlanNote
       setNotes((prev) => [created, ...prev])
       setContent("")
+      setNoteOneHMarker(ONE_H_MARKER_NONE)
+      setNoteOneHMarkerComment("")
       setPlannedHorizonNewNote(PLANNED_HORIZON_NONE)
       if (selectedFiles.length > 0) {
         try {
@@ -1665,6 +1759,8 @@ export default function NextWeekPlanPage() {
 
   const openEditNote = (note: PlanNote) => {
     const parsedContent = parseMarkedNoteContent(note.content)
+    setEditOneHMarker(note.one_h_marker ?? ONE_H_MARKER_NONE)
+    setEditOneHMarkerComment(note.one_h_marker_comment ?? "")
     setEditNoteId(note.id)
     setEditContent(parsedContent.text)
     setEditDoneRanges(parsedContent.doneRanges)
@@ -1818,6 +1914,8 @@ export default function NextWeekPlanPage() {
         body: JSON.stringify({
           content: serializeMarkedNoteContent(editContent, editDoneRanges, editAddedRanges).trim(),
           planned_for_date: plannedHorizonToIso(editPlannedHorizon),
+          one_h_marker: editOneHMarker === ONE_H_MARKER_NONE ? null : editOneHMarker,
+          one_h_marker_comment: editOneHMarker === ONE_H_MARKER_NONE ? null : editOneHMarkerComment.trim() || null,
         }),
       })
       if (res?.ok) {
@@ -1972,6 +2070,9 @@ export default function NextWeekPlanPage() {
       return
     }
     const defaultTitle = noteToTaskTitle(note.content || "")
+    setTaskOneHReportSlot(ONE_H_REPORT_SLOT_NONE_VALUE)
+    setTaskOneHMarker(note.one_h_marker ?? ONE_H_MARKER_NONE)
+    setTaskOneHMarkerComment(note.one_h_marker_comment ?? "")
     setTaskDialogNoteId(note.id)
     setTaskTitle(defaultTitle)
     setTaskDescription("") // start empty so creator can add detailed description
@@ -2024,6 +2125,11 @@ export default function NextWeekPlanPage() {
       toast.error("Select at least one department before creating a task")
       return
     }
+    const pvAssignees = taskAssigneeIds.flatMap((id) => {
+      const leave = taskPvByAssigneeId.get(id)
+      return leave ? [`${taskAssigneeLabel(users.find((person) => person.id === id), id)} is in PV until ${formatISODateDMY(leave.endDate)}`] : []
+    })
+    if (pvAssignees.length) toast.warning("Selected assignee is in PV", { description: pvAssignees.join(" · ") })
     const primaryDepartmentId = effectiveDepartments[0]
     setCreatingTask(true)
     try {
@@ -2093,6 +2199,9 @@ export default function NextWeekPlanPage() {
           project_id: taskProjectId !== "NONE" ? taskProjectId : null,
           is_bllok: isBllok,
           is_1h_report: is1hReport,
+          one_h_report_slot: is1hReport && taskOneHReportSlot !== ONE_H_REPORT_SLOT_NONE_VALUE ? taskOneHReportSlot : null,
+          one_h_marker: taskOneHMarker === ONE_H_MARKER_NONE ? null : taskOneHMarker,
+          one_h_marker_comment: taskOneHMarker === ONE_H_MARKER_NONE ? null : taskOneHMarkerComment.trim() || null,
           is_r1: isR1,
           is_personal: isPersonal,
         }),
@@ -2306,6 +2415,128 @@ export default function NextWeekPlanPage() {
     return []
   }, [taskDepartmentIds, taskDialogNote?.department_id])
   const taskAssigneeOptions = users
+  const taskSelectedDateRange = React.useMemo(() => {
+    const dates = [taskStartDate, taskDueDate].filter(Boolean).sort()
+    if (dates.length === 0) return null
+    return {
+      start: dates[0],
+      end: dates[dates.length - 1],
+      key: dateRangeKey(dates[0], dates[dates.length - 1]),
+    }
+  }, [taskDueDate, taskStartDate])
+  const taskSelectedWeekStartISOs = React.useMemo(() => {
+    if (!taskSelectedDateRange) return null
+    const weekStarts = new Set<string>()
+    for (const iso of taskSelectedDateRange.key.split("|").filter(Boolean)) {
+      weekStarts.add(toISODate(getMonday(new Date(`${iso}T12:00:00`))))
+    }
+    return Array.from(weekStarts)
+  }, [taskSelectedDateRange])
+  const taskPvAssigneeIds = React.useMemo(() => {
+    if (!taskSelectedDateRange) return new Set<string>()
+    const result = new Set<string>()
+    const selectedDates = taskSelectedDateRange.key.split("|").filter(Boolean)
+    const allUsersOnLeave = taskDateLeaveItems.some((item) =>
+      item.fullDay &&
+      item.isAllUsers &&
+      selectedDates.some((iso) => iso >= item.startDate && iso <= item.endDate)
+    )
+    if (allUsersOnLeave) {
+      taskAssigneeOptions.forEach((person) => {
+        if (person.id) result.add(person.id)
+      })
+    }
+    for (const item of taskDateLeaveItems) {
+      if (!item.fullDay || !item.userId) continue
+      if (selectedDates.some((iso) => iso >= item.startDate && iso <= item.endDate)) {
+        result.add(item.userId)
+      }
+    }
+    return result
+  }, [taskAssigneeOptions, taskDateLeaveItems, taskSelectedDateRange])
+  const taskPvByAssigneeId = React.useMemo(() => {
+    if (!taskSelectedDateRange) return new Map<string, CommonLeaveItem>()
+    const selectedDates = taskSelectedDateRange.key.split("|").filter(Boolean)
+    const result = new Map<string, CommonLeaveItem>()
+    const allUsersLeave = taskDateLeaveItems
+      .filter((item) =>
+        item.fullDay &&
+        item.isAllUsers &&
+        selectedDates.some((iso) => iso >= item.startDate && iso <= item.endDate)
+      )
+      .sort((a, b) => b.endDate.localeCompare(a.endDate))[0]
+    if (allUsersLeave) {
+      taskAssigneeOptions.forEach((person) => {
+        if (person.id) result.set(person.id, allUsersLeave)
+      })
+    }
+    for (const item of taskDateLeaveItems) {
+      if (!item.fullDay || !item.userId) continue
+      if (!selectedDates.some((iso) => iso >= item.startDate && iso <= item.endDate)) continue
+      const existing = result.get(item.userId)
+      if (!existing || item.endDate > existing.endDate) {
+        result.set(item.userId, item)
+      }
+    }
+    return result
+  }, [taskAssigneeOptions, taskDateLeaveItems, taskSelectedDateRange])
+  const taskAssigneeLabel = React.useCallback(
+    (person?: Pick<UserLookup, "id" | "full_name" | "username"> | null, fallbackId?: string) => {
+      const id = person?.id || fallbackId || ""
+      return person?.full_name || person?.username || fallbackId || id
+    },
+    []
+  )
+  const taskAssigneePvBadge = React.useCallback(
+    (userId?: string | null) =>
+      userId && taskPvAssigneeIds.has(userId) ? (
+        <span
+          className="ml-1 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-600 text-[9px] font-bold leading-none text-white"
+          title={`PV until ${formatISODateDMY(taskPvByAssigneeId.get(userId)?.endDate)}`}
+        >
+          PV
+        </span>
+      ) : null,
+    [taskPvAssigneeIds, taskPvByAssigneeId]
+  )
+
+  React.useEffect(() => {
+    if (!taskDialogNoteId || !taskSelectedWeekStartISOs?.length) {
+      setTaskDateLeaveItems([])
+      return
+    }
+
+    let cancelled = false
+    const loadTaskDateLeave = async () => {
+      const responses = await Promise.all(
+        taskSelectedWeekStartISOs.map((weekStartIso) => {
+          const params = new URLSearchParams({
+            week_start: weekStartIso,
+            include: "entries",
+            include_all_departments: "true",
+          })
+          return apiFetch(`/common-view?${params.toString()}`)
+        })
+      )
+      if (responses.some((res) => !res?.ok)) {
+        if (!cancelled) setTaskDateLeaveItems([])
+        return
+      }
+      const payloads = await Promise.all(responses.map(async (res) => (await res.json()) as CommonViewLeavePayload))
+      const leaveItems = payloads.flatMap((payload) => payload.items?.leave ?? [])
+      if (!cancelled) setTaskDateLeaveItems(leaveItems)
+    }
+
+    void loadTaskDateLeave().catch((error) => {
+      if (!cancelled) { setTaskDateLeaveItems([]); toast.error("Unable to check assignee PV") }
+      console.error("Failed to load task date leave:", error)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [apiFetch, taskDialogNoteId, taskSelectedWeekStartISOs])
+
+
 
   // Projects filtered by the department chosen in the task dialog
   const primaryDepartmentId = effectiveTaskDepartmentIds[0] || null
@@ -2604,6 +2835,23 @@ export default function NextWeekPlanPage() {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          <div className="max-w-[220px] space-y-2">
+            <Label>Symbol (optional)</Label>
+            <Select value={noteOneHMarker} onValueChange={(rawValue) => {
+              const value = rawValue as OneHMarker | typeof ONE_H_MARKER_NONE
+              if (value === ONE_H_MARKER_NONE) { setNoteOneHMarker(value); setNoteOneHMarkerComment(""); return }
+              const nextComment = window.prompt("Optional symbol comment:", value === noteOneHMarker ? noteOneHMarkerComment : "")
+              if (nextComment !== null) { setNoteOneHMarker(value); setNoteOneHMarkerComment(nextComment) }
+            }}>
+              <SelectTrigger className={`border-blue-300 bg-blue-50 font-black ${noteOneHMarker === ONE_H_MARKER_NONE ? "text-[#0F2A5F]" : "text-red-600"}`}><SelectValue /></SelectTrigger>
+              <SelectContent className="font-black text-[#0F2A5F]">
+                <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
+                {ONE_H_MARKER_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-2">
             <Label>Attachments</Label>
@@ -3293,6 +3541,16 @@ export default function NextWeekPlanPage() {
                                       ) : null}
                                     </span>
                                   ) : null}
+                                {note.one_h_marker ? (
+                                  <button
+                                    type="button"
+                                    className="inline-flex min-h-6 shrink-0 items-center rounded-md border border-blue-300 bg-blue-50 px-2 text-lg font-black text-red-600 [text-shadow:0_0_0_currentColor]"
+                                    title={note.one_h_marker_comment || "Note symbol"}
+                                    onClick={() => { if (note.one_h_marker_comment) window.prompt("Symbol comment (copy with Ctrl+C):", note.one_h_marker_comment) }}
+                                  >
+                                    {oneHMarkerLabel(note.one_h_marker, note.one_h_marker_by_ga)}
+                                  </button>
+                                ) : null}
                                   <span id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
                                     {renderMarkedNoteContent(note.content)}
                                   </span>
@@ -4028,7 +4286,9 @@ export default function NextWeekPlanPage() {
                       // Reset to NORMAL if switching between project/non-project modes and current value is invalid
                       const nextValue = v as TaskTypeOption
                       const isValid = availablePriorityOptions.includes(nextValue)
-                      setTaskPriority(isValid ? nextValue : "NORMAL")
+                      const nextPriority = isValid ? nextValue : "NORMAL"
+                      setTaskPriority(nextPriority)
+                      if (nextPriority !== "1H") setTaskOneHReportSlot(ONE_H_REPORT_SLOT_NONE_VALUE)
                     }}
                   >
                     <SelectTrigger>
@@ -4043,13 +4303,44 @@ export default function NextWeekPlanPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                {taskPriority === "1H" ? (
+                  <div className="space-y-2">
+                    <Label>1H slot (optional)</Label>
+                    <Select
+                      value={taskOneHReportSlot}
+                      onValueChange={(value) => {
+                        const nextSlot = value as OneHReportSlot | typeof ONE_H_REPORT_SLOT_NONE_VALUE
+                        setTaskOneHReportSlot(nextSlot)
+                        if (nextSlot !== ONE_H_REPORT_SLOT_NONE_VALUE) {
+                          setTaskFinishPeriod(finishPeriodForOneHReportSlot(nextSlot))
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select slot" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ONE_H_REPORT_SLOT_NONE_VALUE}>Unassigned</SelectItem>
+                        {oneHReportSlotsForPeriod(
+                          taskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : taskFinishPeriod
+                        ).map((value) => (
+                          <SelectItem key={value} value={value}>{value}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
                 <div className="space-y-2">
                   <Label>Finish by (optional)</Label>
                   <Select
                     value={taskFinishPeriod}
-                    onValueChange={(value) =>
-                      setTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
-                    }
+                    onValueChange={(value) => {
+                      const nextPeriod = value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
+                      setTaskFinishPeriod(nextPeriod)
+                      if (nextPeriod !== FINISH_PERIOD_NONE_VALUE && taskOneHReportSlot !== ONE_H_REPORT_SLOT_NONE_VALUE && finishPeriodForOneHReportSlot(taskOneHReportSlot) !== nextPeriod) {
+                        setTaskOneHReportSlot(ONE_H_REPORT_SLOT_NONE_VALUE)
+                      }
+                    }}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="None (all day)" />
@@ -4060,6 +4351,23 @@ export default function NextWeekPlanPage() {
                         <SelectItem key={value} value={value}>
                           {value}
                         </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Symbol (optional)</Label>
+                  <Select value={taskOneHMarker} onValueChange={(rawValue) => {
+                    const value = rawValue as OneHMarker | typeof ONE_H_MARKER_NONE
+                    if (value === ONE_H_MARKER_NONE) { setTaskOneHMarker(value); setTaskOneHMarkerComment(""); return }
+                    const nextComment = window.prompt("Optional symbol comment:", value === taskOneHMarker ? taskOneHMarkerComment : "")
+                    if (nextComment !== null) { setTaskOneHMarker(value); setTaskOneHMarkerComment(nextComment) }
+                  }}>
+                    <SelectTrigger className={`w-full border-blue-300 bg-blue-50 font-black ${taskOneHMarker === ONE_H_MARKER_NONE ? "text-[#0F2A5F]" : "text-red-600"}`}><SelectValue /></SelectTrigger>
+                    <SelectContent className="font-black text-[#0F2A5F]">
+                      <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
+                      {ONE_H_MARKER_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{option.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -4179,6 +4487,7 @@ export default function NextWeekPlanPage() {
                             }
                           >
                             {label}
+                            {taskAssigneePvBadge(id)}
                             <span className="text-slate-500">×</span>
                           </button>
                         )
@@ -4212,7 +4521,7 @@ export default function NextWeekPlanPage() {
                         .filter((person) => person.id && !taskAssigneeIds.includes(person.id))
                         .map((person) => (
                           <SelectItem key={person.id} value={person.id}>
-                            {person.full_name || person.username || person.id}
+                            <span className="inline-flex items-center">{taskAssigneeLabel(person)}{taskAssigneePvBadge(person.id)}</span>
                           </SelectItem>
                         ))}
                     </SelectContent>
@@ -4285,6 +4594,23 @@ export default function NextWeekPlanPage() {
                 </div>
               </div>
             </div>
+          <div className="max-w-[220px] space-y-2">
+            <Label>Symbol (optional)</Label>
+            <Select value={editOneHMarker} onValueChange={(rawValue) => {
+              const value = rawValue as OneHMarker | typeof ONE_H_MARKER_NONE
+              if (value === ONE_H_MARKER_NONE) { setEditOneHMarker(value); setEditOneHMarkerComment(""); return }
+              const nextComment = window.prompt("Optional symbol comment:", value === editOneHMarker ? editOneHMarkerComment : "")
+              if (nextComment !== null) { setEditOneHMarker(value); setEditOneHMarkerComment(nextComment) }
+            }}>
+              <SelectTrigger className={`border-blue-300 bg-blue-50 font-black ${editOneHMarker === ONE_H_MARKER_NONE ? "text-[#0F2A5F]" : "text-red-600"}`}><SelectValue /></SelectTrigger>
+              <SelectContent className="font-black text-[#0F2A5F]">
+                <SelectItem value={ONE_H_MARKER_NONE}>No symbol</SelectItem>
+                {ONE_H_MARKER_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value} className="font-black text-red-600 focus:text-red-700">{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
             <div className="space-y-2">
               <Label className="text-xs">Planned for (optional)</Label>
               <Select

@@ -198,6 +198,11 @@ export default function M2ReportingPointsPage() {
     <Tabs value={tab} onValueChange={(value) => { setTab(value); if (value === "history") void loadHistory() }} className="gap-5">
       <div className="flex flex-wrap items-center gap-2"><TabsList className="h-10 rounded-md"><TabsTrigger value="report"><Pencil />Raporti</TabsTrigger><TabsTrigger value="history"><History />Historiku</TabsTrigger></TabsList></div>
       <TabsContent value="report" className="space-y-5">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button variant="outline" onClick={preview} disabled={!report || !!busy || savingAnswers || dirty}><Eye />Pamja e email-it</Button>
+          {(["docx", "png", "txt"] as const).map((format) => <Button key={format} variant="outline" disabled={!report || !!busy || savingAnswers || dirty} onClick={() => download(format)}>{format === "docx" ? "Word" : format.toUpperCase()}</Button>)}
+          {canManage ? <Button onClick={() => setSendOpen(true)} disabled={!report || !report.generated_at || !!busy || savingAnswers || dirty || !recipients?.to.length}><Send />{report?.sent_at ? "Dërgo sërish" : "Dërgo"}</Button> : null}
+        </div>
         <ReportingPointsManagement api={API} reportType="M2" canManage={canManage} onRecipientsChange={setRecipients}>
         <div className="grid gap-4 border-y bg-slate-50/70 px-4 py-4 lg:grid-cols-[190px_minmax(320px,1fr)_auto]">
           <div><Label htmlFor="report-day">Data e raportit</Label><input className="mt-1 h-9 w-full rounded-md border border-input bg-white px-3 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" id="report-day" type="date" value={day} max={today()} disabled={!!busy || savingAnswers}
@@ -205,9 +210,6 @@ export default function M2ReportingPointsPage() {
           <div><Label htmlFor="report-subject">Titulli i email-it</Label><input id="report-subject" readOnly value={report?.subject || ""} placeholder="Gjenero raportin" className="mt-1 h-9 w-full rounded-md border border-input bg-white px-3 text-sm shadow-xs" /></div>
           <div className="flex flex-wrap items-end gap-2">
             {canManage ? <Button variant="outline" onClick={save} disabled={!report || !!busy || savingAnswers || !dirty}><Save />Ruaj përgjigjet</Button> : null}
-            <Button variant="outline" onClick={preview} disabled={!report || !!busy || savingAnswers || dirty}><Eye />Pamja e email-it</Button>
-            {(["docx", "png", "txt"] as const).map((format) => <Button key={format} variant="outline" disabled={!report || !!busy || savingAnswers || dirty} onClick={() => download(format)}>{format === "docx" ? "Word" : format.toUpperCase()}</Button>)}
-            {canManage ? <Button onClick={() => setSendOpen(true)} disabled={!report || !report.generated_at || !!busy || savingAnswers || dirty || !recipients?.to.length}><Send />{report?.sent_at ? "Dërgo sërish" : "Dërgo"}</Button> : null}
           </div>
         </div>
         {report ? <div className="grid border md:grid-cols-3">
