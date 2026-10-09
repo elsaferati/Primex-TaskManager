@@ -73,6 +73,72 @@ def test_live_daily_labels_full_day_leave_without_counting_its_tasks(monkeypatch
     assert result["metrics"]["raw_plan_realization"] == 0
 
 
+@pytest.mark.parametrize("historical_status, current_status, expected", [
+    ("IN_PROGRESS", "DONE", "IN_PROGRESS"),
+    ("TODO", "IN_PROGRESS", "NO_PROGRESS"),
+    ("WAITING_CLIENT", "DONE", "NO_PROGRESS"),
+    (None, "IN_PROGRESS", "IN_PROGRESS"),
+])
+def test_later_status_changes_preserve_daily_outcomes(monkeypatch, historical_status, current_status, expected):
+    import asyncio
+    from sqlalchemy.dialects import postgresql
+    from app.models.audit_log import AuditLog
+    from app.models.task import Task
+    from app.models.user import User
+    from app.services import daily_realization_live as live_service
+
+    person_id, task_id, department_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    person = SimpleNamespace(id=person_id, full_name="Daily history")
+    next_day = datetime(2026, 8, 27, 12, tzinfo=timezone.utc)
+    task = Task(
+        id=task_id, title="Historical task", assigned_to=person_id,
+        status=current_status, created_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        updated_at=next_day, due_date=next_day,
+        completed_at=next_day if current_status == "DONE" else None,
+    )
+    baseline = SimpleNamespace(
+        id=uuid.uuid4(), captured_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
+        payload={"people": [{"user_id": str(person_id), "tasks": [
+            {"task_id": str(task_id), "planned_due_date": "2026-08-27"},
+        ]}]},
+    )
+
+    async def load_people(*args, **kwargs):
+        return [person], {}
+    monkeypatch.setattr(live_service, "load_active_users_and_common_leave", load_people)
+
+    class Result:
+        def __init__(self, rows=(), scalar=None):
+            self.rows, self.scalar = rows, scalar
+        def scalar_one_or_none(self): return self.scalar
+        def scalars(self): return self
+        def all(self): return self.rows
+
+    class Session:
+        async def execute(self, statement):
+            column = statement.column_descriptions[0]
+            entity = column["entity"]
+            if entity is DailyPlannerSnapshot: return Result(scalar=baseline)
+            if entity is User: return Result([person])
+            if entity is Task: return Result([task_id] if column["name"] == "id" else [task])
+            if entity is AuditLog and "audit_logs.created_at > " in str(statement.compile(dialect=postgresql.dialect())) and historical_status:
+                return Result([SimpleNamespace(entity_id=task_id, before={"value": historical_status})])
+            return Result()
+
+    report = asyncio.run(live_service.build_live_daily_realization(
+        Session(), department_id=department_id, day=DAY,
+    ))
+    person_report = report["people"][0]
+    row = person_report["tasks"][0]
+    assert row["current_status"] == (historical_status or current_status)
+    assert row["classification"] == expected
+    assert row["completion_credited"] is False
+    assert row["wfe"] is (historical_status == "WAITING_CLIENT")
+    assert person_report["metrics"]["no_progress_count"] == (expected == "NO_PROGRESS")
+    if expected == "IN_PROGRESS":
+        assert person_report["metrics"]["realization_penalty_points"] == 0
+
+
 def case(**overrides):
     values = dict(
         day=DAY, in_baseline=True, original_due_date=DAY, current_due_date=DAY,

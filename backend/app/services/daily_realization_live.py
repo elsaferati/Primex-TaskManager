@@ -388,7 +388,8 @@ async def build_live_daily_realization(
             TaskDailyProgress.task_id,
         ))).scalars().all():
             previous_progress[row.task_id] = row
-    # A later status change tells what the status was when the day ended (WFE credit).
+    # The first later transition records the status at the selected day's end.
+    # Use it for all daily outcomes, so later work cannot rewrite earlier progress.
     status_after_day: dict[uuid.UUID, str] = {}
     if task_ids:
         for event in (await db.execute(select(AuditLog).where(
@@ -470,6 +471,9 @@ async def build_live_daily_realization(
         metric_rows = []
         for task_id in sorted(candidate_ids, key=str):
             task = tasks.get(task_id)
+            status_on_day = status_after_day.get(task_id) or (
+                str(getattr(task.status, "value", task.status)).upper() if task else "TODO"
+            )
             original = baseline_by_user.get(person_id, {}).get(task_id)
             task_events = events_by_task.get(task_id, [])
             assignee_events = [event for event in task_events if event.action == "task.assignee_changed"]
@@ -553,14 +557,14 @@ async def build_live_daily_realization(
                 local_day(task.start_date) if task else None, original_due or current_due, day,
             )
             requirement = requires_daily_explanation(
-                status=task.status if task else "TODO", selected_day=day,
+                status=status_on_day, selected_day=day,
                 deadline=current_due, deadline_was_today=deadline_was_today,
                 postponed_today=postponed_today,
             )
             classification = classify_daily_task(DailyClassificationInput(
                 day=day, in_baseline=bool(original), original_due_date=original_due or current_due,
                 current_due_date=current_due, created_date=created_day,
-                completed_date=credited_completed_day, status=task.status if task else "TODO",
+                completed_date=credited_completed_day, status=status_on_day,
                 progress_delta=max(progress_delta, percentage_delta, quantity["completed"] if quantity and quantity["source"] == "title" else 0),
                 postponed=postponed_on_day,
                 postponement_approved=approved, reopened=reopened,
@@ -600,10 +604,8 @@ async def build_live_daily_realization(
                 "original_daily_plan": (original or {}).get("original_daily_plan"),
                 "baseline_due_date": original_due.isoformat() if original_due else None,
                 "current_due_date": current_due.isoformat() if current_due else None,
-                "current_status": task.status if task else "DELETED",
-                "wfe": bool(task) and not completion_credited and status_after_day.get(
-                    task_id, str(getattr(task.status, "value", task.status) if task else "").upper(),
-                ) == "WAITING_CLIENT",
+                "current_status": status_on_day if task else "DELETED",
+                "wfe": bool(task) and not completion_credited and status_on_day == "WAITING_CLIENT",
                 "classification": classification, "in_original_plan": bool(original),
                 "created_date": created_day.isoformat() if created_day else None,
                 "completion_credited": completion_credited,
