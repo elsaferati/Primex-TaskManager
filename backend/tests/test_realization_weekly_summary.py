@@ -93,8 +93,18 @@ def test_no_letter_until_every_required_question_has_a_saved_boolean(key):
     assert suggest_weekly_level(facts)["answers_complete"] is True
 
 
-def test_annual_leave_does_not_bypass_answers_first():
-    assert suggest_weekly_level(base_facts(availability_status="PV", manual_answers={})) ["level"] is None
+def test_full_week_annual_leave_proposes_b_without_manual_answers_or_reports():
+    result = suggest_weekly_level(base_facts(availability_status="PV", manual_answers={}, daily_timeline=[], weekly_planned_count=0))
+    assert result["level"] == "B"
+    assert result["answers_complete"] is True
+    assert result["missing"] == []
+    assert result["provisional"] is False
+
+
+def test_partial_annual_leave_still_requires_manual_answers():
+    facts = base_facts(manual_answers={})
+    facts["daily_timeline"] = [{"date": "2026-10-08", "on_leave": True}, {"date": "2026-10-09", "daily_progress_percent": 100}]
+    assert suggest_weekly_level(facts)["level"] is None
 
 
 @pytest.mark.parametrize("key", ["affected_other_plan", "week_problems", "repeated_after_clarification"])

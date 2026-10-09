@@ -3575,7 +3575,10 @@ async def put_manager_review(
     if dimension == "REALIZATION" and payload.level is not None:
         weekly = await _weekly_response(db, period=period, user=user, department_name=None)
         person = next((item for item in weekly.people if item.user_id == subject_user_id), None)
-        if person is None or not (person.facts_json.get("manual_question_completeness") or {}).get("complete"):
+        if person is None or (
+            person.facts_json.get("availability_status") != "PV"
+            and not (person.facts_json.get("manual_question_completeness") or {}).get("complete")
+        ):
             raise HTTPException(status_code=409, detail="Plotëso dhe ruaj 9 përgjigjet para konfirmimit të shkronjës.")
     review = await upsert_manager_review(
         db,

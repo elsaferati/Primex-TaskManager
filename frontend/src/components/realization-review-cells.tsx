@@ -49,8 +49,21 @@ function savedQuestionValues(question: RealizationQuestion): string[] {
   return value.split(" • ").map((item) => item.trim()).filter(Boolean)
 }
 
-function automaticAnswer(question: RealizationQuestion): { answer: string; detail: string } {
+function automaticAnswer(question: RealizationQuestion, timeline?: RealizationPersonResult["facts_json"]["daily_timeline"]): { answer: string; detail: string } {
   const value = question.final_value ?? question.auto_value
+  if (question.key === "unexpected_absences" && timeline) {
+    const leaveDates = [...new Set(timeline.filter(day => day.on_leave || day.attendance?.some(entry => entry.type === "PUSHIM_VJETOR")).map(day => day.date))].sort()
+    const leaveDetail = leaveDates.length
+      ? `Pushim vjetor: ${leaveDates.length} ditë (${leaveDates.map(date => date.split("-").reverse().join(".")).join(", ")}).`
+      : "Pushim vjetor: 0 ditë."
+    const absenceDetail = typeof value === "number"
+      ? `Mungesa të papritura: ${value}.`
+      : "Mungesat e papritura: kërkojnë konfirmim."
+    return {
+      answer: leaveDates.length || (typeof value === "number" && value > 0) ? "Po" : typeof value === "number" ? "Jo" : "Për konfirmim",
+      detail: `${leaveDetail}\n${absenceDetail}`,
+    }
+  }
   if (value == null) return { answer: "Pa të dhëna", detail: "" }
   const facts = typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
   const number = (key: string) => typeof facts[key] === "number" ? facts[key] : "—"
@@ -101,6 +114,7 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
   const { apiFetch } = useAuth()
   const [updatedResult, setUpdatedResult] = React.useState<RealizationPersonResult | null>(null)
   const result = updatedResult || initialResult
+  const fullWeekLeave = scope === "weekly" && result?.facts_json.availability_status === "PV"
   const [data, setData] = React.useState<RealizationManagerReviewResponse | null>(null)
   const [rating, setRating] = React.useState<RealizationManagerReviewRating | "">("")
   const [level, setLevel] = React.useState<RealizationLevel | "">("")
@@ -119,18 +133,18 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
   const generatedQuestionLines = React.useRef<string[]>([])
   draftsRef.current = drafts
   const endpoint = `/realization/periods/${periodId}/users/${userId}/manager-review`
-  const manualQuestions = React.useMemo(() => (result?.facts_json.questions || []).filter((question) => question.source_status.startsWith("MANUAL")), [result])
+  const manualQuestions = React.useMemo(() => fullWeekLeave ? [] : (result?.facts_json.questions || []).filter((question) => question.source_status.startsWith("MANUAL")), [result, fullWeekLeave])
   const automaticQuestions = React.useMemo(() => (result?.facts_json.questions || []).filter((question) => question.source_status.startsWith("AUTO") && question.key !== "extra_engagement"), [result])
   const weeklySnapshotDays = scope === "weekly" ? Number(result?.facts_json.weekly_snapshot_days || 0) : 0
   const questionLabel = React.useCallback((question: RealizationQuestion) => {
     const label = weeklyChecklistLabels[question.key] || question.label
     return scope === "daily" ? label.replace("këtë javë", "këtë ditë") : label
   }, [scope])
-  const initializeDrafts = React.useCallback(() => {
-    const nextDrafts = Object.fromEntries(manualQuestions.map((question) => [question.key, {
+  const initializeDrafts = React.useCallback((questions = manualQuestions) => {
+    const nextDrafts = Object.fromEntries(questions.map((question) => [question.key, {
       values: savedQuestionValues(question), comment: question.source_status === "MANUAL_ANSWERED" ? question.manager_comment || "" : "", touched: manualChecklistBooleanKeys.has(question.key) && question.final_value !== true && question.final_value !== false,
     }]))
-    generatedQuestionLines.current = manualQuestions.flatMap((question) => {
+    generatedQuestionLines.current = questions.flatMap((question) => {
       const text = nextDrafts[question.key]?.comment.trim()
       return text ? [`- ${questionLabel(question)}: ${text}`] : []
     })
@@ -161,8 +175,8 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
   const savedLevel = data?.realization?.level ?? ""
   const suggestion = result?.facts_json.weekly_evaluation
   const reviewDirty = rating !== savedRating || comment !== savedComment || level !== savedLevel
-  const questionsDirty = Object.values(drafts).some((draft) => draft.touched)
-  const answersComplete = Boolean(result?.facts_json.manual_question_completeness?.complete)
+  const questionsDirty = !fullWeekLeave && Object.values(drafts).some((draft) => draft.touched)
+  const answersComplete = fullWeekLeave || Boolean(result?.facts_json.manual_question_completeness?.complete)
   const proposalReady = answersComplete && !questionsDirty && savedAnswersFor !== result
   React.useEffect(() => {
     if (open && proposalReady) proposalRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
@@ -190,8 +204,26 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
   }
 
   const openReview = async () => {
+    if (preparing || saving) return
     initializeDrafts()
     setOpen(true)
+    if (scope === "weekly" && result) {
+      setPreparing(true)
+      try {
+        const weekStart = result.facts_json.daily_timeline?.[0]?.date
+        if (!weekStart || !result.department_id) throw new Error("Mungon java ose departamenti.")
+        const response = await apiFetch(`/realization/weekly?department_id=${result.department_id}&week_start=${weekStart}`, { cache: "no-store" })
+        if (!response.ok) throw new Error("Komentet dhe të dhënat e javës nuk u rifreskuan. Provo përsëri.")
+        const report = await response.json() as { people: RealizationPersonResult[] }
+        const next = report.people.find(person => person.user_id === userId)
+        if (!next) throw new Error("Raporti javor i personit nuk u gjet.")
+        setUpdatedResult(next)
+        initializeDrafts(next.facts_json.availability_status === "PV" ? [] : (next.facts_json.questions || []).filter(question => question.source_status.startsWith("MANUAL")))
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Raporti javor nuk u rifreskua.")
+      } finally { setPreparing(false) }
+      return
+    }
     if (result || !onPrepareResult) return
     setPreparing(true)
     try {
@@ -250,7 +282,7 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
     finally { setSaving(false) }
   }
 
-  const approvePostponement = async (taskId: string, eventId: string, reason: string) => {
+  const approvePostponement = async (taskId: string, eventId: string, status: "APPROVED" | "REJECTED", comment: string) => {
     if (!canEdit || saving || !result) return false
     const weekStart = result.facts_json.daily_timeline?.[0]?.date
     if (!weekStart || !result.department_id) {
@@ -261,11 +293,11 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
     try {
       const response = await apiFetch(`/realization/daily/tasks/${taskId}/adjustment`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audit_event_id: eventId, user_id: userId, status: "APPROVED", reason, comment: null }),
+        body: JSON.stringify({ audit_event_id: eventId, user_id: userId, status, reason: status === "APPROVED" ? "Aprovuar nga vlerësimi javor." : "Jo aprovuar nga vlerësimi javor.", comment: comment || null }),
       })
       if (!response.ok) {
         const error = await response.json().catch(() => ({}))
-        throw new Error(error.detail || "Shtyrja nuk u aprovua.")
+        throw new Error(error.detail || "Vendimi nuk u ruajt.")
       }
       // Reflect the saved decision even if the subsequent report refresh fails.
       const decision = await response.json()
@@ -273,42 +305,42 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
         ...result,
         facts_json: { ...result.facts_json, daily_timeline: result.facts_json.daily_timeline?.map(day => ({
           ...day, tasks: day.tasks?.map(task => task.task_id === taskId && task.timeline?.some(event => event.id === eventId)
-            ? { ...task, adjustment_status: "APPROVED", manager_decision: decision } : task),
+            ? { ...task, adjustment_status: status, manager_decision: decision } : task),
         })) },
       }
       setUpdatedResult(savedResult)
       setSavedAnswersFor(savedResult)
       const refreshed = await apiFetch(`/realization/weekly?department_id=${result.department_id}&week_start=${weekStart}`)
-      if (!refreshed.ok) throw new Error("Shtyrja u aprovua, por raporti nuk u rifreskua. Rifresko faqen.")
+      if (!refreshed.ok) throw new Error("Vendimi u ruajt, por raporti nuk u rifreskua. Rifresko faqen.")
       const report = await refreshed.json() as { people: RealizationPersonResult[] }
       const next = report.people.find(person => person.user_id === userId)
-      if (!next) throw new Error("Shtyrja u aprovua, por raporti i personit nuk u gjet.")
+      if (!next) throw new Error("Vendimi u ruajt, por raporti i personit nuk u gjet.")
       setUpdatedResult(next)
-      toast.success("Shtyrja u aprovua dhe propozimi u përditësua.")
+      toast.success("Vendimi u ruajt dhe propozimi u përditësua.")
       return true
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Shtyrja nuk u aprovua.")
+      toast.error(error instanceof Error ? error.message : "Vendimi nuk u ruajt.")
       return false
     } finally { setSaving(false) }
   }
 
   return <>
     {compactTable ? <td className="p-1" onClick={(event) => event.stopPropagation()}>
-      <Button type="button" variant="outline" size="sm" className="h-8 w-full min-w-32 justify-between px-2 text-[13px]" onClick={() => void openReview()} disabled={failed}>{ratingLabel}<ChevronRight className="h-3.5 w-3.5" /></Button>
+      <Button type="button" variant="outline" size="sm" className="h-8 w-full min-w-32 justify-between gap-2 px-2 text-[13px]" onClick={() => void openReview()} disabled={failed}>{ratingLabel}<ChevronRight className="h-3.5 w-3.5 shrink-0" /></Button>
       <p className={cn("mt-0.5 line-clamp-1 text-[11px]", savedComment ? "text-slate-500" : "text-slate-400")}>{savedComment || "Pa koment"}</p>
-    </td> : <><td className="p-1" onClick={(event) => event.stopPropagation()}><Button type="button" variant="outline" size="sm" className="h-8 w-full min-w-32 justify-between px-2 text-[13px]" onClick={() => void openReview()} disabled={failed}>{ratingLabel}<ChevronRight className="h-3.5 w-3.5" /></Button></td>
+    </td> : <><td className="p-1" onClick={(event) => event.stopPropagation()}><Button type="button" variant="outline" size="sm" className="h-8 w-full min-w-32 justify-between gap-2 px-2 text-[13px]" onClick={() => void openReview()} disabled={failed}>{ratingLabel}<ChevronRight className="h-3.5 w-3.5 shrink-0" /></Button></td>
     {commentCell ?? <td className="p-1" onClick={(event) => event.stopPropagation()}>
       <div className="flex min-w-64 flex-col items-stretch gap-1">
         <Textarea aria-label={`Komenti i përgjegjësit për ${userName}`} className="min-h-20 w-full resize-y bg-white px-2 py-1.5 text-[13px] leading-5" rows={3} maxLength={4000} value={comment} disabled={!canEdit || saving} onChange={(event) => setComment(event.target.value)} placeholder="Shkruaj komentin e përgjegjësit…" />
         {canEdit && reviewDirty ? <Button type="button" size="sm" className="h-8 self-end px-3" disabled={saving} title="Ruaj komentin" onClick={() => void save({ closeDialog: false, saveQuestions: false })}>{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Ruaj komentin"}</Button> : null}
       </div>
     </td>}</>}
-    <Dialog open={open} onOpenChange={(next) => { if (!saving) { setOpen(next); if (!next && updatedResult) onSaved?.() } }}><DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
-      <DialogHeader><DialogTitle>{scope === "weekly" ? "Vlerësimi javor" : "Përgjigjet ditore"} — {userName}</DialogTitle><DialogDescription>{scope === "weekly" ? "Përmbledhje nga ditët e javës. Shkronja propozohet nga sistemi; përgjegjësi mund ta konfirmojë ose ta ndryshojë." : "Përgjigjet ruhen për ditën e zgjedhur dhe përmblidhen në javor. Vlerësimi i përgjegjësit dhe përmbledhja e tij mbeten javore."}</DialogDescription></DialogHeader>
-      {scope === "weekly" && !proposalReady ? <p className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">1. Plotëso dhe ruaj 9 përgjigjet. 2. Shiko propozimin. 3. Konfirmo ose ndrysho shkronjën.</p> : null}
+    <Dialog open={open} onOpenChange={(next) => { if (!saving && !preparing) { setOpen(next); if (!next && updatedResult) onSaved?.() } }}><DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
+      <DialogHeader><DialogTitle>{scope === "weekly" ? "Vlerësimi javor" : "Përgjigjet ditore"} — {userName}</DialogTitle><DialogDescription className="sr-only">{scope === "weekly" ? "Përmbledhje nga ditët e javës. Shkronja propozohet nga sistemi; përgjegjësi mund ta konfirmojë ose ta ndryshojë." : "Përgjigjet ruhen për ditën e zgjedhur dhe përmblidhen në javor. Vlerësimi i përgjegjësit dhe përmbledhja e tij mbeten javore."}</DialogDescription></DialogHeader>
+      {preparing ? <p role="status" className="flex items-center gap-2 py-6 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />Duke ngarkuar komentet dhe të dhënat…</p> : <>
       {scope === "weekly" && proposalReady ? <section ref={proposalRef} className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">
-        <p className="font-semibold">Propozimi: {suggestion?.level || "Pa të dhëna"}{suggestion?.provisional ? " · Paraprak" : ""}</p>
-        {suggestion?.reasons.map(reason => <p key={reason} className="mt-1 text-xs text-slate-600">{reason}</p>)}
+        <p className="font-semibold">Propozimi: {suggestion?.level || "Pa të dhëna"}{suggestion?.reasons[0] ? ` — ${suggestion.reasons[0]}` : ""}{suggestion?.provisional ? " · Paraprak" : ""}</p>
+        {suggestion?.reasons.slice(1).map(reason => <p key={reason} className="mt-1 text-xs text-slate-600">{reason}</p>)}
         {suggestion?.provisional ? <p className="mt-1 text-xs text-amber-800">Ka ditë ose përgjigje që duhen plotësuar. Propozimi përditësohet me të dhënat e javës.</p> : null}
         <label className="mt-3 block text-xs font-semibold">Shkronja e përgjegjësit
           <select aria-label="Shkronja e përgjegjësit" className="ml-2 rounded border bg-white p-2" value={level} disabled={!canEdit || saving} onChange={event => setLevel(event.target.value as RealizationLevel | "")}><option value="">Përdor propozimin</option>{(["A+", "A", "B", "C", "M", "D", "E"] as const).map(value => <option key={value}>{value}</option>)}</select>
@@ -322,7 +354,6 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
         <section aria-label="Pyetjet dhe përgjigjet">
           <div className="mb-3">
             <h3 className="text-sm font-semibold text-slate-800">Pyetjet dhe përgjigjet</h3>
-            <p className="mt-1 text-xs leading-5 text-slate-500">{scope === "weekly" ? "Kontrollo përgjigjet manuale dhe ruaji për të marrë propozimin e shkronjës. Përgjigjet ditore përfshihen automatikisht; kur mungojnë, formulari nis me Jo." : "Pyetjet pa përgjigje nisin me Jo. Ndrysho në Po kur vlen dhe ruaj përgjigjet."} Komentet janë opsionale.</p>
           </div>
           <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white" role="region" aria-label="Tabela e përgjigjeve automatike dhe manuale" tabIndex={0}>
             <table className="w-full min-w-[640px] table-fixed border-collapse text-left">
@@ -339,16 +370,16 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
               {automaticQuestions.length ? <tbody>
                 <tr className="border-y border-slate-200 bg-blue-50"><th scope="rowgroup" colSpan={4} className="px-3 py-2 text-xs font-semibold text-blue-900">Automatike · {automaticQuestions.length} pyetje{scope === "weekly" ? ` · Totali i ${weeklySnapshotDays} ditëve` : ""}</th></tr>
                 {automaticQuestions.map((question, index) => {
-                  const answer = automaticAnswer(question)
+                  const answer = automaticAnswer(question, scope === "weekly" ? result.facts_json.daily_timeline : undefined)
                   return <tr key={question.key} className="border-b border-slate-200 align-top even:bg-slate-50/50 hover:bg-blue-50/40">
                     <td className="px-2 py-3 text-center text-xs tabular-nums text-slate-500">{index + 1}</td>
-                    <th scope="row" className="border-l border-slate-200 px-3 py-3 text-sm font-medium leading-5 text-slate-800">{question.label}</th>
+                    <th scope="row" className="border-l border-slate-200 px-3 py-3 text-sm font-medium leading-5 text-slate-800">{scope === "weekly" && question.key === "unexpected_absences" ? "Mungesa të papritura ose pushim vjetor?" : question.label}</th>
                     <td className="border-l border-slate-200 px-2 py-2 text-center"><span className="inline-flex min-h-9 items-center justify-center rounded-md bg-blue-50 px-3 text-xs font-semibold text-blue-900">{answer.answer}</span></td>
-                    <td className="border-l border-slate-200 px-3 py-3 text-xs leading-5 text-slate-600">{answer.detail || "—"}</td>
+                    <td className="whitespace-pre-line border-l border-slate-200 px-3 py-3 text-xs leading-5 text-slate-600">{answer.detail || "—"}</td>
                   </tr>
                 })}
               </tbody> : null}
-              <tbody>
+              {!fullWeekLeave ? <tbody>
                 <tr className="border-y border-slate-200 bg-blue-50"><th scope="rowgroup" colSpan={4} className="px-3 py-2 text-xs font-semibold text-blue-900">Manuale · {manualQuestions.length} pyetje · Plotësohen nga përgjegjësi</th></tr>
                 {manualQuestions.map((question, index) => (
                   <React.Fragment key={question.key}>
@@ -369,7 +400,7 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
                   ) : null}
                   </React.Fragment>
                 ))}
-              </tbody>
+              </tbody> : null}
             </table>
           </div>
           {scope === "weekly" && canEdit && (!proposalReady || questionsDirty) ? <div className="mt-3 flex justify-end"><Button disabled={saving || preparing || !questionsDirty} onClick={() => void save({ closeDialog: false })}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Ruaj përgjigjet dhe shfaq propozimin</Button></div> : null}
@@ -422,6 +453,7 @@ export function RealizationReviewCells({ periodId, userId, userName, result: ini
         />
         {canEdit && hasUnsavedChanges ? <div className="mt-2 flex items-center justify-end gap-3"><Button type="button" size="sm" onClick={() => void save()} disabled={saving || preparing || Boolean(onPrepareResult && !result)}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Ruaj vlerësimin</Button></div> : null}
       </section> : null}
+      </>}
       <DialogFooter><Button variant="outline" onClick={() => { setOpen(false); if (updatedResult) onSaved?.() }} disabled={saving || preparing}>Mbyll</Button></DialogFooter>
     </DialogContent></Dialog>
   </>

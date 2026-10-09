@@ -38,6 +38,12 @@ def rollup_daily_answers(days: list[dict]) -> dict[str, dict]:
 
 def suggest_weekly_level(facts: dict) -> dict:
     """Suggestion only: never changes payroll, task metrics or a manager decision."""
+    if facts.get("availability_status") == "PV":
+        return {
+            "level": "B", "reasons": ["Pushim vjetor gjatë gjithë javës."],
+            "provisional": False, "missing": [], "rule_version": "weekly-summary-v3",
+            "answers_complete": True,
+        }
     answers = facts.get("manual_answers") or {}
     def yes(key):
         return answers.get(key, {}).get("value") is True
@@ -81,8 +87,6 @@ def suggest_weekly_level(facts: dict) -> dict:
     if missing:
         return decision(None, f"Plotëso dhe ruaj {len(missing)} përgjigjet e mbetura për të marrë propozimin.")
 
-    if facts.get("availability_status") == "PV":
-        return decision("B", "Pushim vjetor gjatë gjithë javës.")
     if len(unexcused) >= 2:
         return decision("E", "Dy ose më shumë mungesa të konfirmuara pa arsyetim.")
     if not planned:
@@ -99,13 +103,22 @@ def suggest_weekly_level(facts: dict) -> dict:
     if not complete and not accepted:
         if not done and not extra and not progress and not wfe:
             return decision("E", "Plani ka detyra, por nuk ka realizim apo progres të regjistruar.")
-        return decision("D", "Plani mbetet i papërfunduar; shtyrjet e mbetura nuk janë konfirmuar plotësisht.")
+        return decision("D", f"Plan i papërfunduar: {done}/{planned} detyra të kryera; {approved_count} shtyrje të aprovuara.")
     if answers.get("respected_meetings", {}).get("value") is False:
         return decision("D", "Ka takim të konfirmuar si të parespektuar.")
-    if yes("affected_other_plan") or yes("repeated_after_clarification") or yes("week_problems"):
-        return decision("C", "Ka problem, përsëritje ose ndikim negativ të regjistruar; përgjegjësi vlerëson rëndësinë.")
+    if yes("affected_other_plan"):
+        return decision("C", "Ka ndikuar negativisht në planin e një kolegu.")
+    if yes("repeated_after_clarification"):
+        return decision("C", "Problemi është përsëritur pas sqarimit.")
+    if yes("week_problems"):
+        return decision("C", "Është raportuar problem në punë ose me kolegët.")
     if len(delays) >= 3 or unexcused:
-        return decision("C", "Plani është mbuluar, por ka vonesa të shpeshta ose mungesë të pajustifikuar.")
+        reasons = []
+        if unexcused:
+            reasons.append("Mungesë e konfirmuar pa njoftim/arsyetim")
+        if len(delays) >= 3:
+            reasons.append(f"{len(delays)} ditë me vonesa")
+        return decision("C", "; ".join(reasons) + ".")
     if approved_personal:
         return decision("M", "Mungesë personale e miratuar; detyrat e punës janë mbuluar.")
     extras = sum([yes("requested_extra_tasks"), yes("helped_colleague"), yes("gave_proposal"), extra > 0])
