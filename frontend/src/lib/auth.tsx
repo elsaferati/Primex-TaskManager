@@ -7,6 +7,8 @@ import { API_HTTP_URL, API_HTTP_FALLBACK_URL, API_WS_URL } from "@/lib/config"
 import { clearDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
 import { clearPersistentPageCache } from "@/lib/persistent-page-cache"
 import type { User } from "@/lib/types"
+import { listenForMeetingAudioUnlock, playMeetingReminderSound, startMeetingReminderAlarm, stopMeetingReminderAlarm, unlockMeetingReminderAudio } from "@/lib/meeting-reminder-audio"
+export { playMeetingReminderSound, startMeetingReminderAlarm, stopMeetingReminderAlarm } from "@/lib/meeting-reminder-audio"
 
 type AuthContextValue = {
   user: User | null
@@ -42,42 +44,7 @@ const REFERENCE_CACHE_TTL_MS = 60 * 1000
 const PREFETCH_CACHE_TTL_MS = 30 * 1000
 const REFERENCE_CACHE_PATHS = new Set(["/departments", "/users/lookup", "/task-statuses", "/boards"])
 const MEETING_ALARM_STOP_KEY = "primex_meeting_alarm_stopped_at"
-const MEETING_ALARM_REPEAT_MS = 2_000
 let cacheGeneration = 0
-let meetingAlarmTimer: number | null = null
-
-export function playMeetingReminderSound() {
-  try {
-    const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-    if (!AudioContextClass) return
-    const context = new AudioContextClass()
-    const oscillator = context.createOscillator()
-    const gain = context.createGain()
-    oscillator.type = "sine"
-    oscillator.frequency.setValueAtTime(880, context.currentTime)
-    gain.gain.setValueAtTime(0.0001, context.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.18, context.currentTime + 0.02)
-    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.5)
-    oscillator.connect(gain)
-    gain.connect(context.destination)
-    oscillator.start()
-    oscillator.stop(context.currentTime + 0.5)
-    oscillator.addEventListener("ended", () => void context.close())
-  } catch {
-    // Browsers can block audio until the user has interacted with the page.
-  }
-}
-
-export function stopMeetingReminderAlarm() {
-  if (meetingAlarmTimer !== null) window.clearInterval(meetingAlarmTimer)
-  meetingAlarmTimer = null
-}
-
-export function startMeetingReminderAlarm() {
-  stopMeetingReminderAlarm()
-  playMeetingReminderSound()
-  meetingAlarmTimer = window.setInterval(playMeetingReminderSound, MEETING_ALARM_REPEAT_MS)
-}
 
 function clearSessionCaches() {
   cacheGeneration += 1
@@ -288,6 +255,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     tokenRef.current = token
   }, [token])
+
+  React.useEffect(() => {
+    if (!userId) return
+    const removeUnlockListeners = listenForMeetingAudioUnlock()
+    return () => {
+      removeUnlockListeners()
+      stopMeetingReminderAlarm()
+    }
+  }, [userId])
 
   const stopActiveMeetingAlarm = React.useCallback(() => {
     stopMeetingReminderAlarm()
@@ -772,7 +748,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               {activeMeetingAlarm.body}
             </span>
           ) : null}
-          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
+            <button
+              type="button"
+              onClick={() => {
+                void unlockMeetingReminderAudio().then((ready) => {
+                  if (!ready || !playMeetingReminderSound()) toast.error("Sound is blocked. Check this tab’s sound settings.")
+                })
+              }}
+              style={{ border: "1px solid #cbd5e1", borderRadius: 8, background: "white", cursor: "pointer", padding: "9px 14px" }}
+            >
+              Enable sound
+            </button>
             <button
               type="button"
               onClick={stopActiveMeetingAlarm}

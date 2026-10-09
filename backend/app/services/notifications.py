@@ -9,6 +9,7 @@ from app.integrations.redis import get_redis_sync
 from app.config import settings
 from app.models.enums import NotificationType
 from app.models.notification import Notification
+from app.websocket.manager import manager
 
 
 CHANNEL = "primex_notifications"
@@ -79,9 +80,11 @@ def notification_realtime_payload(notification: Notification) -> dict:
 
 
 async def publish_notification(*, user_id: uuid.UUID, notification: Notification) -> None:
+    notification_payload = notification_realtime_payload(notification)
     if not settings.REDIS_ENABLED:
+        # Single-process installations still have connected browser clients.
+        await manager.send_to_user(user_id, notification_payload)
         return
     client = get_redis_sync()
-    notification_payload = notification_realtime_payload(notification)
     payload = json.dumps({"user_id": str(user_id), "notification": notification_payload})
     await asyncio.to_thread(client.publish, CHANNEL, payload)

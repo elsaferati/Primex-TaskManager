@@ -2,7 +2,8 @@
 
 import * as React from "react"
 
-import { playMeetingReminderSound } from "@/lib/auth"
+import { toast } from "sonner"
+import { playMeetingReminderSound, unlockMeetingReminderAudio } from "@/lib/meeting-reminder-audio"
 
 import type { Meeting, User } from "@/lib/types"
 
@@ -47,7 +48,7 @@ export function MeetingDetailsDialog({
   React.useEffect(() => {
     if (!meeting) return
     setParticipantIds(meeting.participant_ids || [])
-    setReminderMinutes(meeting.reminder_minutes_before ?? 15)
+    setReminderMinutes(meeting.reminder_minutes_before === undefined ? 15 : meeting.reminder_minutes_before)
     setSearch("")
     setNotificationPermission("Notification" in window ? Notification.permission : "unsupported")
   }, [meeting])
@@ -55,7 +56,7 @@ export function MeetingDetailsDialog({
   const originalIds = meeting?.participant_ids || []
   const isDirty = Boolean(meeting) && (
     [...participantIds].sort().join(",") !== [...originalIds].sort().join(",")
-    || reminderMinutes !== (meeting?.reminder_minutes_before ?? 15)
+    || reminderMinutes !== (meeting?.reminder_minutes_before === undefined ? 15 : meeting.reminder_minutes_before)
   )
 
   const requestClose = React.useCallback(() => {
@@ -81,14 +82,21 @@ export function MeetingDetailsDialog({
   const userById = new Map(users.map((user) => [user.id, user]))
 
   const enableBrowserAlerts = async () => {
+    const audioReady = unlockMeetingReminderAudio()
     if (!("Notification" in window)) return
     const permission = await Notification.requestPermission()
     setNotificationPermission(permission)
-    if (permission === "granted") testBrowserAlerts()
+    await audioReady
+    if (permission === "granted") void testBrowserAlerts()
   }
 
-  const testBrowserAlerts = () => {
-    playMeetingReminderSound()
+  const testBrowserAlerts = async () => {
+    const ready = await unlockMeetingReminderAudio()
+    if (!ready || !playMeetingReminderSound()) {
+      toast.error("Sound could not start. Click Test sound again and check this tab’s sound settings.")
+      return
+    }
+    toast.success("Test sound played. Check that you can hear it.")
     if (!("Notification" in window) || Notification.permission !== "granted") return
     new Notification("PrimeFlow browser alerts enabled", {
       body: "Meeting reminder popups and sounds are ready on this browser.",
@@ -205,14 +213,15 @@ export function MeetingDetailsDialog({
           </select>
         </label>
 
-        <div style={{ marginTop: "14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", padding: "10px", borderRadius: "10px", background: "#f8fafc" }}>
+        <div style={{ marginTop: "14px", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "12px", padding: "10px", borderRadius: "10px", background: "#f8fafc" }}>
           <div style={{ fontSize: "12px", color: "#475569" }}>
             Browser alerts: {notificationPermission === "unsupported" ? "unsupported" : notificationPermission}
           </div>
+          <button className="btn-surface" type="button" onClick={() => void testBrowserAlerts()}>Test sound</button>
           {notificationPermission === "default" ? (
             <button className="btn-surface" type="button" onClick={() => void enableBrowserAlerts()}>Enable browser alerts</button>
           ) : notificationPermission === "granted" ? (
-            <button className="btn-surface" type="button" onClick={testBrowserAlerts}>Test browser alert</button>
+            <button className="btn-surface" type="button" onClick={() => void testBrowserAlerts()}>Test browser alert</button>
           ) : null}
         </div>
 
